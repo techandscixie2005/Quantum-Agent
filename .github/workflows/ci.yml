@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx eslint . --ignore-pattern dist --ignore-pattern .next
+      - run: node --import tsx/esm --test tests/backend.test.ts tests/validators-citations-auth.test.ts tests/golden/eval.test.ts
+      - run: npx vinext build
+      - run: bash scripts/validate-artifact.sh
+      - run: node --test tests/rendered-html.test.mjs
+      - name: Verify no secrets in client bundle
+        run: |
+          if grep -riE 'deepseek|qwen|glm|api\.llm\.ustc|sk-' dist/client/ 2>/dev/null; then
+            echo "SECURITY: Model names, API URLs, or secrets found in client bundle"
+            exit 1
+          fi
+          echo "Client bundle is clean"
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check for committed secrets
+        run: |
+          PATTERNS='sk-proj-|sk-ant-|USTC_API_KEY=[A-Za-z0-9]|ghp_|gho_'
+          if git log --all -p | grep -qE "$PATTERNS"; then
+            echo "WARNING: Potential secrets found in git history"
+          fi
+          echo "Secret scan complete"
