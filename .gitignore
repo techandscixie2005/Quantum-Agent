@@ -42,3 +42,10 @@ next-env.d.ts
 /outputs/
 /work/
 /.vinext/
+
+# local tooling
+/.claude/
+/.omc/
+
+# research papers (large PDFs, not project source)
+/*.pdf

@@ -105,7 +105,7 @@ export function providerConfigForCapability(capability: CapabilityId, runtime: R
   const override = routeOverride(definition.id, runtime);
   const provider = override?.provider ?? "ustc";
   const apiKeys: Partial<Record<ProviderConfig["provider"], string | undefined>> = {
-    ustc: runtime.USTC_API_KEY ?? runtime.COMPATIBLE_API_KEY,
+    ustc: runtime.USTC_API,
     compatible: runtime.COMPATIBLE_API_KEY,
     openai: runtime.OPENAI_API_KEY,
     anthropic: runtime.ANTHROPIC_API_KEY,

@@ -76,13 +76,13 @@ export async function verifyTeacherSession(token: string): Promise<boolean> {
 }
 
 export function setTeacherCookie(value: string, maxAgeSeconds = Math.floor(SESSION_DURATION_MS / 1000)): string {
-  const secure = false; // trusted platform injects TLS
-  const sameSite = "Lax";
+  const secure = true;
+  const sameSite = "Strict";
   return `${SESSION_COOKIE}=${encodeURIComponent(value)}; HttpOnly; Max-Age=${maxAgeSeconds}; Path=/; SameSite=${sameSite}${secure ? "; Secure" : ""}`;
 }
 
 export function clearTeacherCookie(): string {
-  return `${SESSION_COOKIE}=; HttpOnly; Max-Age=0; Path=/; SameSite=Lax`;
+  return `${SESSION_COOKIE}=; HttpOnly; Max-Age=0; Path=/; SameSite=Strict; Secure`;
 }
 
 export function extractTeacherCookie(request: Request): string | undefined {

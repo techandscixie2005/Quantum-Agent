@@ -21,6 +21,11 @@ type TutorApiResponse = {
 type ConversationItem = { id: string; text: string; status: "loading" | "done" | "error"; response?: TutorApiResponse; error?: string };
 const clientId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
+type SimulationStep = { step: number; time: number; probability: number; rValue: number; tValue: number; normError: number };
+type SimResponse = { steps: SimulationStep[]; finalProbabilities: number[]; grid: number[]; potential: number[]; params: Record<string, number>; widthScan: Array<{ width: number; r: number; t: number; rtSum: number }> | null };
+type ProjectProgress = { id: string; title: string; progress: number; currentMilestone: number; stateJson: string; updatedAt: string };
+type ProjectItem = { id: string; title: string; question: string; level: string; milestones: string[]; validators: string[]; progress: ProjectProgress | null };
+
 const modeItems: Array<{ id: Mode; icon: string; label: string; desc: string }> = [
   { id: "concept", icon: "问", label: "问概念", desc: "理解物理图像" },
   { id: "derivation", icon: "∂", label: "看推导", desc: "定位关键错误" },
@@ -119,45 +124,48 @@ function StudentSidebar({ mode, setMode, open }: { mode: Mode; setMode: (mode: M
 function RightEvidence({ open, latest }: { open: boolean; latest: TutorApiResponse | null }) {
   const citation = latest?.citations?.[0];
   const modelEvidence = latest?.evidence?.find((item) => item.type === "model");
+  const symbolicEvidence = latest?.evidence?.filter((item) => item.type === "symbolic");
+  const numericalEvidence = latest?.evidence?.filter((item) => item.type === "numerical");
+  const allVerifiers = [...(symbolicEvidence ?? []), ...(numericalEvidence ?? [])];
+  const misconceptionText = latest?.answer?.misconception;
+  const hasLatest = Boolean(latest);
   return (
     <aside className={`right-panel ${open ? "mobile-open" : ""}`}>
-      <div className="panel-heading"><div><span className="eyebrow">EVIDENCE</span><h2>本轮学习证据</h2></div><span className="live-dot">已同步</span></div>
+      <div className="panel-heading"><div><span className="eyebrow">EVIDENCE</span><h2>本轮学习证据</h2></div><span className="live-dot">{hasLatest ? "已同步" : "等待输入"}</span></div>
 
       <section className="evidence-card citation-card">
-        <div className="card-kicker"><span className="evidence-icon">文</span><strong>课程资料</strong><Tag tone="green">已引用</Tag></div>
+        <div className="card-kicker"><span className="evidence-icon">文</span><strong>课程资料</strong><Tag tone={citation ? "green" : "neutral"}>{citation ? "已引用" : "等待检索"}</Tag></div>
         <h3>{citation?.chapter ?? "等待本轮检索"}</h3>
         <p>“{citation?.excerpt ?? "发送问题后，这里只显示来自已发布课件、带页码且可打开原页核对的证据。"}”</p>
         {citation?.sourceUrl ? <a href={citation.sourceUrl} target="_blank" rel="noreferrer">{citation.title} · 第 {citation.pages} 页 <span>↗</span></a> : <button>等待本轮检索 <span>↗</span></button>}
       </section>
 
       <section className="evidence-card verify-card">
-        <div className="card-kicker"><span className="evidence-icon">✓</span><strong>符号验证</strong><Tag tone="green">通过</Tag></div>
-        <div className="verify-line"><span>边界连续性</span><strong>满足</strong></div>
-        <div className="verify-line"><span>量纲一致性</span><strong>满足</strong></div>
-        <div className="verify-line"><span>概率流方向</span><strong>一致</strong></div>
-        <small>工具结论 · 演示数据</small>
+        <div className="card-kicker"><span className="evidence-icon">✓</span><strong>符号验证</strong><Tag tone={allVerifiers.length && allVerifiers.every((v) => v.status === "passed") ? "green" : allVerifiers.length ? "amber" : "neutral"}>{allVerifiers.length ? (allVerifiers.every((v) => v.status === "passed") ? "通过" : "待检查") : "未运行"}</Tag></div>
+        {allVerifiers.length > 0 ? allVerifiers.map((verifier, index) => <div className="verify-line" key={`${verifier.label}-${index}`}><span>{verifier.label}</span><strong>{verifier.status === "passed" ? "满足" : verifier.status === "failed" ? "不满足" : "待定"}</strong></div>) : <div className="verify-line"><span>等待本轮验证</span><strong>—</strong></div>}
+        <small>工具结论{allVerifiers.length ? "" : " · 发送问题后自动运行"}</small>
       </section>
 
       <section className="learning-state">
         <div className="card-kicker"><span className="evidence-icon">◎</span><strong>学习状态</strong></div>
-        <div className="state-row"><span>当前知识点</span><strong>量子隧穿</strong></div>
-        <div className="state-row"><span>掌握证据</span><div className="dots"><i className="on"/><i className="on"/><i/><i/><i/></div></div>
-        <div className="state-row"><span>当前提示层级</span><Tag tone="blue">H2 · 关键提问</Tag></div>
+        <div className="state-row"><span>当前知识点</span><strong>{latest?.answer?.conclusion ? "量子隧穿" : "等待输入"}</strong></div>
+        <div className="state-row"><span>掌握证据</span><div className="dots"><i className={latest ? "on" : ""}/><i className={latest ? "on" : ""}/><i/><i/><i/></div></div>
+        <div className="state-row"><span>当前提示层级</span><Tag tone="blue">H{latest?.hintLevel ?? 1} · {latest?.hintLevel && latest.hintLevel >= 3 ? "逐步引导" : "关键提问"}</Tag></div>
         <div className="misconception">
           <span>待澄清误区</span>
-          <p>“能量低于势垒，因此粒子绝不可能穿过。”</p>
+          <p>{misconceptionText ?? "发送问题后，系统将诊断你的理解偏差。"}</p>
         </div>
       </section>
 
       <section className="evidence-card gateway-proof">
-        <div className="card-kicker"><span className="evidence-icon">AI</span><strong>能力路由</strong><Tag tone={latest?.model.source === "api" ? "green" : "blue"}>{latest?.model.source === "api" ? "已调用" : "安全回退"}</Tag></div>
-        <h3>{latest?.model.label ?? "课程内确定性引擎"}</h3>
+        <div className="card-kicker"><span className="evidence-icon">AI</span><strong>能力路由</strong><Tag tone={latest?.model?.source === "api" ? "green" : "blue"}>{latest?.model?.source === "api" ? "已调用" : hasLatest ? "安全回退" : "等待调用"}</Tag></div>
+        <h3>{latest?.model?.label ?? "课程内确定性引擎"}</h3>
         <p>{modelEvidence?.detail ?? "真实模型、接口地址与密钥只存在于服务器端；教学政策与证据链不随模型变化。"}</p>
       </section>
 
       <section className="next-step">
         <span className="eyebrow">NEXT STEP</span>
-        <p>先完成一个定性预测，再进入数值模拟。</p>
+        <p>{latest?.answer?.suggestedAction ?? "先完成一个定性预测，再进入数值模拟。"}</p>
         <button>记录我的预测 <span>→</span></button>
       </section>
     </aside>
@@ -277,87 +285,267 @@ function ConceptWorkspace({ capability, onLatest }: { capability: CapabilityChoi
   );
 }
 
-function DerivationWorkspace() {
+function DerivationWorkspace({ capability, onLatest }: { capability: CapabilityChoice; onLatest: (value: TutorApiResponse) => void }) {
+  const [messages, setMessages] = useState<ConversationItem[]>([]);
+  const [sessionId, setSessionId] = useState<string>();
+  const [steps, setSteps] = useState<Array<{ id: string; text: string; status: "valid" | "warning" | "muted" }>>([
+    { id: "01", text: "区域 I：ψ₁ = Aeⁱᵏˣ + Be⁻ⁱᵏˣ", status: "valid" },
+    { id: "02", text: "区域 II：ψ₂ = Ce⁻ᵏˣ + Deᵏˣ", status: "warning" },
+    { id: "03", text: "区域 III：ψ₃ = Feⁱᵏˣ", status: "muted" },
+  ]);
+  const [newStep, setNewStep] = useState("");
+
+  function addStep() {
+    if (!newStep.trim()) return;
+    const id = String(steps.length + 1).padStart(2, "0");
+    setSteps((items) => [...items, { id, text: newStep.trim(), status: "muted" }]);
+    setNewStep("");
+  }
+
+  async function send(message: string, _attachments: ClientAttachment[]) {
+    const id = clientId();
+    const derivationText = steps.map((s) => `${s.id}. ${s.text}`).join("\n");
+    const fullMessage = `${message}\n\n当前推导步骤：\n${derivationText}`;
+    setMessages((items) => [...items, { id, text: message, status: "loading" }]);
+    try {
+      const response = await fetch("/api/tutor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "derivation", message: fullMessage, sessionId, capability: capability.id, attemptedWork: derivationText, requestedHintLevel: 2 }) });
+      const payload = await response.json() as TutorApiResponse & { error?: string; detail?: string };
+      if (!response.ok) throw new Error(payload.detail ?? payload.error ?? "教学工作流暂时不可用");
+      setSessionId(payload.sessionId); onLatest(payload);
+      setMessages((items) => items.map((item) => item.id === id ? { ...item, status: "done", response: payload } : item));
+    } catch (error) {
+      setMessages((items) => items.map((item) => item.id === id ? { ...item, status: "error", error: error instanceof Error ? error.message : "请求失败" } : item));
+    }
+  }
+
+  const latestResult = messages.findLast((item) => item.status === "done")?.response;
+  const hasError = latestResult?.answer?.misconception && latestResult.answer.misconception.length > 0;
+
   return (
     <div className="workspace-scroll derivation-workspace">
-      <header className="workspace-title"><div><span className="eyebrow">DERIVATION LAB · 首错诊断</span><h1>检查我的定态薛定谔方程推导</h1></div><Tag tone="amber">H2 · 最小提示</Tag></header>
+      <header className="workspace-title"><div><span className="eyebrow">DERIVATION LAB · 首错诊断</span><h1>检查我的定态薛定谔方程推导</h1></div><Tag tone="amber">H{latestResult?.hintLevel ?? 2} · 最小提示</Tag></header>
       <div className="derivation-layout">
         <section className="steps-panel">
-          <div className="section-top"><div><span className="eyebrow">YOUR DERIVATION</span><h2>矩形势垒的透射系数</h2></div><button>＋ 添加步骤</button></div>
-          {[
-            ["01", "区域 I：ψ₁ = Aeⁱᵏˣ + Be⁻ⁱᵏˣ", "valid"],
-            ["02", "区域 II：ψ₂ = Ce⁻ᵏˣ + Deᵏˣ", "warning"],
-            ["03", "区域 III：ψ₃ = Feⁱᵏˣ", "muted"],
-          ].map(([n, eq, state]) => <div className={`derivation-step ${state}`} key={n}><span>{n}</span><code>{eq}</code><i>{state === "valid" ? "✓" : state === "warning" ? "!" : "·"}</i></div>)}
-          <button className="run-check">检查到此处 <span>⌘ ↵</span></button>
+          <div className="section-top"><div><span className="eyebrow">YOUR DERIVATION</span><h2>矩形势垒的透射系数</h2></div><button onClick={() => { if (newStep.trim()) addStep(); }}>＋ 添加步骤</button></div>
+          <input className="step-input" value={newStep} onChange={(e) => setNewStep(e.target.value)} placeholder="输入下一步推导…" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addStep(); } }} />
+          {steps.map((step) => <div className={`derivation-step ${step.status}`} key={step.id}><span>{step.id}</span><code>{step.text}</code><i>{step.status === "valid" ? "✓" : step.status === "warning" ? "!" : "·"}</i></div>)}
+          <button className="run-check" onClick={() => { if (steps.length > 0) send("请检查我的推导步骤，定位首个关键错误并给出最小提示。", []); }}>检查到此处 <span>⌘ ↵</span></button>
         </section>
         <section className="diagnosis-panel">
-          <div className="diagnosis-heading"><span className="diagnosis-mark">!</span><div><Tag tone="amber">首个关键错误</Tag><h2>势垒区的衰减常数与外部波数混用了</h2></div></div>
-          <p>第 2 步的函数形式是合理的，但指数中的参数不能直接沿用区域 I 的 <em>k</em>。</p>
-          <div className="hint-box"><span>给你一个最小提示</span><p>将区域 II 的薛定谔方程整理为 ψ″ = ? · ψ。右侧系数的符号是什么？</p></div>
-          <div className="diagnosis-actions"><button>我来修改</button><button>再给一级提示</button></div>
-          <div className="tool-proof"><span>✓</span><div><strong>量纲检查已通过</strong><p>当前问题来自参数定义，而非量纲。</p></div></div>
+          {latestResult ? (<>
+            <div className="diagnosis-heading"><span className="diagnosis-mark">!</span><div><Tag tone={hasError ? "amber" : "green"}>{hasError ? "首个关键错误" : "已通过"}</Tag><h2>{latestResult.answer.conclusion}</h2></div></div>
+            <p>{latestResult.answer.physicalPicture}</p>
+            <div className="hint-box"><span>给你一个最小提示</span><p>{latestResult.answer.mathematics}</p></div>
+            {latestResult.answer.misconception && <div className="hint-box"><span>误区诊断</span><p>{latestResult.answer.misconception}</p></div>}
+            <div className="diagnosis-actions"><button onClick={() => send("再给一级提示。", [])}>再给一级提示</button></div>
+            {latestResult.evidence.length > 0 && <div className="tool-proof"><span>✓</span><div><strong>工具验证</strong><p>{latestResult.evidence.map((e) => `${e.label}: ${e.status}`).join(" · ")}</p></div></div>}
+          </>) : messages.findLast((item) => item.status === "loading") ? (
+            <div className="diagnosis-heading"><span className="diagnosis-mark">…</span><div><Tag tone="blue">正在检查</Tag><h2>正在执行教学工作流</h2></div></div>
+          ) : messages.findLast((item) => item.status === "error") ? (
+            <div className="diagnosis-heading"><span className="diagnosis-mark">!</span><div><Tag tone="amber">安全回退</Tag><h2>{messages.findLast((item) => item.status === "error")?.error}</h2></div></div>
+          ) : (
+            <div className="diagnosis-heading"><span className="diagnosis-mark">!</span><div><Tag tone="blue">等待检查</Tag><h2>添加推导步骤后点击"检查到此处"</h2></div></div>
+          )}
         </section>
       </div>
-      <Composer onSend={() => {}} placeholder="解释你为什么这样写，或贴入下一步推导…" />
+      <Composer onSend={send} acceptsImages={capability.acceptsImages} placeholder="解释你为什么这样写，或贴入下一步推导…" />
     </div>
   );
 }
 
+type SimulationResultJson = {
+  steps: Array<{ step: number; time: number; probability: number; rValue: number; tValue: number; normError: number }>;
+  params: Record<string, number>;
+};
+
 function ExperimentWorkspace() {
   const [running, setRunning] = useState(false);
   const [width, setWidth] = useState(1.2);
-  const [verification, setVerification] = useState<{ status: string; summary: string; details?: { maxDrift?: number } } | null>(null);
+  const [v0, setV0] = useState(4.0);
+  const [energy, setEnergy] = useState(2.5);
+  const [simResult, setSimResult] = useState<SimulationResultJson | null>(null);
+  const [simError, setSimError] = useState("");
+  const [activeStep, setActiveStep] = useState(0);
+
   async function runSimulation() {
-    setRunning(true); setVerification(null);
-    const drift = Math.max(0.00008, width * 0.00004);
-    const probabilities = Array.from({ length: 16 }, (_, i) => 1 - drift * Math.sin(i / 3) ** 2);
+    setRunning(true); setSimError(""); setSimResult(null);
     try {
-      const response = await fetch("/api/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tool: "probability_conservation", input: { probabilities, tolerance: 0.001 } }) });
-      setVerification(await response.json());
-    } catch { setVerification({ status: "inconclusive", summary: "验证服务暂时不可用。" }); }
+      const response = await fetch("/api/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nPoints: 300, nSteps: 150, dt: 0.08,
+          xMin: -15, xMax: 15, x0: -6, k0: 3.0, sigma: 1.5,
+          v0, barrierWidth: width, barrierCenter: 0,
+        }),
+      });
+      if (!response.ok) { setSimError("模拟计算失败，请调整参数后重试。"); setRunning(false); return; }
+      const data = await response.json() as SimulationResultJson;
+      setSimResult(data);
+      setActiveStep(0);
+    } catch { setSimError("模拟服务暂时不可用。"); }
     setRunning(false);
   }
+
+  const lastStep = simResult?.steps?.[simResult.steps.length - 1];
+  const activeStepData = simResult?.steps?.[activeStep];
+  const normError = lastStep?.normError ?? 1;
+  const conservationPassed = normError < 0.005;
+
   return (
     <div className="workspace-scroll experiment-workspace">
-      <header className="workspace-title"><div><span className="eyebrow">COMPUTATION LAB · 数值实验</span><h1>观察高斯波包穿越有限势垒</h1></div><Tag tone="green">模板已保存</Tag></header>
+      <header className="workspace-title"><div><span className="eyebrow">COMPUTATION LAB · 数值实验</span><h1>观察高斯波包穿越有限势垒</h1></div><Tag tone={simResult ? "green" : "blue"}>{simResult ? "模拟已运行" : "Crank-Nicolson 求解器就绪"}</Tag></header>
       <div className="lab-grid">
         <section className="parameter-panel">
           <span className="eyebrow">PARAMETERS</span><h2>实验参数</h2>
-          <label>势垒高度 V₀ <strong>4.0 eV</strong><input type="range" min="1" max="8" step=".1" defaultValue="4" /></label>
+          <label>势垒高度 V₀ <strong>{v0.toFixed(1)} eV</strong><input type="range" min="1" max="8" step=".1" defaultValue={v0} onChange={(e) => setV0(Number(e.target.value))}/></label>
           <label>势垒宽度 a <strong>{width.toFixed(1)} nm</strong><input type="range" min=".2" max="3" step=".1" value={width} onChange={(e) => setWidth(Number(e.target.value))}/></label>
-          <label>中心能量 E <strong>2.5 eV</strong><input type="range" min=".5" max="5" step=".1" defaultValue="2.5" /></label>
+          <label>中心能量 E <strong>{energy.toFixed(1)} eV</strong><input type="range" min=".5" max="5" step=".1" defaultValue={energy} onChange={(e) => setEnergy(Number(e.target.value))}/></label>
           <button onClick={runSimulation} className="run-sim"><span>{running ? "…" : "▶"}</span>{running ? "正在计算" : "运行模拟"}</button>
-          <small>受限环境 · 不联网 · 最长 30 秒</small>
+          <small>Crank-Nicolson 有限差分 · 纯浏览器内计算</small>
         </section>
         <section className="simulation-panel">
-          <div className="simulation-top"><div><span className="eyebrow">SIMULATION RESULT</span><h2>概率密度 |ψ(x,t)|²</h2></div><div className="sim-stats"><span>概率守恒 <strong>{verification?.details?.maxDrift !== undefined ? (1 - verification.details.maxDrift).toFixed(4) : "—"}</strong></span><Tag tone={verification?.status === "passed" ? "green" : "amber"}>{verification ? (verification.status === "passed" ? "工具通过" : "待检查") : "未运行"}</Tag></div></div>
-          <div className={`large-plot ${running ? "running" : ""}`}><MiniWave /><div className="time-scrubber"><button>▶</button><div><span style={{width:"38%"}}/></div><small>t = 1.84 fs</small></div></div>
-          <div className="result-strip"><div><span>反射概率 R</span><strong>{(0.81 + width * .02).toFixed(3)}</strong></div><div><span>透射概率 T</span><strong>{(0.19 - width * .02).toFixed(3)}</strong></div><div><span>工具结论</span><strong className="tool-result-text">{verification?.summary ?? "等待运行"}</strong></div></div>
+          <div className="simulation-top"><div><span className="eyebrow">SIMULATION RESULT</span><h2>概率密度 |ψ(x,t)|²</h2></div><div className="sim-stats"><span>概率守恒 <strong>{simResult ? (lastStep?.probability ?? 1).toFixed(6) : "—"}</strong></span><Tag tone={simResult ? (conservationPassed ? "green" : "amber") : "neutral"}>{simResult ? (conservationPassed ? "守恒通过" : "漂移警告") : "未运行"}</Tag></div></div>
+          <div className={`large-plot ${running ? "running" : simResult ? "has-data" : ""}`}>
+            <MiniWave />
+            {simResult && (
+              <div className="time-scrubber">
+                <button onClick={() => setActiveStep(Math.max(0, activeStep - 10))}>◀</button>
+                <div><span style={{ width: `${(activeStep / Math.max(simResult.steps.length - 1, 1)) * 100}%` }} /></div>
+                <button onClick={() => setActiveStep(Math.min(simResult.steps.length - 1, activeStep + 10))}>▶</button>
+                <small>t = {activeStepData?.time.toFixed(2) ?? 0} fs · 步 {activeStep} / {simResult.steps.length - 1}</small>
+              </div>
+            )}
+          </div>
+          <div className="result-strip">
+            <div><span>反射概率 R</span><strong>{lastStep ? lastStep.rValue.toFixed(4) : "—"}</strong></div>
+            <div><span>透射概率 T</span><strong>{lastStep ? lastStep.tValue.toFixed(4) : "—"}</strong></div>
+            <div><span>R + T</span><strong>{lastStep ? (lastStep.rValue + lastStep.tValue).toFixed(4) : "—"}</strong></div>
+          </div>
         </section>
       </div>
-      <section className="interpretation-prompt"><div><span>下一步 · 解释结果</span><h2>当势垒变宽时，图像中的哪一部分最先发生明显变化？</h2></div><button>写下我的解释 →</button></section>
+      {simError && <section className="interpretation-prompt"><div><span>模拟状态</span><h2>{simError}</h2></div></section>}
+      <section className="interpretation-prompt"><div><span>下一步 · 解释结果</span><h2>当势垒变宽时，图像中的哪一部分最先发生明显变化？</h2></div><button onClick={() => { const msg = `势垒宽度为${width.toFixed(1)}nm时，我观察到R=${lastStep?.rValue.toFixed(4) ?? '—'}, T=${lastStep?.tValue.toFixed(4) ?? '—'}。`; }}>写下我的解释 →</button></section>
     </div>
   );
 }
 
 function ProjectWorkspace() {
-  const milestones = [
-    ["01", "建立物理预测", "completed"], ["02", "实现波包求解器", "completed"], ["03", "验证概率守恒", "active"], ["04", "参数扫描与可视化", "pending"], ["05", "迁移问题与报告", "pending"],
-  ];
-  const otherProjects = [
-    ["02", "氢原子轨道、简并与外场微扰", "可运行基础模块", "径向分布 · 球谐函数 · Stark/Zeeman 劈裂"],
-    ["03", "变分法与氦原子的有效核电荷", "教学设计", "有效核电荷 · 能量曲线 · 变分上界"],
-    ["04", "双原子分子的分子轨道与振转光谱", "教学设计", "LCAO · Morse 势 · 振转光谱"],
-  ];
+  const [projectsData, setProjectsData] = useState<Array<{
+    id: string; title: string; question: string; level: string;
+    milestones: Array<{ id: string; title: string; status: string }>;
+    validators: string[];
+  }> | null>(null);
+  const [selectedProject, setSelectedProject] = useState(0);
+  const [projectProgress, setProjectProgress] = useState<Record<string, { progress: number; currentMilestone: number }>>({});
+
+  useEffect(() => {
+    fetch("/api/projects")
+      .then((r) => r.json())
+      .then((data: { projects?: typeof projectsData }) => {
+        if (data.projects?.length) {
+          setProjectsData(data.projects);
+          const progress: Record<string, { progress: number; currentMilestone: number }> = {};
+          data.projects.forEach((p) => { progress[p.id] = { progress: 0, currentMilestone: 1 }; });
+          setProjectProgress(progress);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const projects = projectsData ?? [];
+  const activeProject = projects[selectedProject] ?? null;
+  const activeProgress = activeProject ? projectProgress[activeProject.id] ?? { progress: 0, currentMilestone: 1 } : { progress: 0, currentMilestone: 1 };
+  const pct = activeProject ? Math.round((activeProject.milestones.filter((m) => m.status === "completed").length / Math.max(activeProject.milestones.length, 1)) * 100) : 0;
+  const completedCount = activeProject ? activeProject.milestones.filter((m) => m.status === "completed").length : 0;
+  const totalCount = activeProject?.milestones.length ?? 0;
+
   return (
     <div className="workspace-scroll project-workspace">
-      <header className="project-hero"><div><Tag tone="amber">PROJECT 01 · 进行中</Tag><h1>量子隧穿与波包传播</h1><p>从定性预测出发，亲手构建一维含时薛定谔方程的数值实验，并用守恒律检验你的计算。</p><div className="project-meta"><span>预计 3 周</span><span>5 个里程碑</span><span>个人项目</span></div></div><div className="project-score"><span>当前进度</span><strong>58<small>%</small></strong><div><i style={{width:"58%"}}/></div></div></header>
-      <div className="project-columns">
-        <section className="milestone-list"><div className="section-top"><div><span className="eyebrow">ROADMAP</span><h2>学习里程碑</h2></div><span>2 / 5 完成</span></div>{milestones.map(([n,title,state]) => <button className={`milestone ${state}`} key={n}><span>{state === "completed" ? "✓" : n}</span><div><strong>{title}</strong><small>{state === "active" ? "正在进行 · 自动检查 2/3" : state === "completed" ? "已完成" : "尚未解锁"}</small></div><i>→</i></button>)}</section>
-        <section className="active-milestone"><span className="eyebrow">CURRENT MILESTONE · 03</span><h2>验证概率守恒</h2><p>在整个传播过程中，检查总概率是否保持为 1，并分析数值误差的来源。</p><div className="checklist"><div className="done"><span>✓</span><p><strong>归一化初始波包</strong><small>自动测试通过</small></p></div><div className="done"><span>✓</span><p><strong>记录每个时间步的总概率</strong><small>自动测试通过</small></p></div><div><span>3</span><p><strong>解释误差随 Δt 的变化</strong><small>等待你的回答</small></p></div></div><button className="continue-project">继续当前任务 <span>→</span></button><small className="coach-note">Agent Coach 只提供当前里程碑所需提示，不会生成完整报告。</small></section>
-      </div>
-      <section className="project-catalog"><div className="section-top"><div><span className="eyebrow">PROJECT LIBRARY</span><h2>其他课程项目</h2></div><span>由教师逐步开放</span></div><div className="project-catalog-grid">{otherProjects.map(([number, title, level, description]) => <article key={number}><span>PROJECT {number}</span><Tag tone="blue">{level}</Tag><h3>{title}</h3><p>{description}</p><button>查看项目骨架 <i>→</i></button></article>)}</div></section>
+      {activeProject && (
+        <>
+          <header className="project-hero">
+            <div>
+              <Tag tone={activeProject.level === "golden-loop" ? "amber" : "blue"}>
+                PROJECT {String(selectedProject + 1).padStart(2, "0")} · {activeProject.level === "golden-loop" ? "进行中" : "可用"}
+              </Tag>
+              <h1>{activeProject.title}</h1>
+              <p>{activeProject.question}</p>
+              <div className="project-meta">
+                <span>{activeProject.level === "golden-loop" ? "预计 3 周" : "自主进度"}</span>
+                <span>{totalCount} 个里程碑</span>
+                <span>个人项目</span>
+              </div>
+            </div>
+            <div className="project-score">
+              <span>当前进度</span>
+              <strong>{pct}<small>%</small></strong>
+              <div><i style={{ width: `${pct}%` }} /></div>
+            </div>
+          </header>
+          <div className="project-columns">
+            <section className="milestone-list">
+              <div className="section-top">
+                <div><span className="eyebrow">ROADMAP</span><h2>学习里程碑</h2></div>
+                <span>{completedCount} / {totalCount} 完成</span>
+              </div>
+              {activeProject.milestones.map((m, i) => (
+                <button className={`milestone ${m.status}`} key={m.id}>
+                  <span>{m.status === "completed" ? "✓" : String(i + 1).padStart(2, "0")}</span>
+                  <div>
+                    <strong>{m.title}</strong>
+                    <small>{m.status === "completed" ? "已完成" : m.status === "in_progress" ? "正在进行" : "尚未解锁"}</small>
+                  </div>
+                  <i>→</i>
+                </button>
+              ))}
+            </section>
+            <section className="active-milestone">
+              <span className="eyebrow">CURRENT MILESTONE · {String(activeProgress.currentMilestone).padStart(2, "0")}</span>
+              <h2>{activeProject.milestones[activeProgress.currentMilestone - 1]?.title ?? "开始学习"}</h2>
+              <p>完成当前模块的自动检查和解释任务，解锁下一里程碑。</p>
+              <div className="checklist">
+                {activeProject.validators.map((v, i) => (
+                  <div key={v} className={i < 2 ? "done" : ""}>
+                    <span>{i < 2 ? "✓" : i + 1}</span>
+                    <p><strong>{v.replace(/_/g, " ")}</strong><small>{i < 2 ? "自动测试通过" : "等待你的回答"}</small></p>
+                  </div>
+                ))}
+              </div>
+              <button className="continue-project">继续当前任务 <span>→</span></button>
+              <small className="coach-note">Agent Coach 只提供当前里程碑所需提示，不会生成完整报告。</small>
+            </section>
+          </div>
+          {projects.length > 1 && (
+            <section className="project-catalog">
+              <div className="section-top">
+                <div><span className="eyebrow">PROJECT LIBRARY</span><h2>其他课程项目</h2></div>
+                <span>由教师逐步开放</span>
+              </div>
+              <div className="project-catalog-grid">
+                {projects.filter((_, i) => i !== selectedProject).map((p, i) => (
+                  <article key={p.id} onClick={() => setSelectedProject(projects.findIndex((pp) => pp.id === p.id))}>
+                    <span>PROJECT {String(i + 2).padStart(2, "0")}</span>
+                    <Tag tone={p.level === "golden-loop" ? "amber" : "blue"}>{p.level === "golden-loop" ? "可运行模块" : "教学设计"}</Tag>
+                    <h3>{p.title}</h3>
+                    <p>{p.validators.slice(0, 3).join(" · ")}</p>
+                    <button>查看项目 <i>→</i></button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+        </>
+      )}
+      {!activeProject && (
+        <header className="project-hero">
+          <div>
+            <Tag tone="blue">PROJECTS</Tag>
+            <h1>课程项目</h1>
+            <p>正在加载项目列表…</p>
+          </div>
+        </header>
+      )}
     </div>
   );
 }
@@ -418,19 +606,34 @@ function TeacherDashboard({ onLogout }: { onLogout: () => void }) {
     );
   }
 
-  const metrics = [["本周活跃学生",String(analytics?.activeStudents ?? 86),analytics?.source === "database" ? "实时数据" : "演示数据"],["待处理升级",String(analytics?.pendingEscalations ?? 7),"需关注"],["高提示依赖",String(analytics?.highHintDependency ?? 14),"3 个知识点"],["工具运行失败",String(analytics?.failedToolRuns ?? 0),"本周"]];
+  const metrics = [["本周活跃学生",String(analytics?.activeStudents ?? 0),analytics?.source === "database" ? "实时数据" : "无数据"],["待处理升级",String(analytics?.pendingEscalations ?? 0),analytics?.pendingEscalations ? "需关注" : "无待处理"],["高提示依赖",String(analytics?.highHintDependency ?? 0),"需要教学介入"],["工具运行失败",String(analytics?.failedToolRuns ?? 0),"本周"]];
+  const isLoading = authorized === null;
+  if (isLoading) return (
+    <main className="teacher-dashboard">
+      <header className="teacher-title"><div><span className="eyebrow">TEACHING OVERVIEW</span><h1>加载中…</h1><p>正在获取教学数据。</p></div></header>
+    </main>
+  );
+  const isRealData = analytics?.source === "database";
+  const misconceptionData = (analytics as { misconceptionCounts?: Array<{ id: string; count: number }> })?.misconceptionCounts ?? [];
+  const recentEscalations = (analytics as { recentEscalations?: Array<{ id: string; reason: string; createdAt: string }> })?.recentEscalations ?? [];
+  const misconceptionRows = misconceptionData.length > 0
+    ? misconceptionData.map((m) => [m.id.replace(/_/g, " ").slice(0, 20), m.count, Math.min(100, m.count * 3), "—"] as [string, number | string, number | string, string])
+    : [["等待数据收集", 0, 0, "—"]] as [string, number | string, number | string, string][];
   return (
     <main className="teacher-dashboard">
       <header className="teacher-title"><div><span className="eyebrow">TEACHING OVERVIEW · 量子物理</span><h1>早上好，谢老师</h1><p>这里呈现需要教学介入的信号，不用于学生排名。</p></div><div><button onClick={handleLogout}>退出教师端</button></div></header>
       <section className="metric-grid">{metrics.map(([label,value,delta],i)=><article key={label}><span>{label}</span><strong>{value}</strong><small className={i===1?"urgent":""}>{delta}</small></article>)}</section>
       <div className="teacher-grid">
-        <section className="misconception-map"><div className="section-top"><div><span className="eyebrow">MISCONCEPTION MAP</span><h2>本周高频误区</h2></div><button>查看全部 →</button></div>
-          {[["隧穿违反能量守恒",38,82,"第二章"],["波函数坍缩等于退相干",24,61,"第一章"],["简并态可直接使用非简并微扰",17,44,"第五章"],["自旋是经典自转",12,30,"第四章"]].map(([name,count,width,chapter])=><div className="mis-row" key={String(name)}><span>{chapter}</span><div><strong>{name}</strong><i><b style={{width:`${width}%`}}/></i></div><em>{count} 次</em></div>)}
+        <section className="misconception-map"><div className="section-top"><div><span className="eyebrow">MISCONCEPTION MAP</span><h2>本周高频误区</h2></div><span>{isRealData ? "来自 D1" : "等待数据"}</span></div>
+          {misconceptionRows.map(([name, count, barWidth, chapter]) => <div className="mis-row" key={String(name)}><span>{String(chapter)}</span><div><strong>{name}</strong><i><b style={{width: `${String(barWidth)}%`}} /></i></div><em>{typeof count === "number" ? `${count} 次` : String(count)}</em></div>)}
         </section>
-        <section className="ta-queue"><div className="section-top"><div><span className="eyebrow">TA QUEUE</span><h2>需要人工介入</h2></div><Tag tone="amber">7 项</Tag></div>
-          {[['林同学','连续 3 次未通过归一化检查','4 分钟前'],['陈同学','工具结论与讲义表述冲突','18 分钟前'],['匿名会话','可能涉及未发布标准答案','42 分钟前']].map(([name,reason,time])=><button className="queue-row" key={name}><span>{name.slice(0,1)}</span><div><strong>{name}</strong><p>{reason}</p><small>{time}</small></div><i>→</i></button>)}
+        <section className="ta-queue"><div className="section-top"><div><span className="eyebrow">TA QUEUE</span><h2>需要人工介入</h2></div><Tag tone={recentEscalations.length > 0 ? "amber" : "green"}>{recentEscalations.length} 项</Tag></div>
+          {recentEscalations.length > 0
+            ? recentEscalations.map((esc) => <button className="queue-row" key={esc.id}><span>{esc.id.slice(0, 1)}</span><div><strong>{esc.id.slice(0, 12)}</strong><p>{esc.reason}</p><small>{esc.createdAt}</small></div><i>→</i></button>)
+            : <div className="queue-row"><span>—</span><div><strong>暂无待处理升级</strong><p>所有会话均在课程政策范围内流转。</p></div></div>
+          }
         </section>
-        <section className="trajectory"><div className="section-top"><div><span className="eyebrow">TURN TRACE</span><h2>最近教学轨迹</h2></div><button>回放完整轨迹</button></div><div className="trace-line">{["学生输入","任务分类","课程政策","资料检索","误区诊断","工具验证","最终回复"].map((item,i)=><div key={item} className={i<6?"passed":"current"}><span>{i<6?'✓':i+1}</span><small>{item}</small></div>)}</div><p>学生对量子隧穿作出错误预测；系统选择 H2 关键提问，并调用符号验证器检查边界连续性。</p></section>
+        <section className="trajectory"><div className="section-top"><div><span className="eyebrow">TURN TRACE</span><h2>最近教学轨迹</h2></div><button>回放完整轨迹</button></div><div className="trace-line">{["学生输入","任务分类","课程政策","资料检索","误区诊断","工具验证","最终回复"].map((item,i)=><div key={item} className={i<6?"passed":"current"}><span>{i<6?'✓':i+1}</span><small>{item}</small></div>)}</div><p>{isRealData ? "数据来自各学生的教学转折记录。课程政策在每次回复时以代码执行。" : "教师验证通过后将显示实时教学轨迹数据。"}</p></section>
       </div>
     </main>
   );
@@ -459,7 +662,7 @@ export default function Home() {
   const [capabilities, setCapabilities] = useState<CapabilityChoice[]>(fallbackCapabilities);
   const [selectedCapability, setSelectedCapability] = useState<CapabilityChoice>(fallbackCapabilities[0]);
   useEffect(() => { fetch("/api/capabilities").then((response) => response.json()).then((data: { capabilities?: CapabilityChoice[] }) => { if (data.capabilities?.length) { setCapabilities(data.capabilities); setSelectedCapability(data.capabilities[0]); } }).catch(() => {}); }, []);
-  const workspace = mode === "concept" ? <ConceptWorkspace capability={selectedCapability} onLatest={setLatestTutor} /> : mode === "derivation" ? <DerivationWorkspace /> : mode === "experiment" ? <ExperimentWorkspace /> : <ProjectWorkspace />;
+  const workspace = mode === "concept" ? <ConceptWorkspace capability={selectedCapability} onLatest={setLatestTutor} /> : mode === "derivation" ? <DerivationWorkspace capability={selectedCapability} onLatest={setLatestTutor} /> : mode === "experiment" ? <ExperimentWorkspace /> : <ProjectWorkspace />;
   return (
     <div className={`quantum-app theme-${theme}`}>
       <header className="topbar">
