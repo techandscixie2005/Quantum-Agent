@@ -1,0 +1,48 @@
+"""Auditable deterministic scientific verification for the teaching workflow."""
+
+from quantum_agent.science.models import (
+    CodeTestRequest,
+    ComplexValue,
+    LineVisualizationRequest,
+    NumericalNormalizationRequest,
+    NumericalUnitarityRequest,
+    PlotSeries,
+    SandboxExecutionOutcome,
+    SandboxLimits,
+    ScientificVerificationKind,
+    ScientificVerificationMethod,
+    ScientificVerificationRequest,
+    ScientificVerificationResult,
+    ScientificVerificationStatus,
+    SymbolicEquivalenceRequest,
+    SymbolicResidualRequest,
+    ToolIdentity,
+    TwoLevelSimulationRequest,
+    UnverifiedRequest,
+    VisualizationSpec,
+)
+from quantum_agent.science.toolbox import SandboxExecutor, ScientificToolbox
+
+__all__ = [
+    "CodeTestRequest",
+    "ComplexValue",
+    "LineVisualizationRequest",
+    "NumericalNormalizationRequest",
+    "NumericalUnitarityRequest",
+    "PlotSeries",
+    "SandboxExecutionOutcome",
+    "SandboxExecutor",
+    "SandboxLimits",
+    "ScientificToolbox",
+    "ScientificVerificationKind",
+    "ScientificVerificationMethod",
+    "ScientificVerificationRequest",
+    "ScientificVerificationResult",
+    "ScientificVerificationStatus",
+    "SymbolicEquivalenceRequest",
+    "SymbolicResidualRequest",
+    "ToolIdentity",
+    "TwoLevelSimulationRequest",
+    "UnverifiedRequest",
+    "VisualizationSpec",
+]

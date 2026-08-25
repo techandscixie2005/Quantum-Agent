@@ -1,0 +1,1797 @@
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+QUANTUM AGENT
+产品需求文档 PRD · V2.0
+面向大学量子物理课程的可信、多阶段教学智能体系统
+
+文档状态
+
+V2.0 - LangGraph 架构升级与比赛最终冲刺规范
+
+目标版本
+
+Competition Release 0.2
+
+权威基线
+
+PRD V1.0 + 当前已验证单智能体系统 + 课程知识图谱
+
+目标用户
+
+中国科学技术大学量子物理课程学生、助教、主讲教
+师
+
+开发团队
+
+1 名核心开发者 + 1 名主讲教师教学审核
+
+更新日期
+
+2026-08-23
+
+比赛截止
+
+2026-09-06
+
+核心产品原则
+Course-bounded · Teacher-controlled · Workflow-first · Tool-verified · Evidence-grounded ·
+Student-model-lite
+
+Quantum Agent = 课程知识模型 + 教学计算图 + 科学验证工具 + 学生学习证据 + 教师治理
+
+1
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+目录
+0. V2.0 变更摘要与当前基线
+1. 产品执行摘要
+2. 第一性原理与设计公理
+3. 产品目标与非目标
+4. 用户、权限与治理边界
+5. 学生端产品结构
+6. 教学动作空间
+7. 分层提示与答案释放
+8. LangGraph 教学计算图
+9. 多智能体职责设计
+10. 课程知识图谱与混合检索
+11. 课程语料质量与 Grounding 门控
+12. Student-model-lite
+13. 科学验证工具与代码沙箱
+14. 四类教学子图
+15. 四个课程 Project
+16. 教师与 TA 产品
+17. 技术架构与技术栈
+18. 模型网关、Embedding 与结构化输出
+19. 数据模型与状态持久化
+20. API 与 SSE 事件
+21. 安全、隐私与 Prompt Injection
+22. 可观测性与轨迹回放
+23. 评测体系与单/多智能体对照
+24. 测试策略
+25. 仓库结构与开发规范
+26. 2026-08-23 至 2026-09-06 开发计划
+27. 比赛演示脚本
+28. Definition of Done
+29. 工程参考资料
+2
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+0. V2.0 变更摘要与当前基线
+本版本不是推倒重来，而是在已经验证可运行的单智能体系统上进行“行为保持型”架构升级。PRD V1.0 仍是
+产品边界与安全原则的基础；V2.0 主要引入课程知识图谱、LangGraph 持久化/人工中断能力、专业化教学子
+图，以及单智能体与多智能体的可证伪对照评测。
+
+0.1 当前已验证基线（2026-08-23）
+能力
+
+基础设施
+课程导入
+知识图谱候选
+
+审核生命周期
+
+概念检索
+
+EvidencePacket
+
+教学工作流
+
+真实基础设施缺陷
+
+当前状态
+PostgreSQL + pgvector、Neo4j、Redis 全部
+运行
+12 份文档 -> 2204 chunks + 2204 evidence
+398 node candidates + 476 relation
+candidates
+document approve -> publish -> node
+approve -> outbox -> Neo4j projection
+Neo4j 返回带 canonical key、SHA-256
+provenance、源定位的节点
+pgvector 可返回带引用证据包，当前
+coverage=partial
+现有固定 10-step workflow 可调用 USTC
+deepseek-v4-pro
+NUL-byte ingestion 与 Neo4j query kwarg
+collision
+
+判定
+
+已通过 live infra
+已持久化
+已生成
+
+端到端通过
+
+通过
+
+通过但覆盖不足
+
+已运行
+
+已修复
+
+0.2 当前最重要的数据瓶颈
+P0 - 先修语料，再评估多智能体
+当前 model_degraded 的根因不是编排能力不足，而是可发布的叙事型课程证据覆盖不足：部分讲义由碎片
+化幻灯片构成，Griffiths 为扫描版，Yan/Weinberg 尚未进入可发布课程 scope。任何多智能体架构都不能
+从不存在的课程证据中可靠地产生 grounded explanation。
+
+• 比赛黄金路径涉及的概念必须拥有可发布、可引用的叙事型证据；
+• 对 scan-only 资料提供选择性 OCR/人工导入通道，但 OCR 结果默认 REVIEW_REQUIRED；
+• 对 Yan/Weinberg 等可解析教材建立 edition/scope，教师明确批准后方可进入学生检索；
+• 检索结果显式返回 coverage = sufficient / partial / insufficient，模型不得越过 coverage gate。
+
+3
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+0.3 V2.0 核心架构变化
+V1.0
+
+V2.0
+LangGraph custom workflow 复刻同一确定性流程，再逐步引入
+
+自定义 10-step Python 状态机
+
+specialist subgraphs
+Evidence Agent + Diagnosis Agent + 专业化 Tutor 子图；
+
+单一 Tutor 模型节点
+
+Policy/Verifier/Monitor 保持确定性
+LangGraph checkpointer 保存 thread state；学生长期学习证据
+
+会话状态主要由应用持久化
+
+仍由 PostgreSQL 业务表负责
+
+TA 升级为普通业务事件
+
+LangGraph interrupt/resume + TA 审批/编辑/接管
+课程知识图谱成为语义骨架；GraphRAG 只负责检索，不成为事实
+
+知识库以混合 RAG 为主
+
+权威
+多智能体成为“需实验证明收益”的增强层，而不是先进性的默认
+
+多智能体为未来选项
+
+假设
+
+1. 产品执行摘要
+Quantum Agent 不是一个“量子物理聊天机器人”，也不是替学生完成作业的自动解题器。它是一套课程内教
+学基础设施：课程材料决定知识边界，教师决定教学政策，确定性工具裁决可验证科学结论，LLM 只在受控节
+点内承担诊断、解释、提问和教学化表达。
+产品公式
+Quantum Agent = 课程知识模型 + 课程知识图谱 + 教学计算图 + 学生学习证据 + 科学验证工具 + 计算实验环
+境 + 教师治理系统
+
+• 问概念：课程 grounding、概念联系、误区与迁移检查；
+• 看推导：识别目标、定位第一处实质错误、给最小修正提示；
+• 做实验：预测 -> 仿真 -> 验证 -> 解释 -> 迁移；
+• 做项目：以 milestone 为状态单位，限制 Agent 只辅导当前可解锁步骤。
+比赛演示仍围绕“量子隧穿与波包传播”黄金闭环，但 V2.0 必须额外显式展示：知识图谱证据、Policy Gate、
+Verifier、LangGraph checkpoint、TA interrupt/resume、以及单/多智能体对照评测结果。
+
+4
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+2. 第一性原理与设计公理
+2.1 教育目标函数
+终极目标
+max P（学生在撤去 AI 后，能够独立解决新的相关问题）
+
+因此产品 KPI 不以“有 AI 时做题更快”为核心，而优先关注独立后测、迁移、延迟保持、自我解释、提示依
+赖、答案泄漏与教师工作量。
+
+2.2 四类权威必须分离
+权威
+
+回答的问题
+
+知识权威
+
+课程里到底讲了什么？
+
+科学权威
+
+公式、数值、代码是否成立？
+
+教学权威
+
+此刻允许帮助到什么程度？
+
+语言智能
+
+怎样诊断、解释、追问更合适？
+
+最终裁决者
+PUBLISHED 课程资料 + 教师审核 KG
+SymPy / NumPy / SciPy / QuTiP /
+Sandbox tests
+Teacher Policy + deterministic Policy
+Gate
+受控 LLM 节点
+
+2.3 为什么采用 LangGraph，但不采用“Agent swarm”
+LangGraph 在本项目中的价值是 durable state、checkpoint、interrupt/resume、subgraph 和可观测图运
+行，而不是让多个角色自由互相聊天。根图由应用代码控制；专业 Agent 只作为节点或子图嵌入。
+• 确定性流程优先：权限、政策、工具、引用、状态写入和升级规则都由代码执行；
+• 上下文隔离：不同 specialist 只读取完成职责所需的最小状态；
+• 人工可中断：关键教学/审核节点可以暂停并由 TA/教师恢复；
+• 可证伪：若多智能体不能显著改善诊断、引用或恢复能力，则回退到更简单架构。
+
+3. 产品目标与非目标
+3.1 Competition Release 0.2 必须实现
+ID
+
+目标
+
+G-01
+
+保留学生 / TA / 教师 / Admin RBAC 与现有 Web 产品
+
+5
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+ID
+
+目标
+
+G-02
+
+课程资料上传、审核、发布、知识图谱投影与来源追溯
+
+G-03
+
+课程问答、概念检索和图谱路径均可回到文档/章节/页码或幻灯片
+现有 10-step 教学逻辑迁移为 LangGraph custom workflow，行
+
+G-04
+
+为保持
+
+G-05
+
+实现 Evidence Agent、Diagnosis Agent 与四类专业化教学子图
+
+G-06
+
+Policy Gate、Verifier、权限与安全不 Agent 化
+
+G-07
+
+实现 LangGraph 持久化 checkpoint、TA interrupt/resume
+
+G-08
+
+至少 5 类 deterministic verifier + 安全 Python sandbox
+
+G-09
+
+完整量子隧穿黄金闭环；其他 3 Project 可启动并有验证骨架
+教师端可查看完整 graph trace、误区、提示依赖、工具与
+
+G-10
+
+interrupt
+建立 single-agent vs LangGraph vs specialist-agent 分层对照评
+
+G-11
+
+测
+
+G-12
+
+Docker Compose 一键启动，真实 infra E2E 通过
+
+3.2 明不做
+• 不做 peer-to-peer agent swarm；
+• 不允许 Agent 自己提高提示权限、修改课程政策或绕过审核；
+• 不允许学生端开放网页浏览、教务系统操作或自动提交作业；
+• 不把 GraphRAG 或 LLM 生成文本当成课程事实来源；
+• 不做无限制长期人格画像、正式成绩自动判定、模型微调或强化学习作为比赛依赖；
+• 不为了展示多智能体而把 deterministic service 包装成“Agent”。
+
+4. 用户、权限与治理边界
+角色
+
+Student
+
+TA
+Teacher
+
+核心权限
+
+禁止事项
+
+四类学习模式、查看引用、受控运行代码、
+
+查看他人数据、教师答案库、政策、系统
+
+查看个人学习证据、请求 TA
+
+Prompt、联网沙箱、自动提交作业
+
+查看升级会话、回复、审核 Agent 建议、标
+
+修改系统安全、发布知识源、覆盖教师锁定
+
+记误区候选、恢复 interrupt
+
+政策
+
+课程/知识/政策/Project/Rubric/审核/统
+
+绕过审计日志、访问无关课程
+
+6
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+角色
+
+核心权限
+
+禁止事项
+
+计/导出
+Admin
+
+系统配置、模型、配额、故障、安全、备份
+
+默认不读取课程对话；确需读取必须留审计
+记录
+
+所有权限在 FastAPI 后端强制执行；Agent 只能看到经过授权后注入的上下文。
+
+5. 学生端产品结构
+5.1 三栏教学工作台
+区域
+
+内容
+
+左栏
+
+章节 / 知识图谱导航 / 四种模式 / 历史会话 / Project
+
+中栏
+
+教学交互、推导步骤、代码编辑、实验、Tutor 输出
+Citation / Concept / Formula / Verifier / Simulation / 学习状态 /
+
+右栏
+
+“为什么连接”证据
+
+5.2 四种模式
+模式
+
+问概念
+
+看推导
+
+做实验
+
+做项目
+
+默认交互逻辑
+结论 -> 物理图像 -> 数学表达 -> 误区 -> 理
+解检查 -> 引用
+目标 -> 步骤 -> 第一实质错误 -> 最小提示
+-> 学生修正
+预测 -> 参数 -> 仿真 -> 守恒检查 -> 解释 ->
+迁移
+目标 -> 当前 milestone -> artifact ->
+verifier -> review -> unlock
+
+核心防线
+
+不得脱离课程证据给权威事实
+
+默认不直接重写完整解
+
+图表必须来自真实运行
+
+禁止一次性生成完整可提交项目
+
+6. 教学动作空间
+模型每轮只能提出受控 TutorAction，Policy Gate 决定是否执行。动作空间沿用 V1.0，并增加图谱/人工中断相
+关动作。
+
+7
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+类别
+
+动作
+ASK_GOAL, ASK_FOR_ATTEMPT, ELICIT_PREDICTION,
+
+诊断
+
+ASK_SELF_EXPLANATION
+GIVE_CONCEPT_CUE, GIVE_FORMULA_CUE,
+
+提示
+
+GIVE_PROCESS_CUE, SHOW_LOCAL_EXAMPLE,
+SHOW_COUNTEREXAMPLE
+COMPARE_REPRESENTATIONS, SHOW_KG_PATH,
+
+表示
+
+SHOW_SOURCE_EVIDENCE
+RUN_RETRIEVAL, RUN_SYMBOLIC_VERIFIER,
+
+工具
+
+RUN_NUMERIC_VERIFIER, RUN_SIMULATION,
+REVIEW_CODE_LOCALLY
+SUMMARIZE_PROGRESS, GIVE_TRANSFER_CHECK,
+
+收束
+
+RELEASE_FULL_EXPLANATION
+ESCALATE_TO_TA, REQUEST_TEACHER_APPROVAL,
+
+升级
+
+REFUSE_OUT_OF_SCOPE
+
+每个动作必须声明允许模式、最大提示层级、工具白名单、是否更新学习证据、是否需要批准、可渲染 UI 组件
+和审计字段。
+
+7. 分层提示与答案释放
+层级
+
+名称
+
+允许内容
+
+H0
+
+诊断
+
+询问目标、已有步骤、卡点
+
+H1
+
+概念线索
+
+概念、物理图像、应检查假设
+
+H2
+
+公式线索
+
+相关公式/定理，不完成代入
+
+H3
+
+过程线索
+
+下一步操作、选基、边界条件、算法方向
+
+H4
+
+局部示范
+
+一个关键子步骤或局部代码修复
+
+H5
+
+完整讲解
+
+完整解法 + 总结 + 迁移题
+
+任务模式
+
+默认上限
+
+LEARNING
+
+H5
+
+PRACTICE
+
+H4
+
+GRADED
+
+H3
+
+8
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+任务模式
+
+默认上限
+
+PROJECT
+
+H4，且禁止完整项目
+
+REVIEW
+
+H5
+
+EXAM_LOCKED
+
+H1 或完全禁用
+
+7.1 Policy Gate 是唯一有效权限源
+requested_hint = model_proposal.requested_hint
+effective_hint = min(
+teacher_policy.max_hint,
+assignment_policy.max_hint,
+task_mode.max_hint,
+release_rule.max_hint,
+)
+if requested_hint > effective_hint:
+downgrade_and_log()
+
+LLM 可以请求 H4，但不能让 H3 的计分作业变成 H4。任何 Prompt Injection 都无法改变代码层规则。
+
+7.2 挫败处理
+• 连续失败或反复请求同一提示时，首先降低任务粒度，而不是机械重复追问；
+• 从苏格拉底追问切换到局部示范或前置知识回顾；
+• 若仍无进展，触发 TA interrupt；
+• “frustration”可以由 LLM 辅助识别，但升级阈值由 deterministic rule 决定。
+
+8. LangGraph 教学计算图
+8.1 Root Graph
+START
+-> validate_identity
+[deterministic]
+-> load_course_context
+[deterministic]
+|| load_policy
+|| load_student_snapshot
+|| resolve_assignment
+-> classify_mode
+[structured LLM + rule fallback]
+-> concept | derivation | experiment | project subgraph
+-> propose_tutor_action
+[LLM]
+-> POLICY_GATE
+[deterministic]
+-> execute_allowed_tools
+[deterministic dispatch]
+-> compose_response
+[LLM]
+-> verify_response_contract
+[deterministic]
+-> repair_once if needed
+-> update_learning_evidence
+[deterministic]
+
+9
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+-> write_trace
+END
+
+[deterministic]
+
+根图不由一个 Supervisor LLM 决定流程，而是由 LangGraph StateGraph + 条件边显式定义。
+
+8.2 LangGraph 引入范围
+能力
+
+要求
+生产环境使用 PostgreSQL-backed checkpointer；thread_id 使
+
+Persistence
+
+用 conversation/run UUID
+
+Interrupt
+
+TA/教师审批、证据冲突、项目里程碑等场景暂停并等待外部输入
+
+Resume
+
+使用同一 thread_id 恢复；resume 节点前的副作用必须幂等
+
+Subgraph
+
+四类教学模式独立子图，避免共享巨型 prompt/context
+将 node state、tool events、response delta、interrupt
+
+Streaming
+
+payload 映射到现有 SSE
+
+State history
+
+支持教师 trace 回放和故障定位；不把隐藏思维链记录为日志
+
+8.3 迁移原则
+• 第一步只做 behavior-preserving migration：同输入、同 policy、同 verifier、同 citation contract；
+• 只有在单图稳定后才拆 specialist agent；
+• 任何 multi-agent 增强必须有对照数据证明收益，否则删除。
+
+9. 多智能体职责设计
+核心原则
+不是“六个 AI 角色排队工作”，而是“确定性工作流包围少量 specialist agents”。
+
+9.1 Evidence Agent
+职责：回答“我有什么课程证据可以支持这句话？”。只做查询规划、证据聚合与证据包结构化，不直接给学生
+最终答案。
+输入
+
+问题、course_id、concept hints
+
+允许工具
+
+输出
+
+PostgreSQL FTS、pgvector、Neo4j
+
+EvidenceBundle：concepts,
+
+controlled query
+
+graph_paths, chunks, formulas,
+
+10
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+输入
+
+允许工具
+
+输出
+citations, coverage, conflicts
+
+Evidence Agent 不要求机械返回固定数量证据；如果只有 1 个高质量证据就返回 1 个，没有可靠依据则
+coverage=insufficient。
+
+9.2 Diagnosis Agent
+职责：回答“学生当前到底卡在哪里？”。输入学生尝试、EvidenceBundle 与精简后的 StudentSnapshot；
+输出目标概念、第一实质错误、误区候选、缺失前置知识、进展程度、置信度和是否需要 verifier。
+Diagnosis Agent 无权决定最终提示等级，也不直接生成完整解答。
+
+9.3 Specialist Tutor Subgraphs
+子图
+
+核心任务
+
+典型闭环
+retrieve -> diagnose -> cue ->
+
+Concept Tutor
+
+概念澄清/误区/表示比较
+
+counterexample/visualization -> selfexplanation -> transfer
+
+Derivation Tutor
+
+逐步推导纠错
+
+Experiment Tutor
+
+计算实验
+
+Project Coach
+
+长时项目
+
+parse steps -> first error -> typed verifier
+-> minimal hint -> correction loop
+predict -> simulate -> invariant check ->
+explain -> intervention -> transfer
+milestone -> artifact -> verifier ->
+feedback -> review -> unlock next
+
+9.4 不应做成 Agent 的模块
+模块
+
+原因
+
+Policy Gate
+
+教学权限必须由代码与教师配置强制执行
+
+Science Verifier
+
+科学裁决应是 deterministic typed tool，不是自然语言判断
+
+RBAC / Security
+
+越权不能依靠 Prompt
+
+Monitor / Escalation 主规则
+
+连续失败、工具冲突、coverage 不足等多数信号可直接计算
+
+Learning evidence writer
+
+长期状态写入必须可验证、幂等、可审计
+
+11
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+9.5 Teacher Intelligence Graph
+教师反思/周报不进入学生每轮主链。独立图按需或定期聚合误区、提示依赖、transfer、工具失败与课程材料缺
+口，产出“候选洞察”；教师审核后方可写回正式课程知识或 policy。
+
+10. 课程知识图谱与混合检索
+知识图谱是课程材料的可审核派生语义表示，不是新的事实来源。Neo4j 负责概念、公式、误区、前置关系和证
+据关联；PostgreSQL 仍是文档、版本、审核与业务事实的 system of record。
+
+10.1 核心 ontology
+节点族
+课程结构
+知识对象
+
+教学对象
+
+代表节点
+Course, Chapter, Section
+Concept, Principle, PhysicalSystem, MathematicalObject,
+Operator, QuantumState, Approximation
+Formula, Symbol, Derivation, Example, Exercise,
+Misconception, Hint
+
+实验对象
+
+Experiment, Visualization, Project, Verifier
+
+证据对象
+
+SourceDocument, SourceChunk, Evidence, Assertion
+
+10.2 关键关系
+PART_OF, PREREQUISITE_OF, DEFINES, USES, DEPENDS_ON, DERIVES_FROM, APPLIES_TO, ACTS_ON,
+COMMUTES_WITH, HAS_EIGENSTATE, APPROXIMATES, VALID_UNDER, CONTRASTS_WITH, RELATED_TO,
+HAS_MISCONCEPTION, REMEDIATED_BY, VISUALIZED_BY, VERIFIED_BY, SUPPORTED_BY,
+EXTRACTED_FROM。
+
+10.3 Provenance 规则
+• 每个学生可见 semantic assertion 必须绑定 Assertion/Evidence；
+• 每个 Evidence 必须回到 canonical chunk/document version/page-or-slide locator；
+• LLM 提取 assertion 默认 REVIEW_REQUIRED；只有教师审核或 deterministic 结构关系可进入 APPROVED；
+• 学生查询仅返回 PUBLISHED document + APPROVED assertion。
+
+10.4 Hybrid Retrieval
+PostgreSQL FTS (lexical)
++
+pgvector (semantic)
++
+
+12
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+Neo4j subgraph / prerequisite / misconception traversal
+-> candidate fusion (RRF or equivalent)
+-> course/version/publication filter
+-> dedup
+-> optional graph expansion
+-> rerank
+-> EvidenceBundle
+
+Neo4j 官方 GraphRAG Python package / SimpleKGPipeline 可作为 KG 构建基础设施，但 Quantum Agent 自
+己的 ontology、review lifecycle、provenance 与权限规则优先。
+
+11. 课程语料质量与 Grounding 门控
+11.1 文档生命周期
+UPLOADED -> PROCESSING -> REVIEW_REQUIRED -> APPROVED -> PUBLISHED -> ARCHIVED。只有
+PUBLISHED 资料可进入学生检索。
+
+11.2 语料质量状态
+状态
+
+含义
+
+学生回答策略
+
+SUFFICIENT
+
+有直接课程证据且可形成叙事解释
+
+允许 grounded model-written response
+
+PARTIAL
+
+有碎片证据，但不足以支撑完整解释
+
+给证据片段 + 明确缺口 + 可要求教师补充
+
+INSUFFICIENT
+
+无可靠课程依据
+
+明确拒绝作为课程事实回答，不伪造引用
+
+NEEDS_OCR
+
+扫描/图片型资料无法可靠提取
+
+进入 OCR/人工处理队列，不直接发布
+
+11.3 比赛前 P0 语料修复
+• 为量子隧穿、波函数/概率、定态时间演化、测量、微扰、变分、MO/光谱等演示概念建立 100% 可发布
+narrative evidence；
+• 将 Yan_QPhys / Weinberg 中与课程 syllabus 对齐的章节建立 edition scope；
+• 对 Griffiths 仅在确有必要时做选择性 OCR，OCR 后必须人工抽检；
+• 建立 chapter coverage dashboard，避免把 orchestration 失败与 corpus 缺失混淆。
+
+12. Student-model-lite
+长期学习记忆不依赖 LangGraph store 的自由文本总结，而依赖业务数据库中结构化、可操作的学习证据。首
+版不得推断智力、人格、心理状态或给出虚假精确掌握百分比。
+
+13
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+知识状态
+
+定义
+
+UNKNOWN
+
+尚无课程内学习证据
+
+EXPOSED
+
+已接触相关概念/任务
+
+DEVELOPING
+
+在提示或纠错后可以继续
+
+DEMONSTRATED
+
+在独立解释/迁移/验证中表现出可靠理解
+
+NEEDS_REVIEW
+
+出现重复误区或高提示依赖，需要复习
+
+12.1 证据类型
+CORRECT_SELF_EXPLANATION, CORRECT_TRANSFER_RESPONSE, CORRECTED_DERIVATION,
+PASSED_TOOL_CHECK, FAILED_TOOL_CHECK, MISCONCEPTION_OBSERVED,
+REPEATED_MISCONCEPTION, HIGH_HINT_DEPENDENCY, COMPLETED_PROJECT_MILESTONE,
+TEACHER_CONFIRMED。
+
+12.2 Memory 三分法
+Memory
+
+承载
+
+Conversation / Run
+
+LangGraph checkpointer
+
+Student Learning
+
+PostgreSQL 业务表
+
+Course Knowledge
+
+PostgreSQL + pgvector + Neo4j
+
+用途
+本轮/本会话状态、interrupt、恢复、fault
+tolerance
+跨会话学习证据、误区、提示依赖、
+transfer
+权威课程材料、证据、语义关系
+
+13. 科学验证工具与代码沙箱
+13.1 Verifier Contract
+ToolResult:
+status: verified | contradicted | inconclusive | error
+summary: string
+evidence: list[string]
+numeric_values: map
+artifacts: list[path/ref]
+warnings: list[string]
+runtime_ms: int
+
+模型无权把 inconclusive 改写成 verified。Verifier 接收 typed request，而不是任意自然语言 claim。
+
+14
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+13.2 首版验证器
+ID
+
+验证器
+
+技术
+
+V-01
+
+代数等价
+
+SymPy simplify/equals + 高精度抽样
+
+V-02
+
+归一化
+
+符号/数值积分
+
+V-03
+
+厄米性
+
+矩阵共轭转置/白名单算符
+
+V-04
+
+对易子
+
+SymPy/矩阵
+
+V-05
+
+本征问题
+
+维数、残差、归一化
+
+V-06
+
+边界条件
+
+一维分段函数规则
+
+V-07
+
+量纲
+
+教师符号单位表
+
+V-08
+
+变分上界
+
+参考基准/数值比较
+
+V-09
+
+仿真不变量
+
+概率守恒、稳定性、R+T 等
+
+13.3 Python Sandbox
+资源
+
+限制
+
+network
+
+none
+
+user
+
+non-root
+
+root filesystem
+
+read-only
+
+capabilities
+
+drop all + no-new-privileges
+
+memory
+
+512 MB
+
+CPU
+
+1 core
+
+PIDs
+
+64
+
+wall time
+
+20 s
+
+stdout
+
+200 KB
+
+artifacts
+
+20 MB
+
+packages
+
+numpy, scipy, sympy, matplotlib, pandas, qutip, pytest
+
+15
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+14. 四类教学子图
+14.1 Concept Subgraph
+question -> retrieve EvidenceBundle -> diagnose concept/misconception
+-> Policy Gate -> minimal conceptual intervention
+-> optional counterexample / visualization
+-> self-explanation -> transfer check -> evidence update
+
+14.2 Derivation Subgraph
+goal -> parse student steps -> find first consequential error
+-> build typed VerificationRequest -> deterministic verifier
+-> Diagnosis Agent -> Policy Gate -> minimal hint
+-> wait for student correction -> loop or close
+
+错误类型：ALGEBRA_ERROR, ASSUMPTION_ERROR, BOUNDARY_CONDITION_ERROR,
+NORMALIZATION_ERROR, BASIS_CONFUSION, OPERATOR_ERROR, DEGENERACY_ERROR,
+DIMENSION_ERROR, NUMERICAL_ERROR, PHYSICAL_INTERPRETATION_ERROR, INCONCLUSIVE。
+
+14.3 Experiment Subgraph
+prediction -> parameter setup -> real simulation -> invariant verifier
+-> compare prediction vs evidence -> student explanation
+-> misconception update -> parameter intervention -> transfer question
+
+14.4 Project Subgraph
+Project 以 milestone 为 durable state。每个 milestone 有 prerequisites、allowed actions、starter
+artifacts、tests、review requirement 和 unlock condition。Project Coach 只能读取当前 milestone 所需上
+下文，避免长项目 context 膨胀。
+
+15. 四个课程 Project
+Project
+
+P1 量子隧穿与波包传播
+
+核心学习问题
+反射、透射、干涉、展宽、概率守恒、
+WKB
+
+比赛实现级别
+
+黄金闭环，100% E2E
+
+P2 氢原子轨道、简并与外场微扰
+
+轨道、节点、简并、Stark/Zeeman
+
+完整页面 + 可运行基础模块
+
+P3 变分法与氦原子有效核电荷
+
+近似、能量分解、屏蔽、上界
+
+教学设计 + 代码骨架 + 能量曲线
+
+P4 双原子分子 MO 与振转光谱
+
+LCAO、势能曲线、振动/转动能级、光谱
+
+教学设计 + LCAO 可视化 + 光谱示例
+
+16
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+15.1 P1 黄金闭环
+1. 学生预测：平均能量低于势垒时是否完全不能通过。
+2. Diagnosis Agent 识别隧穿相关误区，但不直接纠正。
+3. Policy Gate 允许“运行基准模拟”，不允许直接放标准结论。
+4. 真实波包求解器生成 R/T、|ψ|² 动画和概率守恒证据。
+5. Verifier 返回总概率与误差；若不通过则停止教学结论。
+6. 学生基于图与数值解释；Tutor 只针对解释中的概念缺口干预。
+7. 系统给双势垒共振或势垒宽度变化的迁移问题。
+8. 教师端出现该学生的误区、提示层级、工具证据与 graph trace。
+
+16. 教师与 TA 产品
+16.1 教师首页
+展示活跃学生、待处理 interrupts、高频误区、高提示依赖知识点、失败工具运行、引用缺失、答案泄漏、
+Project milestone、语料 coverage 缺口。所有指标用于教学支持，不用于学生排名。
+
+16.2 LangGraph Trace 回放
+每个 Tutor Run 展示：输入 -> mode/router -> evidence -> diagnosis -> model proposal -> Policy Gate ->
+tool -> tool result -> response contract -> final response -> evidence update -> interrupt/resume。教师可
+标记“动作正确 / 提示过多 / 提示过少 / 误区错误 / 引用错误 / 工具错误 / 应人工处理”，标记进入 failure set。
+
+16.3 TA Interrupt Queue
+触发
+
+TA 可操作
+
+学生主动求助
+
+回复 / 接管
+
+coverage insufficient 或来源冲突
+
+补充材料 / 标记需教师
+
+tool 与课程证据冲突
+
+审核 / 升级教师
+
+多次失败无进展
+
+调整局部支架 / 接管
+
+任务需要教师批准
+
+批准 / 编辑 / 拒绝
+
+安全事件
+
+冻结 run / 转管理员
+
+17
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+17. 技术架构与技术栈
+17.1 总体架构
+Browser / Next.js
+| HTTPS + SSE
+FastAPI Application
+|- Auth & RBAC
+|- Course / Knowledge Service
+|- LangGraph Tutor Runtime
+|
+|- Root deterministic graph
+|
+|- Evidence Agent
+|
+|- Diagnosis Agent
+|
+|- Concept / Derivation / Experiment / Project subgraphs
+|
+|- Policy Gate (code)
+|
+|- Verifier Dispatcher (code)
+|
+`- HITL interrupt/resume
+|- Project Service
+|- Analytics / Teacher Intelligence
+`- ModelGateway + EmbeddingGateway
+|
+PostgreSQL + pgvector | Neo4j | Redis | Worker/Sandbox
+
+17.2 技术栈
+层
+
+Backend
+
+Knowledge
+
+Frontend
+Scientific
+Runtime
+Quality
+
+技术
+Python 3.12, FastAPI, LangGraph, PydanticAI/Pydantic v2,
+SQLAlchemy 2, Alembic
+PostgreSQL 15+, pgvector, Neo4j, Neo4j GraphRAG /
+SimpleKGPipeline where useful
+Next.js, React, TypeScript strict, Tailwind, shadcn/ui, TanStack
+Query, KaTeX, Monaco, Plotly.js
+SymPy, NumPy, SciPy, QuTiP, Matplotlib
+Docker Compose, Redis optional for queue/cache, sandbox
+worker
+pytest, Ruff, mypy, Playwright, GitHub Actions compatible
+
+17.3 为什么 LangGraph 现在合理
+PRD V1.0 将 LangGraph 设为“出现跨小时任务、人工暂停恢复、多代理并行、大规模长任务时再考虑”的迁移
+目标。当前知识图谱、Project 长任务和 TA interrupt 已经使这些条件部分成立，因此 V2.0 采用 LangGraph
+custom workflow，但仍保留应用级 deterministic control。
+
+18
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+18. 模型网关、Embedding 与结构化输出
+18.1 LLM Gateway
+LLM_PROVIDER=openai_compatible
+LLM_BASE_URL=https://api.llm.ustc.edu.cn/v1
+LLM_MODEL=deepseek-v4-pro
+LLM_API_KEY=${USTC_API}
+
+• Bearer Token 只在服务端读取，不打印、不提交、不写日志、不进入前端；
+• 业务代码不得直接散落厂商 SDK 调用，统一经过 ModelGateway；
+• 单元测试使用 FakeModelGateway，不产生真实 API 费用；
+• 启动/诊断任务真实探测 streaming、JSON、tool calling、structured output 能力，不凭假设。
+
+18.2 Embedding Gateway
+Embedding 与 Chat LLM 解耦。USTC /chat/completions 不意味着一定存在 /embeddings。系统必须独立配
+置 EMBEDDING_PROVIDER / BASE_URL / API_KEY / MODEL；若学校网关不提供 embedding，可接本地模
+型。禁止伪造 embedding。
+
+18.3 Structured Output
+所有模型节点输出 Pydantic schema；若原生 JSON Schema/tool output 不稳定，降级到 prompted JSON +
+parsing + Pydantic validation + bounded retry。不得保存或要求模型隐藏思维链，只保存短、可审计的
+decision summary。
+
+19. 数据模型与状态持久化
+19.1 PostgreSQL 业务事实
+沿用 V1.0 users/courses/documents/document_versions/document_chunks/publications/policies/
+assignments/conversations/turns/decisions/retrieval_hits/citations/tool_runs/escalations/
+student_evidence/project_* / audit_logs 等表，并新增/扩展以下实体。
+实体
+
+用途
+
+graph_runs
+
+LangGraph run 元数据、thread_id、status、started/ended
+
+graph_interrupts
+
+interrupt payload、reason、status、resume actor/time
+
+graph_node_events
+
+可选 node-level trace projection，不保存隐藏 CoT
+
+evidence_bundles
+
+Evidence Agent 结构化输出及 coverage
+
+diagnoses
+
+Diagnosis Agent 结构化输出
+
+19
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+实体
+
+用途
+
+corpus_coverage
+
+章节/概念的 sufficient/partial/insufficient/needs_ocr
+
+architecture_experiments
+
+B0-B4 对照实验配置与指标
+
+19.2 LangGraph Checkpoint
+生产使用 PostgreSQL-backed checkpointer。Checkpointer 负责 thread-scoped graph state；长期学习证
+据、课程知识与策略仍保存在业务表。checkpoint 必须设置保留策略，避免长期对话无界增长。
+
+20. API 与 SSE 事件
+所有 API 延续 /api/v1。现有 conversation/turn API 保持兼容，内部 runtime 切换为 LangGraph。
+类别
+Conversation
+
+端点/事件
+POST /conversations/{id}/turns；GET /runs/{run_id}/events
+GET /teacher/interrupts；POST
+
+Interrupt
+
+/teacher/interrupts/{id}/resume；POST
+/teacher/interrupts/{id}/take-over
+
+Knowledge
+
+search / node / evidence / subgraph / path / review
+
+Tools
+
+普通学生不能直接任意调用；教师保留受控测试接口
+run.started, node.started, retrieval.completed,
+
+SSE
+
+diagnosis.completed, policy.completed,
+tool.started/completed, run.interrupted, run.resumed,
+response.delta/completed, run.failed
+
+21. 安全、隐私与 Prompt Injection
+• Session + HttpOnly/Secure/SameSite Cookie，Argon2id 密码，后端 RBAC；
+• 学生端无开放浏览器/任意 Cypher/任意 shell；
+• 检索内容始终视为 data，不得覆盖系统 policy；
+• Agent 工具权限由代码注入，不允许模型构造未经授权的工具；
+• interrupt/resume 必须验证 actor role、course scope 与 audit permission；
+• 跨课程数据隔离、prompt injection、答案泄漏与沙箱逃逸继续作为红队硬指标；
+• 不记录 API Key、Session Cookie、数据库密码、隐藏模型推理或无关敏感字段。
+
+20
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+22. 可观测性与轨迹回放
+每个 Tutor Run 生成 trace_id，并可关联 LangGraph thread_id/run_id。记录模型、prompt version、
+token/latency、EvidenceBundle、Diagnosis、Policy Gate 调整、tool calls/results、interrupt、最终回复、
+用户反馈与学习证据更新。
+
+22.1 证据协议
+badge
+
+含义
+
+COURSE_SOURCE
+
+直接课程原文/课件
+
+TEACHER_APPROVED_KG
+
+教师审核的知识图谱 assertion
+
+SYMBOLIC_VERIFICATION
+
+SymPy/形式检查
+
+NUMERICAL_VERIFICATION
+
+NumPy/SciPy 数值检查
+
+SIMULATION
+
+真实模拟结果
+
+CODE_TEST
+
+Sandbox/pytest
+
+MODEL_INFERENCE
+
+模型推断，未获得独立验证
+
+前端不只显示“模型说了什么”，还要显示“这句话凭什么”。
+
+23. 评测体系与单/多智能体对照
+23.1 离线评测
+继续维护至少 200 个标注案例：课程事实与引用、概念误区、推导诊断、符号工具、代码与仿真、答案泄漏、
+Prompt Injection/RBAC。V2.0 新增 graph recovery、interrupt、evidence coverage 与 agent separation 契
+约。
+
+23.2 架构对照
+组
+
+架构
+
+B0
+
+现有 Single-Agent / fixed 10-step baseline
+
+B1
+
+LangGraph behavior-preserving workflow，无 specialist agent
+
+B2
+
+B1 + Evidence Agent
+
+B3
+
+B2 + Diagnosis Agent
+
+B4
+
+B3 + specialist tutors/subgraphs
+
+21
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+B4 不是默认胜者。若 B2/B3 已达到同等质量、成本更低、延迟更短，则应删除无收益 Agent。
+
+23.3 核心指标
+维度
+Grounding
+
+指标
+引用存在率、页码正确率、引用支持率、coverage calibration
+误区识别准确率、first-error localization、missing prerequisite
+
+Diagnosis
+
+precision
+Policy compliance、过早答案率、可执行下一步、transfer check
+
+Pedagogy
+
+质量
+
+Tools
+
+请求 schema 正确率、verifier correctness、inconclusive 保真
+越权工具调用=0、跨课程泄漏=0、sandbox network=0、prompt
+
+Safety
+
+injection 成功率
+P95 latency、token cost、agent calls/turn、checkpoint
+
+Runtime
+
+recovery、interrupt resume success
+
+23.4 Competition Threshold
+指标
+
+最低要求
+
+课程引用存在率
+
+>=95%
+
+人工抽检引用支持率
+
+>=90%
+
+受限任务完整答案泄漏率
+
+<=5%
+
+deterministic verifier 单测通过率
+
+>=95%
+
+非授权工具调用
+
+0
+
+跨用户/跨课程泄漏
+
+0
+
+黄金闭环 E2E
+
+100%
+
+interrupt/resume E2E
+
+100%
+
+server error 后输入保留
+
+100%
+
+22
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+24. 测试策略
+层级
+
+Unit
+
+Model contract
+
+Graph contract
+
+Integration
+
+Live infra smoke
+
+E2E
+
+重点
+Policy Gate、RBAC、retrieval fusion、citation、verifier、
+evidence update、route functions、reducers
+schema、非法枚举、缺字段、低置信、非 JSON、超时、prompt
+injection、无证据
+节点只读/写允许字段、subgraph I/O、checkpoint、retry、
+idempotency、interrupt rules
+PostgreSQL/pgvector、Neo4j、Redis、Fake LLM、Fake
+Embedding、sandbox
+真实 PostgreSQL/Neo4j/Redis + USTC model；仅少量，不作为
+单测依赖
+学生概念/推导/实验/项目、TA interrupt、教师政策、受限作业、
+失败恢复
+
+特别要求：SQLite/InMemoryGraphStore 通过不代表生产通过。必须保留 live-infra regression 测试，以捕获
+此前 NUL byte、Neo4j driver 参数冲突等只在真实依赖出现的问题。
+
+25. 仓库结构与开发规范
+quantum-agent/
+apps/web/
+services/api/quantum_agent/
+auth/ courses/ knowledge/ tutor/ policies/ tools/ projects/ analytics/ llm/
+tutor/graphs/
+root.py
+concept.py
+derivation.py
+experiment.py
+project.py
+teacher_intelligence.py
+tutor/agents/
+evidence.py
+diagnosis.py
+tutors.py
+tutor/state.py
+tutor/nodes/
+tutor/routing.py
+services/worker/
+content/
+prompts/
+docs/
+tests/e2e/
+docker-compose.yml
+Makefile
+
+23
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+• AGENTS.md / CLAUDE.md 保持短，只做 repo map 与不可违反规则；
+• 架构细节进入 docs/architecture.md、docs/langgraph.md、docs/knowledge-graph.md、docs/
+evals.md；
+• 每次 Phase 结束运行 lint/typecheck/unit/integration/E2E，更新 changelog 并提交 commit；
+• 不使用 Mock UI 假装后端完成；演示图表必须来自真实运行数据。
+
+26. 2026-08-23 至 2026-09-06 开发计划
+范围原则
+比赛只剩约两周。V2.0 不允许“为了多智能体”破坏已经可运行的单智能体系统。每一步都必须保持可回
+退。
+
+阶段
+
+日期
+
+交付
+Yan/Weinberg scope；关键概
+
+P0 语料修复
+
+8/23-8/24
+
+念 narrative coverage；scanonly 队列
+
+退出条件
+
+黄金路径
+coverage=SUFFICIENT
+
+现有 10-step 一比一迁移；
+P1 LangGraph 迁移
+
+8/24-8/26
+
+Postgres checkpointer；SSE
+
+B1 与 B0 核心行为无回归
+
+保持兼容
+Evidence Agent + Diagnosis
+P2 Specialist 核心
+
+8/26-8/29
+
+Agent；Concept/Derivation
+subgraph
+
+grounding/diagnosis >= B0 且
+policy 无回归
+
+Experiment/Project
+P3 Experiment/Project + HITL
+
+8/29-8/31
+
+subgraph；interrupt/resume
+
+黄金闭环 + interrupt E2E 100%
+
+；TA queue
+P4 架构对照
+
+9/1-9/2
+
+P5 安全/性能/视觉
+
+9/3-9/4
+
+B0-B4 跑核心 eval；删除无收
+益 Agent
+红队、live infra、E2E、trace
+UI、演示数据
+
+形成可复现实验表
+
+DoD 指标达标
+
+部署、README、架构图、演示
+P6 发布
+
+9/5-9/6
+
+脚本/视频、评测报告、Release
+tag
+
+27. 比赛演示脚本
+1. 教师端先展示课程知识图谱：打开“隧穿”概念，显示前置关系与来源页码。
+24
+
+可从新机器一键部署与演示
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+2. 学生进入“做实验 - 隧穿与波包”，系统要求预测平均能量低于势垒时的结果。
+3. 学生回答“完全不能穿过”；Diagnosis Agent 标记候选误区，但不直接泄露答案。
+4. Evidence Agent 返回课程证据；Policy Gate 只允许最小提示与运行仿真。
+5. 学生运行真实波包模拟，Plotly/动画展示反射与透射；Verifier 显示总概率守恒。
+6. 学生解释“透射不意味着获得额外能量”；系统检查解释并给双势垒共振迁移题。
+7. 故意触发一个需要 TA 的条件（例如来源冲突或重复失败），展示 LangGraph interrupt。
+8. TA 在教师端查看证据、诊断、Policy、工具轨迹，选择“编辑并恢复”；原 thread 继续执行。
+9. 教师修改某计分作业最大提示 H4 -> H2；学生再次询问，Policy Gate 自动降级模型请求。
+10. 最后展示 B0-B4 评测表：说明哪些 Agent 真正带来收益，哪些被保留/删除。
+演示只讲一个故事：不是“我们用了多少 Agent”，而是“系统如何在课程证据、教学政策、科学验证和教师控
+制下帮助学生完成一次真实学习闭环”。
+
+28. Definition of Done
+• Docker Compose 一键启动；无硬编码 API Key；
+• 学生 / TA / 教师 / Admin 权限隔离，跨课程数据泄漏为 0；
+• 课程知识图谱可由教师审核、发布，学生所有事实性课程回答可回到来源；
+• 关键课程主题具有 SUFFICIENT narrative evidence，不能因可避免的数据缺口长期 model_degraded；
+• 现有单智能体 10-step 行为已无回归迁移到 LangGraph；
+• PostgreSQL checkpointer 可在服务重启/人工暂停后恢复 thread；
+• 至少一个 TA interrupt/resume 流程真实 E2E 通过；
+• Policy Gate、RBAC、Verifier、sandbox、citation contract 全部仍由代码强制；
+• Evidence Agent 与 Diagnosis Agent 有离线指标证明价值；任何无收益 Agent 已删除或禁用；
+• 至少 5 类 verifier 可运行，inconclusive 不被模型改写；
+• 隧穿 Project 从预测到迁移题完整运行，其他 3 Project 可展示并启动；
+• 教师可回放完整 graph trace，并查看误区、提示依赖、工具、interrupt；
+• 黄金闭环 E2E 100%，interrupt/resume E2E 100%，live infra smoke 通过；
+• 所有数据库迁移可执行并提供 downgrade；
+• README 可让新机器部署；Release 保存评测报告、演示脚本、架构说明、安全说明与备份；
+• 无伪造引用、无自动替学生提交作业、无把“多智能体”本身当成功指标。
+
+25
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+29. 工程参考资料
+本 PRD 的产品原则以 PRD V1.0 与项目当前已验证实现为权威基础；以下外部资料仅用于校准框架能力与工程选
+型，不替代课程教学内容。
+编号
+
+资料
+
+用于本 PRD 的结论
+checkpointer 保存 thread state；持久化
+
+R1
+
+LangGraph official docs - Persistence
+
+支持会话连续、HITL、恢复与 fault
+tolerance；生产应使用持久化
+checkpointer
+interrupt 可暂停图并保存状态；使用同
+
+R2
+
+LangGraph official docs - Interrupts
+
+thread_id + Command(resume=...) 恢
+复；interrupt 前副作用需幂等
+
+R3
+
+R4
+
+LangChain official docs - Custom
+workflow
+
+custom workflow 可混合 deterministic
+logic 与 agentic behavior，并支持分支、
+循环、并行、agent-as-node
+
+Neo4j official - GraphRAG Python
+Package
+
+支持 SimpleKGPipeline、显式实体/关系
+schema、VectorRetriever 与
+VectorCypherRetriever
+Course-bounded、Teacher-controlled、
+
+R5
+
+Quantum Agent PRD V1.0
+
+Workflow-first、Tool-verified、Studentmodel-lite 与完整产品边界
+
+R6
+
+Quantum Agent 证据审计/工程决策报告
+
+结构化教学、工具验证、教师治理优先；多
+智能体必须有明确适用条件与实验证据
+
+访问时间：2026-08-23。
+
+附录 A. Codex 实施硬约束（摘要）
+• 先做 behavior-preserving migration，不重写可工作的知识/政策/验证代码；
+• LangGraph 是 runtime，不是让模型接管路由的理由；
+• Agent 只允许 Evidence、Diagnosis、Tutor/Teacher Intelligence 等高认知职责；
+• Policy Gate、Verifier、RBAC、引用校验、长期学习证据写入保持 deterministic；
+• 所有 Agent 输入输出 Pydantic 校验，禁止无限自循环；
+• 每个 agent/subgraph 只获得最小必要 context；
+• 每个 interrupt 前的 side effect 必须幂等；
+• 保留 B0 baseline，并持续运行架构消融；
+
+26
+
+Quantum Agent · PRD V2.0 · 2026-08-23
+
+• 不解决 P0 语料 coverage 前，不用多智能体结果做模型能力结论；
+• 严禁泄露 USTC_API 或任何 secret。
+
+附录 B. 交付与验收命令
+命令
+
+用途
+
+make bootstrap
+
+初始化依赖、数据库与本地配置
+
+make dev / make up
+
+启动开发或 Docker Compose 全栈
+
+make test / make lint / make typecheck
+
+单测、静态检查与类型检查
+
+make e2e
+
+Playwright 黄金闭环与 HITL E2E
+
+make eval
+
+运行 200+ 离线评测与 B0-B4 架构对照
+
+make kg-audit
+
+输出节点/关系/证据/coverage 质量报告
+
+make live-smoke
+
+真实 PostgreSQL/Neo4j/Redis + 受控 USTC 模型 smoke
+
+make backup / make restore
+
+发布前备份与恢复演练
+
+最终 Release 必须同时包含：源码、Docker 配置、Alembic migration、seed/demo 数据、自动测试、评测报
+告、架构图、操作手册、安全说明、演示脚本、演示账号初始化方式和 release tag。
+
+27
+
+

@@ -22,7 +22,7 @@ function fallbackAnswer(request: TutorRequest, citations: Citation[], misconcept
     mathematics: "请优先检查归一化、边界条件、步长收敛与守恒量；真正的运行结果必须来自隔离沙箱。",
     misconception: misconception ?? "代码能够运行不等于物理结论可信。",
     checkQuestion: "请贴出最小可复现代码、期望结果和实际报错；哪一行最先偏离预期？",
-    suggestedAction: "配置 USTC_API_KEY 后启用编程实验能力，或使用受限沙箱运行最小样例。",
+    suggestedAction: "配置 USTC_API 后启用编程实验能力，或使用受限沙箱运行最小样例。",
   };
   if ((capability === "vision" || capability === "vision-reasoner") && request.attachments?.length) return {
     conclusion: "图片已安全接收，但当前未配置视觉模型，因此我不会猜测其中的公式或图像细节。",
@@ -30,7 +30,7 @@ function fallbackAnswer(request: TutorRequest, citations: Citation[], misconcept
     mathematics: primary ? `可先对照：${primary.chapter}，第 ${primary.pages} 页。` : "当前没有足够文本线索定位课件页。",
     misconception: misconception ?? "在无法可靠读取图片时，直接推断公式会制造不可追溯错误。",
     checkQuestion: "请补充图片所属章节或粘贴关键公式文本，可以立即继续课程检索。",
-    suggestedAction: "配置 USTC_API_KEY 后重新提交图片，系统会调用视觉能力并保留页码引用。",
+    suggestedAction: "配置 USTC_API 后重新提交图片，系统会调用视觉能力并保留页码引用。",
   };
   if (request.mode === "derivation") return {
     conclusion: "先检查第一处会改变后续结论的错误，而不是重写整份推导。",

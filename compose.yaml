@@ -1,0 +1,445 @@
+name: quantum-agent
+
+x-database-environment: &database-environment
+  DATABASE_URL: >-
+    postgresql+asyncpg://${POSTGRES_USER:-quantum_agent}:${POSTGRES_PASSWORD_URLENCODED:?Set POSTGRES_PASSWORD_URLENCODED to the percent-encoded database password}@postgres:5432/${POSTGRES_DB:-quantum_agent}
+
+x-graph-environment: &graph-environment
+  NEO4J_URI: bolt://neo4j:7687
+  NEO4J_USER: neo4j
+  NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set a non-default NEO4J_PASSWORD}
+  NEO4J_DATABASE: neo4j
+
+x-redis-environment: &redis-environment
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a non-default REDIS_PASSWORD}
+
+x-api-runtime: &api-runtime
+  image: quantum-agent-api:${QA_IMAGE_TAG:-local}
+  build:
+    context: ./services/api
+    dockerfile: Dockerfile
+    target: runtime
+  init: true
+  user: "10001:10001"
+  read_only: true
+  tmpfs:
+    - /tmp:size=256m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  networks:
+    - backend
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg15-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-quantum_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-quantum_agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a non-default POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: --data-checksums --encoding=UTF8
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    shm_size: 256mb
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    stop_grace_period: 60s
+    networks:
+      - backend
+
+  neo4j:
+    image: neo4j:5.26.29-community
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set a non-default NEO4J_PASSWORD}
+      NEO4J_server_default__listen__address: 0.0.0.0
+      NEO4J_server_bolt_listen__address: :7687
+      NEO4J_server_http_listen__address: :7474
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          cypher-shell -a bolt://127.0.0.1:7687 -u neo4j
+          -p "$${NEO4J_AUTH#*\/}" 'RETURN 1;' >/dev/null
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    stop_grace_period: 60s
+    networks:
+      - backend
+
+  redis:
+    image: redis:7.4.10-alpine3.21
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a non-default REDIS_PASSWORD}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --requirepass
+      - ${REDIS_PASSWORD:?Set a non-default REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli ping | grep -q PONG
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    stop_grace_period: 30s
+    networks:
+      - backend
+
+  migrate:
+    <<: *api-runtime
+    restart: "no"
+    environment:
+      <<: *database-environment
+      ENVIRONMENT: ${API_ENVIRONMENT:-development}
+    command:
+      - quantum-agent
+      - migrate
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+
+  api:
+    <<: *api-runtime
+    restart: unless-stopped
+    environment:
+      <<: [*database-environment, *graph-environment, *redis-environment]
+      ENVIRONMENT: ${API_ENVIRONMENT:-development}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local_hashing}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      USTC_BASE_URL: ${USTC_BASE_URL:-https://api.llm.ustc.edu.cn/v1}
+      USTC_API: ${USTC_API:?Set USTC_API in the backend runtime environment}
+      USTC_MODEL: ${USTC_MODEL:-deepseek-v4-pro}
+      USTC_VISION_MODEL: ${USTC_VISION_MODEL:-qwen3.8-chat}
+      USTC_MODEL_QUICK: ${USTC_MODEL_QUICK:-deepseek-v4-flash-ascend1}
+      USTC_MODEL_VISION_REASONER: ${USTC_MODEL_VISION_REASONER:-qwen3.8-reasoner}
+      USTC_MODEL_CODE: ${USTC_MODEL_CODE:-glm-5.2}
+      USTC_MODEL_EMBEDDING: ${USTC_MODEL_EMBEDDING:-qwen3-embedding}
+      USTC_MODEL_RERANK: ${USTC_MODEL_RERANK:-qwen3-reranker}
+      USTC_MODEL_MINERU: ${USTC_MODEL_MINERU:-mineru}
+      USTC_MODEL_OCR: ${USTC_MODEL_OCR:-unlimited-ocr}
+      ATTACHMENT_STORAGE_ROOT: /var/lib/quantum-agent/attachments
+      ATTACHMENT_MAX_BYTES: ${ATTACHMENT_MAX_BYTES:-26214400}
+      ATTACHMENT_MAX_IMAGE_PIXELS: ${ATTACHMENT_MAX_IMAGE_PIXELS:-40000000}
+      ATTACHMENT_MAX_IMAGE_DIMENSION: ${ATTACHMENT_MAX_IMAGE_DIMENSION:-16384}
+      ATTACHMENT_MAX_DOCUMENT_PAGES: ${ATTACHMENT_MAX_DOCUMENT_PAGES:-500}
+      ATTACHMENT_MAX_ARCHIVE_ENTRIES: ${ATTACHMENT_MAX_ARCHIVE_ENTRIES:-5000}
+      ATTACHMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES: ${ATTACHMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES:-262144000}
+      ATTACHMENT_MAX_ARCHIVE_COMPRESSION_RATIO: ${ATTACHMENT_MAX_ARCHIVE_COMPRESSION_RATIO:-100}
+      XDG_CACHE_HOME: /tmp/quantum-agent-cache
+      MPLCONFIGDIR: /tmp/matplotlib
+    command:
+      - uvicorn
+      - quantum_agent.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --forwarded-allow-ips=${API_FORWARDED_ALLOW_IPS:-127.0.0.1}
+    ports:
+      - 127.0.0.1:${API_PORT:-8000}:8000
+    volumes:
+      - type: bind
+        source: ./knowledge
+        target: /workspace/knowledge
+        read_only: true
+      - type: volume
+        source: attachment_data
+        target: /var/lib/quantum-agent/attachments
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).read()
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      neo4j:
+        condition: service_healthy
+        restart: true
+      redis:
+        condition: service_healthy
+        restart: true
+    networks:
+      - backend
+      - edge
+
+  web:
+    image: quantum-agent-web:${QA_IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      target: runtime
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      QUANTUM_API_BASE_URL: http://api:8000
+      XDG_CACHE_HOME: /tmp/quantum-agent-web-cache
+      WRANGLER_LOG_PATH: /tmp/wrangler.log
+      MINIFLARE_REGISTRY_PATH: /tmp/miniflare-registry
+    ports:
+      - 127.0.0.1:${WEB_PORT:-3000}:3000
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3000/').then(r => {
+            if (!r.ok) process.exit(1)
+          }).catch(() => process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      api:
+        condition: service_healthy
+        restart: true
+    networks:
+      - edge
+
+  ingest:
+    <<: *api-runtime
+    profiles:
+      - jobs
+    restart: "no"
+    environment:
+      <<: *database-environment
+      ENVIRONMENT: ${API_ENVIRONMENT:-development}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local_hashing}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      XDG_CACHE_HOME: /tmp/quantum-agent-cache
+    command:
+      - quantum-agent
+      - ingest
+      - --manifest
+      - /workspace/content/quantum_course/manifest.toml
+    volumes:
+      - type: bind
+        source: ./content
+        target: /workspace/content
+        read_only: true
+      - type: bind
+        source: ./knowledge
+        target: /workspace/knowledge
+        read_only: true
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - backend
+      - edge
+
+  graph-sync-once:
+    <<: *api-runtime
+    profiles:
+      - jobs
+    restart: "no"
+    environment:
+      <<: [*database-environment, *graph-environment]
+      ENVIRONMENT: ${API_ENVIRONMENT:-development}
+    command:
+      - quantum-agent
+      - sync-graph
+      - --limit
+      - ${GRAPH_SYNC_BATCH_SIZE:-100}
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      neo4j:
+        condition: service_healthy
+        restart: true
+
+  graph-sync-worker:
+    <<: *api-runtime
+    profiles:
+      - workers
+    restart: unless-stopped
+    environment:
+      <<: [*database-environment, *graph-environment]
+      ENVIRONMENT: ${API_ENVIRONMENT:-development}
+    command:
+      - quantum-agent
+      - sync-graph
+      - --watch
+      - --limit
+      - ${GRAPH_SYNC_BATCH_SIZE:-100}
+      - --poll-seconds
+      - ${GRAPH_SYNC_POLL_SECONDS:-2}
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      neo4j:
+        condition: service_healthy
+        restart: true
+
+  api-test:
+    image: quantum-agent-api-test:${QA_IMAGE_TAG:-local}
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+      target: test
+    profiles:
+      - tools
+    init: true
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    network_mode: none
+    command:
+      - pytest
+      - -q
+    healthcheck:
+      disable: true
+
+  api-lint:
+    extends:
+      service: api-test
+    profiles:
+      - tools
+    command:
+      - ruff
+      - check
+      - quantum_agent
+      - tests
+      - alembic
+
+  api-live-test:
+    image: quantum-agent-api-test:${QA_IMAGE_TAG:-local}
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+      target: test
+    profiles:
+      - tools
+    init: true
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      <<: [*database-environment, *graph-environment, *redis-environment]
+      ENVIRONMENT: test
+      QA_LIVE_INFRA: "1"
+      QA_LIVE_REQUIRE_CORPUS: ${QA_LIVE_REQUIRE_CORPUS:-0}
+      QUANTUM_API_BASE_URL: http://api:8000
+    command:
+      - pytest
+      - -q
+      - tests/live/test_live_stack.py
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - backend
+
+  api-live-model-test:
+    image: quantum-agent-api-test:${QA_IMAGE_TAG:-local}
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+      target: test
+    profiles:
+      - tools
+    init: true
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      <<: *database-environment
+      ENVIRONMENT: test
+      QA_LIVE_MODEL: "1"
+      QUANTUM_API_BASE_URL: http://api:8000
+      XDG_CACHE_HOME: /tmp/quantum-agent-cache
+      MPLCONFIGDIR: /tmp/matplotlib
+    command:
+      - pytest
+      - -q
+      - tests/live/test_live_multimodal_workflow.py
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - backend
+
+volumes:
+  postgres_data:
+  neo4j_data:
+  neo4j_logs:
+  redis_data:
+  attachment_data:
+
+networks:
+  backend:
+    internal: true
+  edge:

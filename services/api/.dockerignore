@@ -1,0 +1,14 @@
+# The backend image is built from services/api only. Exclude host environments,
+# credentials, and generated test/tool state from that context.
+.venv
+.env
+.env.*
+__pycache__
+**/__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+

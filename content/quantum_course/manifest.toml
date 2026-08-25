@@ -1,0 +1,148 @@
+schema_version = 1
+course_key = "quantum-physics-2026-fall"
+course_title = "量子物理"
+knowledge_root = "knowledge"
+
+[governance]
+canonical_curriculum_edition = "syllabus-2026-fall"
+student_visibility_rule = "published_document_and_approved_knowledge_only"
+unmatched_extraction_status = "REVIEW_REQUIRED"
+chapter_merge_rule = "never_merge_by_number_alone"
+
+[[curriculum_editions]]
+key = "syllabus-2026-fall"
+title = "《量子物理》教学大纲 — 2026 秋"
+chapter_count = 6
+canonical = true
+
+[[curriculum_editions]]
+key = "lecture-decks-2022"
+title = "2022 课件与教师知识图谱课程结构"
+chapter_count = 8
+canonical = false
+
+[[sources]]
+path = "量子物理-教学大纲.docx"
+sha256 = "b70af9b50c701779de8ab753eaacbd576451529a98f993a618f4a5c57baeb3dc"
+kind = "syllabus"
+authority = "course_policy"
+priority = 100
+curriculum_edition = "syllabus-2026-fall"
+locator = "heading_and_paragraph"
+
+[[sources]]
+path = "量子物理-知识图谱(1).xlsx"
+sha256 = "dfbbcda9640f3043fbc8ba921e40861b64497e58244db0ed08eafe98259c51c9"
+kind = "teacher_curated_taxonomy"
+authority = "course_structure"
+priority = 95
+curriculum_edition = "lecture-decks-2022"
+locator = "sheet_and_row"
+claim_scope = "sequence_taxonomy_and_prerequisites"
+
+[[sources]]
+path = "第1-2章.pdf"
+sha256 = "a634f78b021ed4c04e59dd5400f9e1841215bde90e1d9986bbbbba11641e08bb"
+kind = "lecture_deck"
+authority = "course_material"
+priority = 90
+curriculum_edition = "lecture-decks-2022"
+locator = "physical_pdf_page"
+
+[[sources]]
+path = "第三章 单电子原子 .pdf"
+sha256 = "9e890ed8b94e46222ece474d7e5a328c13ccf4f2ea23dd3be2e6c413eabdd1b1"
+kind = "lecture_deck"
+authority = "course_material"
+priority = 90
+curriculum_edition = "lecture-decks-2022"
+locator = "physical_pdf_page"
+
+[[sources]]
+path = "第4章(2).pdf"
+sha256 = "156aac1149a83c324ee9812dcfa29a4223100594e4a03b216bca3d1e16c1479b"
+kind = "lecture_deck"
+authority = "course_material"
+priority = 90
+curriculum_edition = "lecture-decks-2022"
+locator = "physical_pdf_page"
+
+[[sources]]
+path = "第五章 微扰理论.pdf"
+sha256 = "bcaadb64372a64bcb0206461ff7617cd3f19618779c81c43995092675fa35cc0"
+kind = "lecture_deck"
+authority = "course_material"
+priority = 90
+curriculum_edition = "lecture-decks-2022"
+locator = "physical_pdf_page"
+
+[[sources]]
+path = "第六章 多电子原子 .pdf"
+sha256 = "734208007daf24113cb8a3104b7dfb3b7149a6701f2b910317f68875d6e98d27"
+kind = "lecture_deck"
+authority = "course_material"
+priority = 90
+curriculum_edition = "lecture-decks-2022"
+locator = "physical_pdf_page"
+
+[[sources]]
+path = "第七章 双原子分子.pdf"
+sha256 = "bad99b2f22d2dce9a6c0142750ebd815e4817974706dfdf6c3c019542044c91d"
+kind = "lecture_deck"
+authority = "course_material"
+priority = 90
+curriculum_edition = "lecture-decks-2022"
+locator = "physical_pdf_page"
+
+[[sources]]
+path = "第八章 分子光谱.pdf"
+sha256 = "a4ac4cee32c7d31c81dfebb74a94328d3d09ee1cf2de9420d458b5828fca830b"
+kind = "lecture_deck"
+authority = "course_material"
+priority = 90
+curriculum_edition = "lecture-decks-2022"
+locator = "physical_pdf_page"
+
+[[sources]]
+path = "Yan_QPhys.pdf"
+sha256 = "95939bb1a855af623451045a90b2f1d1764d80ff48724279c0beca5de25115f8"
+kind = "supplemental_text"
+authority = "course_reference"
+priority = 70
+locator = "physical_pdf_page_and_printed_label"
+
+[[sources]]
+path = "Steven Weinberg - Lectures on Quantum Mechanics-Cambridge University Press (2012)-1.pdf"
+sha256 = "4b14e546ba7e51c2db0fa544ac517c472f5a76e438701ae203ca0748abd2ae44"
+kind = "textbook"
+authority = "reference"
+priority = 50
+locator = "physical_pdf_page_and_printed_label"
+
+[[sources]]
+path = "量子力学概论（翻译版） (格里菲斯) (z-library.sk, 1lib.sk, z-lib.sk).pdf"
+sha256 = "5bf2d9b05d24fc2b1ae517c79b5de9772729125d3e17d7f02ca56f65e81fa2dd"
+kind = "scanned_textbook"
+authority = "reference"
+priority = 50
+locator = "physical_pdf_page_and_printed_label"
+requires_ocr = true
+initial_status = "REVIEW_REQUIRED"
+
+[[alignment_hints]]
+from = "syllabus-2026-fall:chapter-3"
+to = "lecture-decks-2022:chapter-4"
+reason = "matching representation-theory titles"
+status = "REVIEW_REQUIRED"
+
+[[alignment_hints]]
+from = "syllabus-2026-fall:chapter-4"
+to = "lecture-decks-2022:chapter-3,lecture-decks-2022:chapter-6"
+reason = "2026 atomic-structure chapter combines single- and many-electron deck units"
+status = "REVIEW_REQUIRED"
+
+[[alignment_hints]]
+from = "syllabus-2026-fall:chapter-6"
+to = "lecture-decks-2022:chapter-7,lecture-decks-2022:chapter-8"
+reason = "2026 diatomic-molecule chapter includes the separate spectroscopy deck"
+status = "REVIEW_REQUIRED"

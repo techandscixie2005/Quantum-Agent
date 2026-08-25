@@ -2,6 +2,14 @@
 
 # dependencies
 /node_modules
+/.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 /.pnp
 .pnp.*
 .yarn/*
@@ -30,6 +38,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
+.dev.vars
 
 # vercel
 .vercel
@@ -49,3 +58,11 @@ next-env.d.ts
 
 # research papers (large PDFs, not project source)
 /*.pdf
+
+# Windows ADS artifacts (never commit)
+*:Zone.Identifier
+
+# Playwright ephemeral output
+/test-results/
+/playwright-report/
+/playwright/.cache/

@@ -1,0 +1,74 @@
+# syntax=docker/dockerfile:1.7
+
+ARG NODE_IMAGE=node:22.23.2-bookworm-slim
+
+FROM ${NODE_IMAGE} AS dependencies
+
+ENV NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
+WORKDIR /workspace
+
+COPY package.json package-lock.json .npmrc ./
+
+RUN npm ci
+
+
+FROM dependencies AS build
+
+ENV NODE_ENV=production \
+    SITES_BUILD_TIMEOUT=10m \
+    WRANGLER_WRITE_LOGS=false
+
+COPY .openai ./.openai
+COPY app ./app
+COPY build ./build
+COPY db ./db
+COPY drizzle ./drizzle
+COPY lib ./lib
+COPY public ./public
+COPY scripts ./scripts
+COPY types ./types
+COPY worker ./worker
+COPY drizzle.config.ts eslint.config.mjs next.config.ts postcss.config.mjs tsconfig.json vite.config.ts ./
+
+RUN npm run build
+
+
+FROM ${NODE_IMAGE} AS runtime
+
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=3000 \
+    XDG_CACHE_HOME=/tmp/quantum-agent-web-cache \
+    WRANGLER_WRITE_LOGS=false \
+    WRANGLER_LOG_PATH=/tmp/wrangler.log \
+    MINIFLARE_REGISTRY_PATH=/tmp/miniflare-registry
+
+WORKDIR /workspace
+
+COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
+COPY --from=build --chown=node:node /workspace/dist ./dist
+COPY --from=build --chown=node:node /workspace/.openai ./.openai
+COPY --from=build --chown=node:node /workspace/app ./app
+COPY --from=build --chown=node:node /workspace/build ./build
+COPY --from=build --chown=node:node /workspace/db ./db
+COPY --from=build --chown=node:node /workspace/drizzle ./drizzle
+COPY --from=build --chown=node:node /workspace/lib ./lib
+COPY --from=build --chown=node:node /workspace/public ./public
+COPY --from=build --chown=node:node /workspace/types ./types
+COPY --from=build --chown=node:node /workspace/worker ./worker
+COPY --from=build --chown=node:node /workspace/package.json /workspace/package-lock.json ./
+COPY --from=build --chown=node:node /workspace/drizzle.config.ts /workspace/next.config.ts ./
+COPY --from=build --chown=node:node /workspace/postcss.config.mjs /workspace/tsconfig.json ./
+COPY --from=build --chown=node:node /workspace/vite.config.ts ./
+
+USER node
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=12 \
+    CMD ["node", "-e", "fetch('http://127.0.0.1:3000/').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+
+CMD ["npm", "start", "--", "--host", "0.0.0.0", "--port", "3000"]

@@ -55,8 +55,8 @@ test("demo tutor completes the bounded workflow without an API key", async () =>
 });
 
 test("server capability routing uses USTC defaults without exposing a client model selector", () => {
-  const quick = providerConfigForCapability("quick", { USTC_API_KEY: "test-key" });
-  const code = providerConfigForCapability("code", { USTC_API_KEY: "test-key" });
+  const quick = providerConfigForCapability("quick", { USTC_API: "test-key" });
+  const code = providerConfigForCapability("code", { USTC_API: "test-key" });
   assert.equal(quick.provider, "ustc");
   assert.equal(quick.model, "deepseek-v4-flash-ascend1");
   assert.equal(code.model, "glm-5.2");

@@ -1,0 +1,37 @@
+# Keep the frontend build context small and prevent local credentials or
+# developer state from being sent to the Docker daemon/remote builder.
+.git
+.github
+.claude
+.omc
+.sites-runtime
+.vinext
+.wrangler
+.next
+dist
+node_modules
+playwright-report
+
+.env
+.env.*
+.dev.vars
+*.pem
+
+# The web image copies only the application paths named in Dockerfile.web.
+# Course sources and the Python service are mounted/built through separate,
+# deliberately scoped contexts.
+content
+courseware-source
+design-system
+docs
+examples
+knowledge
+services
+tests
+
+*.pdf
+*.pdf:Zone.Identifier
+*.tsbuildinfo
+coverage
+out
+

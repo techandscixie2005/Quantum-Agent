@@ -1,0 +1,1599 @@
+{
+  "case_results": [
+    {
+      "agent_calls": 1,
+      "case_id": "normalization-b0",
+      "latency_ms": 410.0,
+      "metrics": {
+        "answer_leakage_detected": true,
+        "checkpoint_recovery": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Checkpoint recovery was not exercised in this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "citation_correctness": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "0/0 emitted locators valid; 0/1 required citations recovered.",
+          "numerator": 0.0,
+          "passed": false,
+          "score": 0.0,
+          "threshold": 1.0
+        },
+        "citation_support": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No observed course-fact claims require citation support.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "coverage_calibration": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected SUFFICIENT; observed PARTIAL.",
+          "numerator": 0.0,
+          "passed": false,
+          "score": 0.0,
+          "threshold": 1.0
+        },
+        "diagnosis_accuracy": {
+          "applicable": true,
+          "denominator": 2.0,
+          "detail": "Targets 0/1 gold with 1 emitted; misconceptions 0/1 gold with 0 emitted.",
+          "numerator": 0.0,
+          "passed": false,
+          "score": 0.0,
+          "threshold": 1.0
+        },
+        "first_error_localization": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected first error at step 1; observed 3.",
+          "numerator": 0.0,
+          "passed": false,
+          "score": 0.0,
+          "threshold": 1.0
+        },
+        "interrupt_resume_success": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Interrupt/resume was not exercised in this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "leakage_reasons": [
+          "full_solution_released",
+          "forbidden_fragment:psi = 1/sqrt(L)"
+        ],
+        "missing_prerequisite_accuracy": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "0/1 gold prerequisites matched with 0 emitted.",
+          "numerator": 0.0,
+          "passed": false,
+          "score": 0.0,
+          "threshold": 1.0
+        },
+        "multimodal_formula_transcription": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No formula transcription gold labels are present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_provenance": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal page/slide provenance label is present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_structure": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal structure labels are present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_transcription": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal transcription gold label is present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "policy_compliance": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Observed H4 under maximum H2; leakage=True.",
+          "numerator": 0.0,
+          "passed": false,
+          "score": 0.0,
+          "threshold": 1.0
+        },
+        "verifier_correctness": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected FAIL; tool=FAIL, response=PASS.",
+          "numerator": 0.0,
+          "passed": false,
+          "score": 0.0,
+          "threshold": 1.0
+        }
+      },
+      "scenario_id": "normalization-first-error",
+      "token_cost_usd": 0.0068,
+      "token_count": 680,
+      "variant": "B0"
+    },
+    {
+      "agent_calls": 1,
+      "case_id": "normalization-b1",
+      "latency_ms": 520.0,
+      "metrics": {
+        "answer_leakage_detected": false,
+        "checkpoint_recovery": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "checkpoint_recovered=True.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "citation_correctness": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "1/1 emitted locators valid; 1/1 required citations recovered.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "citation_support": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "1/1 course-fact claims have labeled source support.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "coverage_calibration": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected SUFFICIENT; observed SUFFICIENT.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "diagnosis_accuracy": {
+          "applicable": true,
+          "denominator": 2.0,
+          "detail": "Targets 1/1 gold with 1 emitted; misconceptions 0/1 gold with 0 emitted.",
+          "numerator": 1.0,
+          "passed": false,
+          "score": 0.5,
+          "threshold": 1.0
+        },
+        "first_error_localization": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected first error at step 1; observed 2.",
+          "numerator": 0.0,
+          "passed": false,
+          "score": 0.0,
+          "threshold": 1.0
+        },
+        "interrupt_resume_success": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Interrupt/resume was not exercised in this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "leakage_reasons": [],
+        "missing_prerequisite_accuracy": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "0/1 gold prerequisites matched with 0 emitted.",
+          "numerator": 0.0,
+          "passed": false,
+          "score": 0.0,
+          "threshold": 1.0
+        },
+        "multimodal_formula_transcription": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No formula transcription gold labels are present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_provenance": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal page/slide provenance label is present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_structure": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal structure labels are present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_transcription": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal transcription gold label is present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "policy_compliance": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Observed H2 under maximum H2; leakage=False.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "verifier_correctness": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected FAIL; tool=FAIL, response=FAIL.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        }
+      },
+      "scenario_id": "normalization-first-error",
+      "token_cost_usd": 0.0072,
+      "token_count": 720,
+      "variant": "B1"
+    },
+    {
+      "agent_calls": 2,
+      "case_id": "normalization-b2",
+      "latency_ms": 610.0,
+      "metrics": {
+        "answer_leakage_detected": false,
+        "checkpoint_recovery": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "checkpoint_recovered=True.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "citation_correctness": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "1/1 emitted locators valid; 1/1 required citations recovered.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "citation_support": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "1/1 course-fact claims have labeled source support.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "coverage_calibration": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected SUFFICIENT; observed SUFFICIENT.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "diagnosis_accuracy": {
+          "applicable": true,
+          "denominator": 2.0,
+          "detail": "Targets 1/1 gold with 1 emitted; misconceptions 0/1 gold with 0 emitted.",
+          "numerator": 1.0,
+          "passed": false,
+          "score": 0.5,
+          "threshold": 1.0
+        },
+        "first_error_localization": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected first error at step 1; observed 2.",
+          "numerator": 0.0,
+          "passed": false,
+          "score": 0.0,
+          "threshold": 1.0
+        },
+        "interrupt_resume_success": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Interrupt/resume was not exercised in this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "leakage_reasons": [],
+        "missing_prerequisite_accuracy": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "0/1 gold prerequisites matched with 0 emitted.",
+          "numerator": 0.0,
+          "passed": false,
+          "score": 0.0,
+          "threshold": 1.0
+        },
+        "multimodal_formula_transcription": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No formula transcription gold labels are present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_provenance": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal page/slide provenance label is present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_structure": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal structure labels are present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_transcription": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal transcription gold label is present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "policy_compliance": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Observed H2 under maximum H2; leakage=False.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "verifier_correctness": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected FAIL; tool=FAIL, response=FAIL.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        }
+      },
+      "scenario_id": "normalization-first-error",
+      "token_cost_usd": 0.0079,
+      "token_count": 790,
+      "variant": "B2"
+    },
+    {
+      "agent_calls": 3,
+      "case_id": "normalization-b3",
+      "latency_ms": 735.0,
+      "metrics": {
+        "answer_leakage_detected": false,
+        "checkpoint_recovery": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "checkpoint_recovered=True.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "citation_correctness": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "1/1 emitted locators valid; 1/1 required citations recovered.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "citation_support": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "1/1 course-fact claims have labeled source support.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "coverage_calibration": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected SUFFICIENT; observed SUFFICIENT.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "diagnosis_accuracy": {
+          "applicable": true,
+          "denominator": 2.0,
+          "detail": "Targets 1/1 gold with 1 emitted; misconceptions 1/1 gold with 1 emitted.",
+          "numerator": 2.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "first_error_localization": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected first error at step 1; observed 1.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "interrupt_resume_success": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Interrupt/resume was not exercised in this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "leakage_reasons": [],
+        "missing_prerequisite_accuracy": {
+          "applicable": true,
+          "denominator": 2.0,
+          "detail": "1/1 gold prerequisites matched with 1 emitted.",
+          "numerator": 2.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "multimodal_formula_transcription": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No formula transcription gold labels are present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_provenance": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal page/slide provenance label is present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_structure": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal structure labels are present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_transcription": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal transcription gold label is present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "policy_compliance": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Observed H2 under maximum H2; leakage=False.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "verifier_correctness": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected FAIL; tool=FAIL, response=FAIL.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        }
+      },
+      "scenario_id": "normalization-first-error",
+      "token_cost_usd": 0.0093,
+      "token_count": 930,
+      "variant": "B3"
+    },
+    {
+      "agent_calls": 4,
+      "case_id": "normalization-b4",
+      "latency_ms": 820.0,
+      "metrics": {
+        "answer_leakage_detected": false,
+        "checkpoint_recovery": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "checkpoint_recovered=True.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "citation_correctness": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "1/1 emitted locators valid; 1/1 required citations recovered.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "citation_support": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "1/1 course-fact claims have labeled source support.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "coverage_calibration": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected SUFFICIENT; observed SUFFICIENT.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "diagnosis_accuracy": {
+          "applicable": true,
+          "denominator": 2.0,
+          "detail": "Targets 1/1 gold with 1 emitted; misconceptions 1/1 gold with 1 emitted.",
+          "numerator": 2.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "first_error_localization": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected first error at step 1; observed 1.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "interrupt_resume_success": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "triggered=True, resumed=True, same_thread=True.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "leakage_reasons": [],
+        "missing_prerequisite_accuracy": {
+          "applicable": true,
+          "denominator": 2.0,
+          "detail": "1/1 gold prerequisites matched with 1 emitted.",
+          "numerator": 2.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "multimodal_formula_transcription": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No formula transcription gold labels are present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_provenance": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal page/slide provenance label is present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_structure": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal structure labels are present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_transcription": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal transcription gold label is present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "policy_compliance": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Observed H2 under maximum H2; leakage=False.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "verifier_correctness": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected FAIL; tool=FAIL, response=FAIL.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        }
+      },
+      "scenario_id": "normalization-first-error",
+      "token_cost_usd": 0.0101,
+      "token_count": 1010,
+      "variant": "B4"
+    },
+    {
+      "agent_calls": 3,
+      "case_id": "handwritten-derivation-b4",
+      "latency_ms": 1450.0,
+      "metrics": {
+        "answer_leakage_detected": false,
+        "checkpoint_recovery": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Checkpoint recovery was not exercised in this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "citation_correctness": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No required course citations in the gold case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "citation_support": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No observed course-fact claims require citation support.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "coverage_calibration": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Coverage was not labeled for this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "diagnosis_accuracy": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Diagnosis was not labeled for this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "first_error_localization": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "First-error localization was not labeled for this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "interrupt_resume_success": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Interrupt/resume was not exercised in this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "leakage_reasons": [],
+        "missing_prerequisite_accuracy": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Missing prerequisites were not labeled for this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_formula_transcription": {
+          "applicable": true,
+          "denominator": 2.0,
+          "detail": "2 formulas emitted for 2 gold formulas; mean edit similarity=1.000000.",
+          "numerator": 2.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 0.95
+        },
+        "multimodal_provenance": {
+          "applicable": true,
+          "denominator": 4.0,
+          "detail": "Locator field accuracy=1.000000 across 4 labeled fields.",
+          "numerator": 4.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "multimodal_structure": {
+          "applicable": true,
+          "denominator": 3.0,
+          "detail": "Scored structure components: step_count, concepts, confidence_confirmation.",
+          "numerator": 3.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "multimodal_transcription": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Normalized transcription edit similarity=1.000000.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 0.95
+        },
+        "policy_compliance": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Observed H1 under maximum H2; leakage=False.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "verifier_correctness": {
+          "applicable": true,
+          "denominator": 1.0,
+          "detail": "Expected FAIL; tool=FAIL, response=FAIL.",
+          "numerator": 1.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        }
+      },
+      "scenario_id": "handwritten-normalization",
+      "token_cost_usd": 0.0128,
+      "token_count": 1280,
+      "variant": "B4"
+    },
+    {
+      "agent_calls": 2,
+      "case_id": "simulation-plot-b4",
+      "latency_ms": 980.0,
+      "metrics": {
+        "answer_leakage_detected": null,
+        "checkpoint_recovery": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Checkpoint recovery was not exercised in this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "citation_correctness": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No required course citations in the gold case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "citation_support": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No observed course-fact claims require citation support.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "coverage_calibration": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Coverage was not labeled for this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "diagnosis_accuracy": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Diagnosis was not labeled for this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "first_error_localization": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "First-error localization was not labeled for this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "interrupt_resume_success": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Interrupt/resume was not exercised in this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "leakage_reasons": [],
+        "missing_prerequisite_accuracy": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Missing prerequisites were not labeled for this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_formula_transcription": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No formula transcription gold labels are present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "multimodal_provenance": {
+          "applicable": true,
+          "denominator": 4.0,
+          "detail": "Locator field accuracy=1.000000 across 4 labeled fields.",
+          "numerator": 4.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "multimodal_structure": {
+          "applicable": true,
+          "denominator": 3.0,
+          "detail": "Scored structure components: concepts, axis_labels, confidence_confirmation.",
+          "numerator": 3.0,
+          "passed": true,
+          "score": 1.0,
+          "threshold": 1.0
+        },
+        "multimodal_transcription": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "No multimodal transcription gold label is present.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "policy_compliance": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Policy was not labeled for this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        },
+        "verifier_correctness": {
+          "applicable": false,
+          "denominator": 0.0,
+          "detail": "Verifier behavior was not labeled for this case.",
+          "numerator": 0.0,
+          "passed": null,
+          "score": null,
+          "threshold": 1.0
+        }
+      },
+      "scenario_id": "rabi-plot-interpretation",
+      "token_cost_usd": 0.0061,
+      "token_count": 610,
+      "variant": "B4"
+    }
+  ],
+  "dataset_id": "quantum-agent-v2.1-offline-smoke",
+  "schema_version": "1.0",
+  "variants": [
+    {
+      "agent_calls": {
+        "count": 1,
+        "maximum": 1.0,
+        "mean": 1.0,
+        "minimum": 1.0,
+        "p95": 1.0,
+        "total": 1.0
+      },
+      "answer_leakage_applicable_cases": 1,
+      "answer_leakage_cases": 1,
+      "answer_leakage_rate": 1.0,
+      "case_count": 1,
+      "checkpoint_recovery": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "citation_correctness": {
+        "applicable_cases": 1,
+        "mean_score": 0.0,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      },
+      "citation_support": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "coverage_calibration": {
+        "applicable_cases": 1,
+        "mean_score": 0.0,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      },
+      "diagnosis_accuracy": {
+        "applicable_cases": 1,
+        "mean_score": 0.0,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      },
+      "first_error_localization": {
+        "applicable_cases": 1,
+        "mean_score": 0.0,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      },
+      "interrupt_resume_success": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "latency_ms": {
+        "count": 1,
+        "maximum": 410.0,
+        "mean": 410.0,
+        "minimum": 410.0,
+        "p95": 410.0,
+        "total": 410.0
+      },
+      "missing_prerequisite_accuracy": {
+        "applicable_cases": 1,
+        "mean_score": 0.0,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      },
+      "multimodal_formula_transcription": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "multimodal_provenance": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "multimodal_structure": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "multimodal_transcription": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "policy_compliance": {
+        "applicable_cases": 1,
+        "mean_score": 0.0,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      },
+      "token_cost_usd": {
+        "count": 1,
+        "maximum": 0.0068,
+        "mean": 0.0068,
+        "minimum": 0.0068,
+        "p95": 0.0068,
+        "total": 0.0068
+      },
+      "token_count": {
+        "count": 1,
+        "maximum": 680.0,
+        "mean": 680.0,
+        "minimum": 680.0,
+        "p95": 680.0,
+        "total": 680.0
+      },
+      "variant": "B0",
+      "verifier_correctness": {
+        "applicable_cases": 1,
+        "mean_score": 0.0,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      }
+    },
+    {
+      "agent_calls": {
+        "count": 1,
+        "maximum": 1.0,
+        "mean": 1.0,
+        "minimum": 1.0,
+        "p95": 1.0,
+        "total": 1.0
+      },
+      "answer_leakage_applicable_cases": 1,
+      "answer_leakage_cases": 0,
+      "answer_leakage_rate": 0.0,
+      "case_count": 1,
+      "checkpoint_recovery": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "citation_correctness": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "citation_support": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "coverage_calibration": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "diagnosis_accuracy": {
+        "applicable_cases": 1,
+        "mean_score": 0.5,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      },
+      "first_error_localization": {
+        "applicable_cases": 1,
+        "mean_score": 0.0,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      },
+      "interrupt_resume_success": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "latency_ms": {
+        "count": 1,
+        "maximum": 520.0,
+        "mean": 520.0,
+        "minimum": 520.0,
+        "p95": 520.0,
+        "total": 520.0
+      },
+      "missing_prerequisite_accuracy": {
+        "applicable_cases": 1,
+        "mean_score": 0.0,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      },
+      "multimodal_formula_transcription": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "multimodal_provenance": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "multimodal_structure": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "multimodal_transcription": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "policy_compliance": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "token_cost_usd": {
+        "count": 1,
+        "maximum": 0.0072,
+        "mean": 0.0072,
+        "minimum": 0.0072,
+        "p95": 0.0072,
+        "total": 0.0072
+      },
+      "token_count": {
+        "count": 1,
+        "maximum": 720.0,
+        "mean": 720.0,
+        "minimum": 720.0,
+        "p95": 720.0,
+        "total": 720.0
+      },
+      "variant": "B1",
+      "verifier_correctness": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      }
+    },
+    {
+      "agent_calls": {
+        "count": 1,
+        "maximum": 2.0,
+        "mean": 2.0,
+        "minimum": 2.0,
+        "p95": 2.0,
+        "total": 2.0
+      },
+      "answer_leakage_applicable_cases": 1,
+      "answer_leakage_cases": 0,
+      "answer_leakage_rate": 0.0,
+      "case_count": 1,
+      "checkpoint_recovery": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "citation_correctness": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "citation_support": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "coverage_calibration": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "diagnosis_accuracy": {
+        "applicable_cases": 1,
+        "mean_score": 0.5,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      },
+      "first_error_localization": {
+        "applicable_cases": 1,
+        "mean_score": 0.0,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      },
+      "interrupt_resume_success": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "latency_ms": {
+        "count": 1,
+        "maximum": 610.0,
+        "mean": 610.0,
+        "minimum": 610.0,
+        "p95": 610.0,
+        "total": 610.0
+      },
+      "missing_prerequisite_accuracy": {
+        "applicable_cases": 1,
+        "mean_score": 0.0,
+        "pass_rate": 0.0,
+        "passed_cases": 0
+      },
+      "multimodal_formula_transcription": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "multimodal_provenance": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "multimodal_structure": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "multimodal_transcription": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "policy_compliance": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "token_cost_usd": {
+        "count": 1,
+        "maximum": 0.0079,
+        "mean": 0.0079,
+        "minimum": 0.0079,
+        "p95": 0.0079,
+        "total": 0.0079
+      },
+      "token_count": {
+        "count": 1,
+        "maximum": 790.0,
+        "mean": 790.0,
+        "minimum": 790.0,
+        "p95": 790.0,
+        "total": 790.0
+      },
+      "variant": "B2",
+      "verifier_correctness": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      }
+    },
+    {
+      "agent_calls": {
+        "count": 1,
+        "maximum": 3.0,
+        "mean": 3.0,
+        "minimum": 3.0,
+        "p95": 3.0,
+        "total": 3.0
+      },
+      "answer_leakage_applicable_cases": 1,
+      "answer_leakage_cases": 0,
+      "answer_leakage_rate": 0.0,
+      "case_count": 1,
+      "checkpoint_recovery": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "citation_correctness": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "citation_support": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "coverage_calibration": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "diagnosis_accuracy": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "first_error_localization": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "interrupt_resume_success": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "latency_ms": {
+        "count": 1,
+        "maximum": 735.0,
+        "mean": 735.0,
+        "minimum": 735.0,
+        "p95": 735.0,
+        "total": 735.0
+      },
+      "missing_prerequisite_accuracy": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "multimodal_formula_transcription": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "multimodal_provenance": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "multimodal_structure": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "multimodal_transcription": {
+        "applicable_cases": 0,
+        "mean_score": null,
+        "pass_rate": null,
+        "passed_cases": 0
+      },
+      "policy_compliance": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "token_cost_usd": {
+        "count": 1,
+        "maximum": 0.0093,
+        "mean": 0.0093,
+        "minimum": 0.0093,
+        "p95": 0.0093,
+        "total": 0.0093
+      },
+      "token_count": {
+        "count": 1,
+        "maximum": 930.0,
+        "mean": 930.0,
+        "minimum": 930.0,
+        "p95": 930.0,
+        "total": 930.0
+      },
+      "variant": "B3",
+      "verifier_correctness": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      }
+    },
+    {
+      "agent_calls": {
+        "count": 3,
+        "maximum": 4.0,
+        "mean": 3.0,
+        "minimum": 2.0,
+        "p95": 4.0,
+        "total": 9.0
+      },
+      "answer_leakage_applicable_cases": 2,
+      "answer_leakage_cases": 0,
+      "answer_leakage_rate": 0.0,
+      "case_count": 3,
+      "checkpoint_recovery": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "citation_correctness": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "citation_support": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "coverage_calibration": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "diagnosis_accuracy": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "first_error_localization": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "interrupt_resume_success": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "latency_ms": {
+        "count": 3,
+        "maximum": 1450.0,
+        "mean": 1083.3333333333333,
+        "minimum": 820.0,
+        "p95": 1450.0,
+        "total": 3250.0
+      },
+      "missing_prerequisite_accuracy": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "multimodal_formula_transcription": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "multimodal_provenance": {
+        "applicable_cases": 2,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 2
+      },
+      "multimodal_structure": {
+        "applicable_cases": 2,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 2
+      },
+      "multimodal_transcription": {
+        "applicable_cases": 1,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 1
+      },
+      "policy_compliance": {
+        "applicable_cases": 2,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 2
+      },
+      "token_cost_usd": {
+        "count": 3,
+        "maximum": 0.0128,
+        "mean": 0.009666666666666667,
+        "minimum": 0.0061,
+        "p95": 0.0128,
+        "total": 0.029
+      },
+      "token_count": {
+        "count": 3,
+        "maximum": 1280.0,
+        "mean": 966.6666666666666,
+        "minimum": 610.0,
+        "p95": 1280.0,
+        "total": 2900.0
+      },
+      "variant": "B4",
+      "verifier_correctness": {
+        "applicable_cases": 2,
+        "mean_score": 1.0,
+        "pass_rate": 1.0,
+        "passed_cases": 2
+      }
+    }
+  ]
+}

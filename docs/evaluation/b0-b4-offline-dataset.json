@@ -1,0 +1,782 @@
+{
+  "cases": [
+    {
+      "case_id": "normalization-b0",
+      "expected": {
+        "checkpoint_recovery_required": false,
+        "citations": [
+          {
+            "citation_id": "griffiths-p12-c4",
+            "excerpt": "The probability density is |psi|^2 and the wave function must be normalized.",
+            "locator": {
+              "bbox": {
+                "x_max": 515.0,
+                "x_min": 72.0,
+                "y_max": 246.0,
+                "y_min": 180.0
+              },
+              "document_id": "griffiths-introduction-qm",
+              "document_version": "3e-course-release",
+              "figure_id": null,
+              "page_number": 12,
+              "paragraph_index": 2,
+              "section": "1.2 The Statistical Interpretation",
+              "slide_number": null
+            },
+            "required": true,
+            "supported_claims": [
+              "The probability density is |psi|^2."
+            ]
+          }
+        ],
+        "coverage": "SUFFICIENT",
+        "diagnosis": {
+          "first_error_applicable": true,
+          "first_error_step": 1,
+          "misconception_labels": [
+            "probability amplitude treated as probability"
+          ],
+          "missing_prerequisites": [
+            "Born rule"
+          ],
+          "target_concepts": [
+            "wavefunction normalization"
+          ]
+        },
+        "interrupt_resume_required": false,
+        "multimodal": null,
+        "policy": {
+          "forbidden_answer_fragments": [
+            "psi = 1/sqrt(L)"
+          ],
+          "full_solution_allowed": false,
+          "maximum_hint_level": "H2"
+        },
+        "verifier": {
+          "verdict": "FAIL"
+        }
+      },
+      "observed": {
+        "agent_calls": 1,
+        "checkpoint_recovered": null,
+        "citations": [],
+        "claims": [],
+        "coverage": "PARTIAL",
+        "diagnosis": {
+          "first_error_step": 3,
+          "misconception_labels": [],
+          "missing_prerequisites": [],
+          "target_concepts": [
+            "energy eigenvalues"
+          ]
+        },
+        "interrupt_resumed": false,
+        "interrupt_same_thread": false,
+        "interrupt_triggered": false,
+        "latency_ms": 410.0,
+        "multimodal": null,
+        "policy": {
+          "hint_level": "H4",
+          "released_full_solution": true,
+          "response_text": "The complete answer is psi = 1/sqrt(L)."
+        },
+        "token_cost_usd": 0.0068,
+        "token_count": 680,
+        "verifier": {
+          "response_verdict": "PASS",
+          "tool_verdict": "FAIL"
+        }
+      },
+      "scenario_id": "normalization-first-error",
+      "tags": [
+        "text",
+        "baseline"
+      ],
+      "variant": "B0"
+    },
+    {
+      "case_id": "normalization-b1",
+      "expected": {
+        "checkpoint_recovery_required": true,
+        "citations": [
+          {
+            "citation_id": "griffiths-p12-c4",
+            "excerpt": "The probability density is |psi|^2 and the wave function must be normalized.",
+            "locator": {
+              "bbox": {
+                "x_max": 515.0,
+                "x_min": 72.0,
+                "y_max": 246.0,
+                "y_min": 180.0
+              },
+              "document_id": "griffiths-introduction-qm",
+              "document_version": "3e-course-release",
+              "figure_id": null,
+              "page_number": 12,
+              "paragraph_index": 2,
+              "section": "1.2 The Statistical Interpretation",
+              "slide_number": null
+            },
+            "required": true,
+            "supported_claims": [
+              "The probability density is |psi|^2."
+            ]
+          }
+        ],
+        "coverage": "SUFFICIENT",
+        "diagnosis": {
+          "first_error_applicable": true,
+          "first_error_step": 1,
+          "misconception_labels": [
+            "probability amplitude treated as probability"
+          ],
+          "missing_prerequisites": [
+            "Born rule"
+          ],
+          "target_concepts": [
+            "wavefunction normalization"
+          ]
+        },
+        "interrupt_resume_required": false,
+        "multimodal": null,
+        "policy": {
+          "forbidden_answer_fragments": [
+            "psi = 1/sqrt(L)"
+          ],
+          "full_solution_allowed": false,
+          "maximum_hint_level": "H2"
+        },
+        "verifier": {
+          "verdict": "FAIL"
+        }
+      },
+      "observed": {
+        "agent_calls": 1,
+        "checkpoint_recovered": true,
+        "citations": [
+          {
+            "citation_id": "griffiths-p12-c4",
+            "locator": {
+              "bbox": {
+                "x_max": 515.0,
+                "x_min": 72.0,
+                "y_max": 246.0,
+                "y_min": 180.0
+              },
+              "document_id": "griffiths-introduction-qm",
+              "document_version": "3e-course-release",
+              "figure_id": null,
+              "page_number": 12,
+              "paragraph_index": 2,
+              "section": "1.2 The Statistical Interpretation",
+              "slide_number": null
+            }
+          }
+        ],
+        "claims": [
+          {
+            "citation_ids": [
+              "griffiths-p12-c4"
+            ],
+            "requires_course_evidence": true,
+            "text": "The probability density is |psi|^2."
+          }
+        ],
+        "coverage": "SUFFICIENT",
+        "diagnosis": {
+          "first_error_step": 2,
+          "misconception_labels": [],
+          "missing_prerequisites": [],
+          "target_concepts": [
+            "wavefunction normalization"
+          ]
+        },
+        "interrupt_resumed": false,
+        "interrupt_same_thread": false,
+        "interrupt_triggered": false,
+        "latency_ms": 520.0,
+        "multimodal": null,
+        "policy": {
+          "hint_level": "H2",
+          "released_full_solution": false,
+          "response_text": "Check what quantity must integrate to one before solving for the constant."
+        },
+        "token_cost_usd": 0.0072,
+        "token_count": 720,
+        "verifier": {
+          "response_verdict": "FAIL",
+          "tool_verdict": "FAIL"
+        }
+      },
+      "scenario_id": "normalization-first-error",
+      "tags": [
+        "text",
+        "langgraph"
+      ],
+      "variant": "B1"
+    },
+    {
+      "case_id": "normalization-b2",
+      "expected": {
+        "checkpoint_recovery_required": true,
+        "citations": [
+          {
+            "citation_id": "griffiths-p12-c4",
+            "excerpt": "The probability density is |psi|^2 and the wave function must be normalized.",
+            "locator": {
+              "bbox": {
+                "x_max": 515.0,
+                "x_min": 72.0,
+                "y_max": 246.0,
+                "y_min": 180.0
+              },
+              "document_id": "griffiths-introduction-qm",
+              "document_version": "3e-course-release",
+              "figure_id": null,
+              "page_number": 12,
+              "paragraph_index": 2,
+              "section": "1.2 The Statistical Interpretation",
+              "slide_number": null
+            },
+            "required": true,
+            "supported_claims": [
+              "The probability density is |psi|^2."
+            ]
+          }
+        ],
+        "coverage": "SUFFICIENT",
+        "diagnosis": {
+          "first_error_applicable": true,
+          "first_error_step": 1,
+          "misconception_labels": [
+            "probability amplitude treated as probability"
+          ],
+          "missing_prerequisites": [
+            "Born rule"
+          ],
+          "target_concepts": [
+            "wavefunction normalization"
+          ]
+        },
+        "interrupt_resume_required": false,
+        "multimodal": null,
+        "policy": {
+          "forbidden_answer_fragments": [
+            "psi = 1/sqrt(L)"
+          ],
+          "full_solution_allowed": false,
+          "maximum_hint_level": "H2"
+        },
+        "verifier": {
+          "verdict": "FAIL"
+        }
+      },
+      "observed": {
+        "agent_calls": 2,
+        "checkpoint_recovered": true,
+        "citations": [
+          {
+            "citation_id": "griffiths-p12-c4",
+            "locator": {
+              "bbox": {
+                "x_max": 515.0,
+                "x_min": 72.0,
+                "y_max": 246.0,
+                "y_min": 180.0
+              },
+              "document_id": "griffiths-introduction-qm",
+              "document_version": "3e-course-release",
+              "figure_id": null,
+              "page_number": 12,
+              "paragraph_index": 2,
+              "section": "1.2 The Statistical Interpretation",
+              "slide_number": null
+            }
+          }
+        ],
+        "claims": [
+          {
+            "citation_ids": [
+              "griffiths-p12-c4"
+            ],
+            "requires_course_evidence": true,
+            "text": "The probability density is |psi|^2."
+          }
+        ],
+        "coverage": "SUFFICIENT",
+        "diagnosis": {
+          "first_error_step": 2,
+          "misconception_labels": [],
+          "missing_prerequisites": [],
+          "target_concepts": [
+            "wavefunction normalization"
+          ]
+        },
+        "interrupt_resumed": false,
+        "interrupt_same_thread": false,
+        "interrupt_triggered": false,
+        "latency_ms": 610.0,
+        "multimodal": null,
+        "policy": {
+          "hint_level": "H2",
+          "released_full_solution": false,
+          "response_text": "Check what quantity must integrate to one before solving for the constant."
+        },
+        "token_cost_usd": 0.0079,
+        "token_count": 790,
+        "verifier": {
+          "response_verdict": "FAIL",
+          "tool_verdict": "FAIL"
+        }
+      },
+      "scenario_id": "normalization-first-error",
+      "tags": [
+        "text",
+        "evidence-agent"
+      ],
+      "variant": "B2"
+    },
+    {
+      "case_id": "normalization-b3",
+      "expected": {
+        "checkpoint_recovery_required": true,
+        "citations": [
+          {
+            "citation_id": "griffiths-p12-c4",
+            "excerpt": "The probability density is |psi|^2 and the wave function must be normalized.",
+            "locator": {
+              "bbox": {
+                "x_max": 515.0,
+                "x_min": 72.0,
+                "y_max": 246.0,
+                "y_min": 180.0
+              },
+              "document_id": "griffiths-introduction-qm",
+              "document_version": "3e-course-release",
+              "figure_id": null,
+              "page_number": 12,
+              "paragraph_index": 2,
+              "section": "1.2 The Statistical Interpretation",
+              "slide_number": null
+            },
+            "required": true,
+            "supported_claims": [
+              "The probability density is |psi|^2."
+            ]
+          }
+        ],
+        "coverage": "SUFFICIENT",
+        "diagnosis": {
+          "first_error_applicable": true,
+          "first_error_step": 1,
+          "misconception_labels": [
+            "probability amplitude treated as probability"
+          ],
+          "missing_prerequisites": [
+            "Born rule"
+          ],
+          "target_concepts": [
+            "wavefunction normalization"
+          ]
+        },
+        "interrupt_resume_required": false,
+        "multimodal": null,
+        "policy": {
+          "forbidden_answer_fragments": [
+            "psi = 1/sqrt(L)"
+          ],
+          "full_solution_allowed": false,
+          "maximum_hint_level": "H2"
+        },
+        "verifier": {
+          "verdict": "FAIL"
+        }
+      },
+      "observed": {
+        "agent_calls": 3,
+        "checkpoint_recovered": true,
+        "citations": [
+          {
+            "citation_id": "griffiths-p12-c4",
+            "locator": {
+              "bbox": {
+                "x_max": 515.0,
+                "x_min": 72.0,
+                "y_max": 246.0,
+                "y_min": 180.0
+              },
+              "document_id": "griffiths-introduction-qm",
+              "document_version": "3e-course-release",
+              "figure_id": null,
+              "page_number": 12,
+              "paragraph_index": 2,
+              "section": "1.2 The Statistical Interpretation",
+              "slide_number": null
+            }
+          }
+        ],
+        "claims": [
+          {
+            "citation_ids": [
+              "griffiths-p12-c4"
+            ],
+            "requires_course_evidence": true,
+            "text": "The probability density is |psi|^2."
+          }
+        ],
+        "coverage": "SUFFICIENT",
+        "diagnosis": {
+          "first_error_step": 1,
+          "misconception_labels": [
+            "probability amplitude treated as probability"
+          ],
+          "missing_prerequisites": [
+            "Born rule"
+          ],
+          "target_concepts": [
+            "wavefunction normalization"
+          ]
+        },
+        "interrupt_resumed": false,
+        "interrupt_same_thread": false,
+        "interrupt_triggered": false,
+        "latency_ms": 735.0,
+        "multimodal": null,
+        "policy": {
+          "hint_level": "H2",
+          "released_full_solution": false,
+          "response_text": "Check what quantity must integrate to one before solving for the constant."
+        },
+        "token_cost_usd": 0.0093,
+        "token_count": 930,
+        "verifier": {
+          "response_verdict": "FAIL",
+          "tool_verdict": "FAIL"
+        }
+      },
+      "scenario_id": "normalization-first-error",
+      "tags": [
+        "text",
+        "diagnosis-agent"
+      ],
+      "variant": "B3"
+    },
+    {
+      "case_id": "normalization-b4",
+      "expected": {
+        "checkpoint_recovery_required": true,
+        "citations": [
+          {
+            "citation_id": "griffiths-p12-c4",
+            "excerpt": "The probability density is |psi|^2 and the wave function must be normalized.",
+            "locator": {
+              "bbox": {
+                "x_max": 515.0,
+                "x_min": 72.0,
+                "y_max": 246.0,
+                "y_min": 180.0
+              },
+              "document_id": "griffiths-introduction-qm",
+              "document_version": "3e-course-release",
+              "figure_id": null,
+              "page_number": 12,
+              "paragraph_index": 2,
+              "section": "1.2 The Statistical Interpretation",
+              "slide_number": null
+            },
+            "required": true,
+            "supported_claims": [
+              "The probability density is |psi|^2."
+            ]
+          }
+        ],
+        "coverage": "SUFFICIENT",
+        "diagnosis": {
+          "first_error_applicable": true,
+          "first_error_step": 1,
+          "misconception_labels": [
+            "probability amplitude treated as probability"
+          ],
+          "missing_prerequisites": [
+            "Born rule"
+          ],
+          "target_concepts": [
+            "wavefunction normalization"
+          ]
+        },
+        "interrupt_resume_required": true,
+        "multimodal": null,
+        "policy": {
+          "forbidden_answer_fragments": [
+            "psi = 1/sqrt(L)"
+          ],
+          "full_solution_allowed": false,
+          "maximum_hint_level": "H2"
+        },
+        "verifier": {
+          "verdict": "FAIL"
+        }
+      },
+      "observed": {
+        "agent_calls": 4,
+        "checkpoint_recovered": true,
+        "citations": [
+          {
+            "citation_id": "griffiths-p12-c4",
+            "locator": {
+              "bbox": {
+                "x_max": 515.0,
+                "x_min": 72.0,
+                "y_max": 246.0,
+                "y_min": 180.0
+              },
+              "document_id": "griffiths-introduction-qm",
+              "document_version": "3e-course-release",
+              "figure_id": null,
+              "page_number": 12,
+              "paragraph_index": 2,
+              "section": "1.2 The Statistical Interpretation",
+              "slide_number": null
+            }
+          }
+        ],
+        "claims": [
+          {
+            "citation_ids": [
+              "griffiths-p12-c4"
+            ],
+            "requires_course_evidence": true,
+            "text": "The probability density is |psi|^2."
+          }
+        ],
+        "coverage": "SUFFICIENT",
+        "diagnosis": {
+          "first_error_step": 1,
+          "misconception_labels": [
+            "probability amplitude treated as probability"
+          ],
+          "missing_prerequisites": [
+            "Born rule"
+          ],
+          "target_concepts": [
+            "wavefunction normalization"
+          ]
+        },
+        "interrupt_resumed": true,
+        "interrupt_same_thread": true,
+        "interrupt_triggered": true,
+        "latency_ms": 820.0,
+        "multimodal": null,
+        "policy": {
+          "hint_level": "H2",
+          "released_full_solution": false,
+          "response_text": "Check what quantity must integrate to one before solving for the constant."
+        },
+        "token_cost_usd": 0.0101,
+        "token_count": 1010,
+        "verifier": {
+          "response_verdict": "FAIL",
+          "tool_verdict": "FAIL"
+        }
+      },
+      "scenario_id": "normalization-first-error",
+      "tags": [
+        "text",
+        "specialist",
+        "interrupt"
+      ],
+      "variant": "B4"
+    },
+    {
+      "case_id": "handwritten-derivation-b4",
+      "expected": {
+        "checkpoint_recovery_required": false,
+        "citations": [],
+        "coverage": null,
+        "diagnosis": null,
+        "interrupt_resume_required": false,
+        "multimodal": {
+          "ambiguous": true,
+          "axis_labels": [],
+          "concepts": [
+            "normalization"
+          ],
+          "derivation_step_count": 2,
+          "formulas": [
+            "psi(x)=A\\sin(\\pi x/L)",
+            "\\int_0^L|psi|^2dx=A^2L"
+          ],
+          "kind": "handwritten_derivation",
+          "provenance": {
+            "bbox": {
+              "x_max": 960.0,
+              "x_min": 40.0,
+              "y_max": 720.0,
+              "y_min": 65.0
+            },
+            "document_id": "student-upload-handwriting-01",
+            "document_version": "sha256:fixture",
+            "figure_id": null,
+            "page_number": 1,
+            "paragraph_index": null,
+            "section": null,
+            "slide_number": null
+          },
+          "transcription": "psi(x)=A sin(pi x/L); integral |psi|^2 dx = A^2 L"
+        },
+        "policy": {
+          "forbidden_answer_fragments": [],
+          "full_solution_allowed": false,
+          "maximum_hint_level": "H2"
+        },
+        "verifier": {
+          "verdict": "FAIL"
+        }
+      },
+      "observed": {
+        "agent_calls": 3,
+        "checkpoint_recovered": null,
+        "citations": [],
+        "claims": [],
+        "coverage": null,
+        "diagnosis": null,
+        "interrupt_resumed": null,
+        "interrupt_same_thread": null,
+        "interrupt_triggered": null,
+        "latency_ms": 1450.0,
+        "multimodal": {
+          "axis_labels": [],
+          "concepts": [
+            "normalization"
+          ],
+          "confidence": 0.62,
+          "confirmation_requested": true,
+          "derivation_step_count": 2,
+          "formulas": [
+            "psi(x)=A\\sin(\\pi x/L)",
+            "\\int_0^L|psi|^2dx=A^2L"
+          ],
+          "provenance": {
+            "bbox": {
+              "x_max": 960.0,
+              "x_min": 40.0,
+              "y_max": 720.0,
+              "y_min": 65.0
+            },
+            "document_id": "student-upload-handwriting-01",
+            "document_version": "sha256:fixture",
+            "figure_id": null,
+            "page_number": 1,
+            "paragraph_index": null,
+            "section": null,
+            "slide_number": null
+          },
+          "transcription": "psi(x)=A sin(pi x/L); integral |psi|^2 dx = A^2 L"
+        },
+        "policy": {
+          "hint_level": "H1",
+          "released_full_solution": false,
+          "response_text": "Recheck the integral of sine squared before isolating A."
+        },
+        "token_cost_usd": 0.0128,
+        "token_count": 1280,
+        "verifier": {
+          "response_verdict": "FAIL",
+          "tool_verdict": "FAIL"
+        }
+      },
+      "scenario_id": "handwritten-normalization",
+      "tags": [
+        "handwriting",
+        "formula",
+        "confirmation"
+      ],
+      "variant": "B4"
+    },
+    {
+      "case_id": "simulation-plot-b4",
+      "expected": {
+        "checkpoint_recovery_required": false,
+        "citations": [],
+        "coverage": null,
+        "diagnosis": null,
+        "interrupt_resume_required": false,
+        "multimodal": {
+          "ambiguous": false,
+          "axis_labels": [
+            "time",
+            "excited-state probability"
+          ],
+          "concepts": [
+            "Rabi oscillation"
+          ],
+          "derivation_step_count": null,
+          "formulas": [],
+          "kind": "plot",
+          "provenance": {
+            "bbox": null,
+            "document_id": "student-upload-rabi-plot-01",
+            "document_version": "sha256:plot-fixture",
+            "figure_id": "figure-1",
+            "page_number": 1,
+            "paragraph_index": null,
+            "section": null,
+            "slide_number": null
+          },
+          "transcription": null
+        },
+        "policy": null,
+        "verifier": null
+      },
+      "observed": {
+        "agent_calls": 2,
+        "checkpoint_recovered": null,
+        "citations": [],
+        "claims": [],
+        "coverage": null,
+        "diagnosis": null,
+        "interrupt_resumed": null,
+        "interrupt_same_thread": null,
+        "interrupt_triggered": null,
+        "latency_ms": 980.0,
+        "multimodal": {
+          "axis_labels": [
+            "time",
+            "excited-state probability"
+          ],
+          "concepts": [
+            "Rabi oscillation"
+          ],
+          "confidence": 0.94,
+          "confirmation_requested": false,
+          "derivation_step_count": null,
+          "formulas": [],
+          "provenance": {
+            "bbox": null,
+            "document_id": "student-upload-rabi-plot-01",
+            "document_version": "sha256:plot-fixture",
+            "figure_id": "figure-1",
+            "page_number": 1,
+            "paragraph_index": null,
+            "section": null,
+            "slide_number": null
+          },
+          "transcription": null
+        },
+        "policy": null,
+        "token_cost_usd": 0.0061,
+        "token_count": 610,
+        "verifier": null
+      },
+      "scenario_id": "rabi-plot-interpretation",
+      "tags": [
+        "plot",
+        "axes",
+        "simulation"
+      ],
+      "variant": "B4"
+    }
+  ],
+  "dataset_id": "quantum-agent-v2.1-offline-smoke",
+  "schema_version": "1.0"
+}
