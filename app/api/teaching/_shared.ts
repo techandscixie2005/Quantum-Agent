@@ -224,7 +224,7 @@ export async function proxyTeachingTurn(request: Request): Promise<Response> {
       },
       body: JSON.stringify(body),
       cache: "no-store",
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(240_000),
     });
   } catch {
     return teachingError(

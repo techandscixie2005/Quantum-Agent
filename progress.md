@@ -162,11 +162,34 @@ input/perception
 
 ## 4. Golden Learning Loop E2E
 
-`tests/e2e/golden-loop.spec.ts` (新增) 通过真实 frontend → mocked API → frontend 路径驱动完整序列：
+### 4.1 确定性 UI/契约测试 (deterministic, mocked)
+
+`tests/e2e/golden-loop.spec.ts` 通过真实 frontend → mocked API → frontend 路径驱动完整序列：
 
 prediction + confidence → diagnosis → minimal hint → revised attempt → real simulation → probability verification → prediction-vs-result comparison → student explanation → Teach-Back → transfer task → Solo Mode → Cognitive Mirror update
 
-6 个阶段，全部断言可见行为 (commitment-card / agent-tutor-result / 0.0821 / 守恒 / teach-back-card / transfer-card / cognitive-mirror)。
+6 个阶段，全部断言可见行为 (commitment-card / agent-tutor-result / 0.0821 / 守恒 / teach-back-card / transfer-card / cognitive-mirror)。该测试使用 `page.route` mock `/api/agent/context` 与 `/api/teaching/turns/stream`，用于快速稳定的 UI/契约回归，**不是**真实全栈 E2E。
+
+### 4.2 真实全栈 Live Golden Loop (non-mocked)
+
+`tests/e2e/live/golden-loop-live.spec.ts` (新增) 是真正的全栈 Learning-Native Golden Loop，**不 mock 任何第一方 API**：
+
+Browser → Next.js → FastAPI → LangGraph (learning_native_pre → scientific_tools → generate_response → learning_native_post → hitl_gate) → 真实 USTC 模型 → PostgreSQL 持久化 → SSE → Browser
+
+测试是自适应的（live 模型的 learning-native 决策非确定性）：在 `learn_concepts` 模式驱动 7 阶段隧穿对话，当 CommitmentCard/TeachBackCard/TransferCard 出现时提交对应 Learning-Native payload，并通过 TA token 调用 `/teacher/learning-statistics` 与 `/teacher/agent-traces` 验证 PostgreSQL 持久化（不是前端状态）。
+
+硬性断言：
+- 每轮工作流到达终态 (tutor result 或可处理的 HITL)
+- 循环后 `total_recorded_events` 递增（证明新 LearningEvidence 行写入 PostgreSQL）
+- `observed_attempts` 递增（learn_concepts 模式的 attempt box 保证 STUDENT_ATTEMPT 持久化）
+- AgentTrace 总数递增，最新 trace 含非空 evidence_bundle + diagnosis + workflow_steps
+- Cognitive Mirror 可见时必须为 evidence-only
+
+实测结果 (2026-08-26)：events 32→41，traces 32→39，mirrorVisible=true，耗时 5.1 分钟。
+
+### 4.3 前端代理超时修复
+
+新增 live Golden Loop 暴露的真实 bug：前端 `/api/teaching/turns/stream` 代理的 `AbortSignal.timeout` 为 45s，但真实 USTC 模型 + 完整 LangGraph 流水线约需 60-90s。已将代理超时提升到 240s (`app/api/teaching/_shared.ts` + `app/api/teaching/threads/[conversationId]/resume/route.ts`)，与 live 测试的 240s `waitForResponse` 一致。
 
 ## 5. 质量门结果 (2026-08-26)
 
@@ -178,13 +201,23 @@ prediction + confidence → diagnosis → minimal hint → revised attempt → r
 | TypeScript tsc --noEmit | ✅ 0 errors | |
 | 前端单元测试 | ✅ 57 passed | |
 | 前端 production build | ✅ Build complete | |
-| 有效全量 Playwright E2E | ✅ 4 passed | 1 golden-loop + 3 learning-native |
-| Golden Loop E2E | ✅ passed | 6 阶段全绿 |
+| 有效确定性 Playwright E2E | ✅ 4 passed | 1 golden-loop (mocked) + 3 learning-native |
+| **真实全栈 Live Golden Loop** | ✅ **passed** | 7 阶段，events 32→41，traces 32→39，mirrorVisible=true |
+| 既有 live multimodal/HITL E2E | ✅ 4 passed | agent-live.spec.ts 全绿，无回归 |
+| Visual QA desktop 1440×900 | ✅ passed | 无水平溢出，无严重 console 错误 |
+| Visual QA mobile 390×844 | ✅ passed | 响应式面板正常，无溢出 |
 | live PostgreSQL/pgvector/Neo4j/Redis | ✅ 1 passed | migration 0005 verified |
-| live USTC model smoke | ✅ 3 successes, 1 skipped | deep reasoning 5.1s, commitment 24.4s, embedding 0.0s |
+| live USTC model smoke | ✅ 3 successes, 1 skipped | deep reasoning 4.1s, commitment 21.8s, embedding 0.0s |
 | Compose schema | ✅ ok — validation done | |
 | secret scan | ✅ PASSED | 客户端 bundle 无敏感模式 |
 
-## 6. Git 提交与推送
+## 6. 仓库卫生
+
+- 移除 git 跟踪的 `services/api/.sites-runtime/npm-cache/_logs/*.log`（11 个 debug 日志）。
+- 从 git 索引移除 `tsconfig.tsbuildinfo`（tsc 增量构建缓存，每次 build 变化）。
+- `.gitignore` 新增 `*.tsbuildinfo` 与 `/services/api/.sites-runtime/`。
+- 删除工作树中的 `.sites-runtime/` 运行时缓存目录。
+
+## 7. Git 提交与推送
 
 最终 commit(s) 推送到 `origin/main` (git@github.com:techandscixie2005/Quantum-Agent.git)。SHA 与 remote branch 在交付时确认。

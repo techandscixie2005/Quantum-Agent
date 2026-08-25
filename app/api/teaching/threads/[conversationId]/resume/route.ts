@@ -184,7 +184,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         confirmed_student_attempt: body.confirmed_student_attempt,
       }),
       cache: "no-store",
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(240_000),
     });
   } catch {
     return agentError(
