@@ -115,6 +115,38 @@ class EvidenceItem(BaseModel):
             raise ValueError("evidence_sha256 does not match evidence_snippet")
         return self
 
+    def redacted_for_gate(self) -> EvidenceItem:
+        """Return a copy with answer-bearing text replaced by safe provenance.
+
+        Used by the commitment gate (PRD V3.0 Axiom 1) so the student cannot
+        read the exact answer-bearing snippet while the gate is still open.
+        Provenance (document title, chapter, locator, evidence id) is preserved
+        so the student knows evidence exists and where it comes from.
+        """
+
+        placeholder = "[evidence withheld while the commitment gate is active]"
+        return EvidenceItem(
+            evidence_id=self.evidence_id,
+            chunk_id=self.chunk_id,
+            document_id=self.document_id,
+            document_version_id=self.document_version_id,
+            document_title=self.document_title,
+            document_version=self.document_version,
+            source_file_name=self.source_file_name,
+            source_file_sha256=self.source_file_sha256,
+            source_chunk_sha256=hashlib.sha256(placeholder.encode("utf-8")).hexdigest(),
+            evidence_sha256=hashlib.sha256(placeholder.encode("utf-8")).hexdigest(),
+            curriculum_edition_id=self.curriculum_edition_id,
+            chapter=self.chapter,
+            section_path=list(self.section_path),
+            locator=self.locator,
+            source_chunk=placeholder,
+            evidence_snippet=placeholder,
+            kind=self.kind,
+            authority_priority=self.authority_priority,
+            contributions=list(self.contributions),
+        )
+
 
 class GraphContextNode(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -165,6 +197,29 @@ class EvidencePacket(BaseModel):
 
     def citation_ids(self) -> set[UUID]:
         return {item.evidence_id for item in self.evidence}
+
+    def redacted_for_gate(self) -> EvidencePacket:
+        """Return a copy where every evidence item's answer-bearing text is redacted.
+
+        Provenance (document, chapter, locator, evidence id) is preserved so
+        the student knows evidence exists and where it comes from, but the
+        exact answer-bearing snippet is withheld until the commitment gate
+        is satisfied (PRD V3.0 Axiom 1).
+        """
+
+        return EvidencePacket(
+            id=self.id,
+            course_id=self.course_id,
+            curriculum_edition_id=self.curriculum_edition_id,
+            query=self.query,
+            created_at=self.created_at,
+            coverage=self.coverage,
+            evidence=[item.redacted_for_gate() for item in self.evidence],
+            graph_nodes=list(self.graph_nodes),
+            graph_edges=list(self.graph_edges),
+            degraded_channels=list(self.degraded_channels),
+            warnings=list(self.warnings),
+        )
 
 
 RRF_K: Annotated[int, Field(ge=1)] = 60

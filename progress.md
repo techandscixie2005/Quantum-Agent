@@ -221,3 +221,58 @@ Browser → Next.js → FastAPI → LangGraph (learning_native_pre → scientifi
 ## 7. Git 提交与推送
 
 最终 commit(s) 推送到 `origin/main` (git@github.com:techandscixie2005/Quantum-Agent.git)。SHA 与 remote branch 在交付时确认。
+
+---
+
+# Quantum Agent V3.0.1 — specification.md Remediation Report
+
+**生成日期**: 2026-08-27
+**触发**: 独立 Codex 审计（`specification.md`）对 V3.0 的 P0/P1 缺陷清单
+**结论**: 全部 P0 已关闭；P1-1/P1-2/P1-3/P1-4 已闭环；硬性 Golden Loop 升级完成；质量门全绿。
+
+## 1. Remediation matrix (finding-by-finding)
+
+| Finding | Original issue | Fix | Regression test | Status |
+|---|---|---|---|---|
+| P0-1a | 通用概念问题（无 marker）默认绕过承诺门 | `policy.py` 将 CONCEPT_QUESTION 默认改为 fail-closed（仅事实查询绕过） | `test_generic_concept_question_requires_commitment_fail_closed` | CLOSED |
+| P0-1b | 模型不可用时 fail-open | `learning_native.py` fail-closed 分支 + `FALLBACK_COMMITMENT_PROMPT` | `test_fail_closed_when_model_unavailable_*` | CLOSED (prior V3.0) |
+| P0-1c | 琐碎 attempt 满足门 | `attempt_is_meaningful`（len≥3 + 字母数字） | `test_trivial_attempt_does_not_satisfy_gate` | CLOSED (prior V3.0) |
+| P0-1d | 门控时证据泄漏 | `evidence_packets.redacted_for_gate` + `assemble_result_node` 应用 | `test_commitment_gate_withholds_answer_before_generation`（新增 evidence 断言） | CLOSED |
+| P0-2 | Teach-Back/Transfer/Solo 非可执行状态机 | 迁移 0006 `learning_phase_json` + `DurableLearningPhase` + 前置 Solo 阻断 + 真实 UI 按钮 + 验证式 Solo 退出 | `test_solo_blocks_ask_ai_before_llm_generation`、`test_solo_persists_across_refresh_and_new_turn`、`test_unverified_solo_attempt_does_not_exit_solo`、`test_explicit_solo_exit_marks_aborted_not_success`、`test_request_teach_back_transitions_phase`、`test_request_transfer_task_arms_solo` | CLOSED (prior V3.0 + 死代码清理) |
+| P0-3-1..5 | 无矩势垒隧穿工具 | `science/models.RectangularBarrierRequest` + `toolbox._verify_rectangular_barrier`（E<V0 公式 + 守恒 + 边界）+ 前端 CTA 接入 | `test_rectangular_barrier_*`（7 个） | CLOSED (prior V3.0) |
+| P0-3-6 | 确定性 E2E 伪造 T=0.0821 | 改用真实 `rectangular_barrier_tunnelling` kind + 真实 T=0.3337/R=0.6663 + `tunnelling-metrics` 断言 | `golden-loop.spec.ts` stage real_simulation_verification | CLOSED |
+| P0-3-7 | Live E2E 从不发送/断言 barrier request | 新增 `sendRealTunnellingTurn` 切换 run_experiments + goldenTunnelling，硬断言 `tunnelling-metrics` + regime + T/R | `golden-loop-live.spec.ts` Stage 3b | CLOSED |
+| P1-1.1..5 | Cognitive Mirror 证据语义过宽 | 迁移 0007 分离 `TRANSFER_ASSIGNED/ATTEMPTED/VERIFIED/FAILED` + `SOLO_ASSIGNED/VERIFIED/ABORTED`；mirror 仅 `TRANSFER_VERIFIED` 计入 `TRANSFER_READY`/`unaided_retrieval`；稳定未标记桶；合并当前轮证据 | `TestCognitiveMirrorEvidenceSemantics`（6 个） | CLOSED |
+| P1-2 | 240s 超时掩盖无界重试/重放 | `client_request_id` 幂等键（`TeachingTurnInput` + `start_turn` 识别 RUNNING/COMPLETED 重放 + `_replay_completed_turn` 返回存储结果）+ BFF 转发浏览器取消（`AbortSignal.any`） | `test_client_request_id_replays_completed_turn_instead_of_duplicating` | CLOSED |
+| P1-3 | 遗留非权威路由攻击面 | 删除 `/api/trace`、`/api/knowledge`、`/api/simulate`、`/api/sandbox` 路由 + `lib/simulation.ts`；`lib/sandbox.ts` 仅保留确定性 `inspectSandboxCode` | `tests/backend.test.ts` "legacy non-authoritative public routes are removed" | CLOSED |
+| P1-4 | 无学生 session bootstrap | Python `/api/v1/auth/demo-login`（fail-closed）+ BFF `/api/auth/demo-login`（设 `qa_session` cookie）+ `quantum-agent seed-demo-account` CLI + `make demo-bootstrap` + 前端登录表单 + `DEMO.md` | `tests/test_demo_login.py`（5 个） | CLOSED |
+
+## 2. 质量门结果 (2026-08-27)
+
+| 门 | 结果 | 证据 |
+|---|---|---|
+| Python pytest | ✅ 255 passed, 2 skipped | 2 skipped 需 Docker live 服务 |
+| Ruff | ✅ All checks passed | |
+| mypy strict | ✅ Success: no issues found in 65 source files | |
+| TypeScript tsc --noEmit | ✅ 0 errors | |
+| 前端单元测试 | ✅ 58 passed | +1 legacy-route-removal 回归 |
+| 前端 production build | ✅ Build complete | |
+| 确定性 Playwright E2E | ✅ 4 passed | golden-loop (真实 barrier 值) + 3 learning-native |
+| secret scan | ✅ PASSED | 客户端 bundle 无敏感模式 |
+
+## 3. 新增/修改文件
+
+- 新增迁移: `alembic/versions/0006_teaching_conversation_learning_phase.py`、`0007_separate_transfer_solo_evidence_kinds.py`
+- 新增 API: `quantum_agent/api/auth.py`（demo-login）
+- 新增 CLI: `quantum-agent seed-demo-account`
+- 新增 BFF: `app/api/auth/demo-login/route.ts`
+- 新增测试: `tests/test_demo_login.py`、`TestCognitiveMirrorEvidenceSemantics`、`test_client_request_id_replays_completed_turn_instead_of_duplicating`、`test_generic_concept_question_requires_commitment_fail_closed`
+- 新增文档: `DEMO.md`
+- 删除: `app/api/trace/`、`app/api/knowledge/`、`app/api/simulate/`、`app/api/sandbox/`、`lib/simulation.ts`（遗留攻击面）
+- 修改: `teaching/policy.py`（fail-closed 默认）、`teaching/learning_native.py`（分离证据种类 + 稳定桶 + 当前轮合并）、`teaching/repository.py`（幂等键）、`tutor/graph.py`（完成轮重放）、`tutor/nodes.py`（分离证据 + Solo 语义）、`science/toolbox.py`（移除未用变量）、`app/components/agent/AgentExperience.tsx`（demo 登录表单 + client_request_id）、`app/components/teaching/contracts.ts`（client_request_id 字段）、`app/api/teaching/_shared.ts`（转发取消）
+
+## 4. 未覆盖项（明确 DEFERRED）
+
+- **Live Golden Loop E2E 实跑**: 需 Docker Compose 栈 + 真实 USTC_API；本次审计未在真实栈上重新执行 `scripts/run-live-e2e.sh`。测试代码已升级为硬断言（Stage 3b 真实 barrier 工具），但需竞赛环境实际运行一次以证明端到端绿。
+- **增量 SSE 消费**: BFF 仍然全缓冲上游响应后重新发出（`readBoundedText`）。本次仅转发浏览器取消信号；真正的增量流式（`response.body.getReader()` 到浏览器）未实现，因为现有契约依赖完整事件文档解析后再重新发出，重写为增量流会破坏 `parseTeachingWorkflowOutcome` 的边界。竞赛期间 240s 超时 + 幂等键已足够可靠。
+- **Gateway/Router 重试预算上限**: 本次只加了 client_request_id 幂等；gateway 4×60s 每配置重试 + router 跨配置 fallback 的总预算上限未改动，因为现有 `_retry_transient` 已对 401/403 fail-fast，且幂等键防止了重放副作用。

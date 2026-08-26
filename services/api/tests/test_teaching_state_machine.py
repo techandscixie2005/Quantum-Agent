@@ -274,7 +274,10 @@ async def test_policy_blocks_tool_before_attempt_then_runs_it_after_attempt(
             ).all()
         )
 
-    assert first.release.release_level is AnswerReleaseLevel.HINT
+    # PRD V3.0 Axiom 1 (P0-1): an exercise question with no prior attempt now
+    # requires a commitment, so the release level is QUESTION_ONLY (not HINT).
+    assert first.release.release_level is AnswerReleaseLevel.QUESTION_ONLY
+    assert first.release.reason_code == "commitment_required_before_explanation"
     assert first.scientific_results == []
     assert first.trace[6].status is WorkflowStepStatus.SKIPPED
     assert second.release.release_level is AnswerReleaseLevel.SCAFFOLD

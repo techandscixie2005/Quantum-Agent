@@ -19,7 +19,7 @@ from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from quantum_agent.auth import TEACHING_STAFF_ROLES, CourseActor
-from quantum_agent.db_models import CourseRole
+from quantum_agent.db_models import CourseRole, TeachingTurnStatus
 from quantum_agent.llm.gateway import ModelGateway
 from quantum_agent.multimodal.teaching import (
     UnconfirmedPerceptionError,
@@ -170,6 +170,19 @@ class TutorGraph:
         )
 
         if started.idempotent_replay:
+            # PRD V3.0 P1-2: a client_request_id replay may target either a
+            # RUNNING turn (HITL interrupt in flight) or a COMPLETED turn
+            # (the original response was persisted but the browser lost the
+            # response and retried).  For a COMPLETED turn, return the
+            # stored TeachingTurnResult so the retry cannot create a
+            # duplicate AgentTrace or LearningEvidence rows.
+            if started.turn.status is TeachingTurnStatus.COMPLETED:
+                return await self._replay_completed_turn(
+                    session=session,
+                    actor=actor,
+                    curriculum_edition_id=curriculum_edition_id,
+                    started=started,
+                )
             try:
                 return await self._inspect_interrupt(
                     session=session,
@@ -299,6 +312,39 @@ class TutorGraph:
             return
         if request.action not in payload.staff_allowed_actions:
             raise HitlAuthorizationError("action is not available to teaching staff")
+
+    async def _replay_completed_turn(
+        self,
+        *,
+        session: AsyncSession,
+        actor: CourseActor,
+        curriculum_edition_id: UUID,
+        started: StartedTeachingTurn,
+    ) -> TeachingTurnResult:
+        """Return the stored TeachingTurnResult for a completed-turn replay.
+
+        PRD V3.0 P1-2: when a browser retries a turn whose ``client_request_id``
+        matches an already-completed turn, we return the persisted result
+        snapshot instead of re-running the graph.  This guarantees a retry
+        cannot create duplicate AgentTrace / LearningEvidence rows or
+        duplicate phase transitions.
+        """
+
+        snapshot = started.turn.scientific_results_json.get("__result_snapshot")
+        if not isinstance(snapshot, dict):
+            raise HitlConflictError(
+                "completed turn replay is missing its result snapshot; "
+                "the turn predates the idempotency-key feature"
+            )
+        result = TeachingTurnResult.model_validate(snapshot)
+        # Re-authorise the replay against the current actor.
+        if (
+            started.conversation.student_user_id != actor.user_id
+            or started.conversation.course_id != actor.course_id
+            or curriculum_edition_id != started.conversation.curriculum_edition_id
+        ):
+            raise HitlConflictError("replay actor does not own the completed turn")
+        return result
 
     async def _inspect_interrupt(
         self,

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { coursewareManifest, seedKnowledge } from "../lib/course-knowledge";
 import { enforceHintLevel } from "../lib/policy";
 import { providerConfigForCapability } from "../lib/providers";
@@ -75,4 +77,23 @@ test("all four course projects are represented", () => {
 test("sandbox preflight rejects network and filesystem access", () => {
   assert.equal(inspectSandboxCode("import requests\nrequests.get('https://example.com')").safe, false);
   assert.equal(inspectSandboxCode("import numpy as np\nprint(np.linalg.norm([3,4]))").safe, true);
+});
+
+test("PRD V3.0 P1-3: legacy non-authoritative public routes are removed", () => {
+  // The superseded TS/D1 attack-surface routes must not exist in the
+  // production build.  /api/trace, /api/knowledge, /api/simulate, and
+  // /api/sandbox were unauthenticated/unbounded and contradicted the
+  // "Python is authoritative" claim.  The deterministic sandbox preflight
+  // (inspectSandboxCode) is retained; the stateful executeInSandbox relay
+  // and the legacy Crank–Nicolson simulation are gone.
+  const legacyRoutes = [
+    "app/api/trace/route.ts",
+    "app/api/knowledge/route.ts",
+    "app/api/simulate/route.ts",
+    "app/api/sandbox/route.ts",
+    "lib/simulation.ts",
+  ];
+  for (const route of legacyRoutes) {
+    assert.equal(existsSync(resolve(route)), false, `legacy route ${route} must be removed`);
+  }
 });

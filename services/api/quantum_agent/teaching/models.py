@@ -290,6 +290,13 @@ class TeachingTurnInput(BaseModel):
     attachment_ids: list[UUID] = Field(default_factory=list, max_length=8)
     scientific_request: ScientificVerificationRequest | None = None
     learning_native: LearningNativeSubmission | None = None
+    # PRD V3.0 P1-2: client-generated idempotency key.  When the browser
+    # retries a turn after a lost response, the same ``client_request_id``
+    # is re-sent.  ``TeachingRepository.start_turn`` recognises a matching
+    # key on an existing RUNNING or COMPLETED turn and returns it as an
+    # idempotent replay, so a retry cannot create duplicate AgentTrace /
+    # LearningEvidence rows or duplicate phase transitions.
+    client_request_id: str | None = Field(default=None, max_length=128)
 
     @field_validator("message")
     @classmethod
@@ -333,6 +340,11 @@ class LearningNativeSubmission(BaseModel):
     solo_attempt: SoloAttemptSubmission | None = None
     request_transfer: bool = False
     request_solo_exit: bool = False
+    # PRD V3.0 P0-2: the UI can request the next pedagogical phase transition.
+    # The deterministic policy decides whether to honour the request based on
+    # the durable phase and evidence; the student cannot force a transition.
+    request_teach_back: bool = False
+    request_transfer_task: bool = False
 
 
 class TeachBackSubmission(BaseModel):
@@ -508,6 +520,7 @@ class SoloModeStatus(StrEnum):
     INACTIVE = "inactive"
     ACTIVE = "active"
     EXITED = "exited"
+    ABORTED = "aborted"
 
 
 class SoloMode(BaseModel):
@@ -520,6 +533,46 @@ class SoloMode(BaseModel):
     started_at: str | None = None
     assistance_locked: bool = True
     unlock_reason: str = Field(default="", max_length=400)
+
+
+class LearningPhase(StrEnum):
+    """Durable pedagogical phase persisted on the teaching conversation.
+
+    The phase is loaded BEFORE answer generation so the tutor graph can route
+    deterministically (PRD V3.0 P0-2): e.g. SOLO_ACTIVE blocks Ask AI,
+    RECONSTRUCTION_REQUIRED requires a teach-back before advancing.
+    """
+
+    OPEN = "open"
+    COMMITMENT_REQUIRED = "commitment_required"
+    ATTEMPT_RECEIVED = "attempt_received"
+    INTERVENTION = "intervention"
+    RECONSTRUCTION_REQUIRED = "reconstruction_required"
+    TRANSFER_REQUIRED = "transfer_required"
+    SOLO_ACTIVE = "solo_active"
+    COMPLETE = "complete"
+    ABORTED = "aborted"
+
+
+class DurableLearningPhase(BaseModel):
+    """The durable Learning-Native state persisted on the conversation row.
+
+    This is the single source of truth for the current pedagogical phase,
+    the active transfer task identity, and the Solo Mode lock.  The tutor
+    graph loads it in ``start_turn`` and uses it to route before generation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    phase: LearningPhase = LearningPhase.OPEN
+    active_transfer_task_id: UUID | None = None
+    active_transfer_task_prompt: str = Field(default="", max_length=2000)
+    solo_started_at: str | None = None
+    solo_assistance_locked: bool = False
+    # The attempt identity that the current transfer task expects.  A random
+    # later message cannot count as completion of the transfer task unless
+    # it is correlated with this identity.
+    expected_attempt_kind: str = Field(default="", max_length=80)
 
 
 class ConceptStateLabel(StrEnum):
@@ -590,10 +643,12 @@ __all__ = [
     "DiagnosisProgressState",
     "DiagnosisStatus",
     "DraftTeachingResponse",
+    "DurableLearningPhase",
     "FirstErrorLocalization",
     "InterpretationOutput",
     "LearningNativeSubmission",
     "LearningNativeTurnState",
+    "LearningPhase",
     "LearningPolicyAction",
     "MisconceptionCandidate",
     "PolicySnapshot",

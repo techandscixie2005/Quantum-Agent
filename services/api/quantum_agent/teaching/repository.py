@@ -27,7 +27,11 @@ from quantum_agent.multimodal.contracts import ConfirmedEvidence
 from quantum_agent.multimodal.teaching import PerceptionTraceEntry
 from quantum_agent.teaching.agents import EvidenceBundle
 from quantum_agent.teaching.hitl import HitlArtifacts, HitlEvent, HitlInterruptPayload
-from quantum_agent.teaching.models import TeachingTurnInput, TeachingTurnResult
+from quantum_agent.teaching.models import (
+    DurableLearningPhase,
+    TeachingTurnInput,
+    TeachingTurnResult,
+)
 
 
 class LearningEvidenceRecord(BaseModel):
@@ -54,6 +58,7 @@ class StartedTeachingTurn(BaseModel):
     prior_attempts: int = Field(ge=0)
     recent_no_progress_count: int = Field(default=0, ge=0, le=20)
     idempotent_replay: bool = False
+    durable_phase: DurableLearningPhase = Field(default_factory=DurableLearningPhase)
 
 
 class StartedTeachingTurnRef(BaseModel):
@@ -121,6 +126,59 @@ class TeachingRepository:
                     "conversation is unavailable in this course, edition, mode, or account"
                 )
             conversation = existing_conversation
+            # PRD V3.0 P1-2: client-generated idempotency key.  When the
+            # browser retries a turn after a lost response, the same
+            # ``client_request_id`` is re-sent.  Recognise a matching key on
+            # an existing RUNNING *or* COMPLETED turn and return it as an
+            # idempotent replay so a retry cannot create duplicate
+            # AgentTrace / LearningEvidence rows or duplicate phase
+            # transitions.  We filter in Python because the JSON-column
+            # ``astext`` accessor is PostgreSQL-specific and the test
+            # database is SQLite.
+            client_request_id = request.client_request_id
+            if client_request_id:
+                candidate_turns = (
+                    await self._session.execute(
+                        select(TeachingTurn)
+                        .where(TeachingTurn.conversation_id == conversation.id)
+                        .order_by(TeachingTurn.sequence_number.desc())
+                        .limit(50),
+                    )
+                ).scalars().all()
+                replay_turn: TeachingTurn | None = None
+                for candidate in candidate_turns:
+                    # RUNNING turns store the key in validation_json; COMPLETED
+                    # turns store it in scientific_results_json (see
+                    # complete_turn, which keeps validation_json a clean
+                    # ValidationReport).
+                    if candidate.status is TeachingTurnStatus.RUNNING:
+                        stored = candidate.validation_json.get("client_request_id", "")
+                    else:
+                        stored = candidate.scientific_results_json.get(
+                            "__client_request_id", ""
+                        )
+                    if stored == client_request_id:
+                        replay_turn = candidate
+                        break
+                if replay_turn is not None:
+                    prior_attempts = await self._attempt_count(
+                        conversation.id,
+                        excluding_turn_id=replay_turn.id,
+                    )
+                    recent_no_progress_count = await self._recent_no_progress_count(
+                        conversation.id,
+                        excluding_turn_id=replay_turn.id,
+                    )
+                    return StartedTeachingTurn(
+                        conversation=conversation,
+                        turn=replay_turn,
+                        prior_attempts=prior_attempts,
+                        recent_no_progress_count=recent_no_progress_count,
+                        idempotent_replay=True,
+                        durable_phase=await self.load_durable_learning_phase(
+                            conversation=conversation
+                        ),
+                    )
             running_turn = await self._session.scalar(
                 select(TeachingTurn)
                 .where(
@@ -154,6 +212,9 @@ class TeachingRepository:
                         prior_attempts=prior_attempts,
                         recent_no_progress_count=recent_no_progress_count,
                         idempotent_replay=True,
+                        durable_phase=await self.load_durable_learning_phase(
+                            conversation=conversation
+                        ),
                     )
                 raise TeachingConversationConflictError(
                     "conversation has a teaching turn awaiting human review"
@@ -177,7 +238,8 @@ class TeachingRepository:
             validation_json={
                 "input_attachment_ids": [
                     str(attachment_id) for attachment_id in request.attachment_ids
-                ]
+                ],
+                "client_request_id": request.client_request_id or "",
             },
         )
         self._session.add(turn)
@@ -187,6 +249,9 @@ class TeachingRepository:
             turn=turn,
             prior_attempts=prior_attempts,
             recent_no_progress_count=recent_no_progress_count,
+            durable_phase=await self.load_durable_learning_phase(
+                conversation=conversation
+            ),
         )
 
     async def _attempt_count(
@@ -284,6 +349,9 @@ class TeachingRepository:
             prior_attempts=reference.prior_attempts,
             recent_no_progress_count=reference.recent_no_progress_count,
             idempotent_replay=True,
+            durable_phase=await self.load_durable_learning_phase(
+                conversation=conversation
+            ),
         )
 
     async def student_actor_for_resume(
@@ -410,8 +478,18 @@ class TeachingRepository:
         turn.status = TeachingTurnStatus.COMPLETED
         turn.evidence_packet_json = result.evidence_packet.model_dump(mode="json")
         turn.response_json = result.response.model_dump(mode="json")
+        # PRD V3.0 P1-2: store the full result snapshot and the idempotency
+        # metadata in the scientific_results_json column (a flexible JSON
+        # dict) so a client_request_id replay can return the stored result
+        # without re-running the graph, and so the replay lookup can find
+        # the key.  The validation_json column is kept as the clean
+        # ValidationReport so the teacher-insights trace-detail endpoint
+        # can still ValidationReport.model_validate it.
         turn.scientific_results_json = {
-            "results": [item.model_dump(mode="json") for item in result.scientific_results]
+            "results": [item.model_dump(mode="json") for item in result.scientific_results],
+            "__result_snapshot": result.model_dump(mode="json"),
+            "__client_request_id": turn.validation_json.get("client_request_id", ""),
+            "__input_attachment_ids": turn.validation_json.get("input_attachment_ids", []),
         }
         turn.validation_json = result.validation.model_dump(mode="json")
         turn.completed_at = datetime.now(UTC)
@@ -595,6 +673,37 @@ class TeachingRepository:
         if not isinstance(native, dict):
             return None
         return native
+
+    async def load_durable_learning_phase(
+        self,
+        *,
+        conversation: TeachingConversation,
+    ) -> DurableLearningPhase:
+        """Load the durable Learning-Native phase from the conversation row.
+
+        Returns a default ``OPEN`` phase if the conversation has no persisted
+        phase yet (first turn in a new thread).
+        """
+
+        raw = conversation.learning_phase_json
+        if not isinstance(raw, dict):
+            return DurableLearningPhase()
+        try:
+            return DurableLearningPhase.model_validate(raw)
+        except Exception:
+            # Corrupted JSON should not crash the turn; fall back to OPEN.
+            return DurableLearningPhase()
+
+    async def save_durable_learning_phase(
+        self,
+        *,
+        conversation: TeachingConversation,
+        phase: DurableLearningPhase,
+    ) -> None:
+        """Persist the durable Learning-Native phase on the conversation row."""
+
+        conversation.learning_phase_json = phase.model_dump(mode="json")
+        await self._session.flush()
 
     async def fail_turn(self, started: StartedTeachingTurn, *, failure_code: str) -> None:
         if started.turn.status is TeachingTurnStatus.FAILED:

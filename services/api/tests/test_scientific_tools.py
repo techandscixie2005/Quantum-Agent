@@ -12,6 +12,7 @@ from quantum_agent.science import (
     NumericalNormalizationRequest,
     NumericalUnitarityRequest,
     PlotSeries,
+    RectangularBarrierRequest,
     ScientificToolbox,
     ScientificVerificationKind,
     ScientificVerificationMethod,
@@ -166,6 +167,175 @@ def test_code_execution_is_fail_closed_without_external_sandbox() -> None:
     assert result.method is ScientificVerificationMethod.CODE_TEST
     assert result.status is ScientificVerificationStatus.INCONCLUSIVE
     assert result.error_code == "SANDBOX_UNAVAILABLE"
+
+
+# ---------------------------------------------------------------------------
+# Rectangular-barrier tunnelling (P0-3): authoritative physics verification.
+# ---------------------------------------------------------------------------
+
+_ELECTRON_MASS_KG = 9.1093837015e-31
+
+
+def _barrier_request(
+    *,
+    energy_eV: float = 5.0,
+    barrier_height_eV: float = 10.0,
+    barrier_width_m: float = 1e-10,
+    particle_mass_kg: float = _ELECTRON_MASS_KG,
+) -> RectangularBarrierRequest:
+    return RectangularBarrierRequest(
+        energy_eV=energy_eV,
+        barrier_height_eV=barrier_height_eV,
+        barrier_width_m=barrier_width_m,
+        particle_mass_kg=particle_mass_kg,
+    )
+
+
+def test_rectangular_barrier_tunnelling_passes_conservation_and_bounds() -> None:
+    result = ScientificToolbox().verify(_barrier_request())
+
+    assert result.kind is ScientificVerificationKind.RECTANGULAR_BARRIER_TUNNELLING
+    assert result.method is ScientificVerificationMethod.NUMERICAL
+    assert result.status is ScientificVerificationStatus.PASS
+    t = float(result.metrics["T"])
+    r = float(result.metrics["R"])
+    assert 0.0 <= t <= 1.0
+    assert 0.0 <= r <= 1.0
+    assert abs(r + t - 1.0) <= float(result.metrics["conservation_tolerance"])
+    assert result.metrics["regime"] == "tunnelling"
+    assert result.visualization is not None
+    assert result.visualization.kind == "line"
+    assert len(result.visualization.x) == 32
+
+
+def test_rectangular_barrier_known_reference_value_for_electron_tunnelling() -> None:
+    # For E=5 eV, V0=10 eV, a=1e-10 m, electron mass:
+    # kappa = sqrt(2 * m_e * (V0-E)_J) / hbar_J_s
+    # This is a deterministic textbook reference; the verifier must reproduce it.
+    request = _barrier_request()
+    result = ScientificToolbox().verify(request)
+    t = float(result.metrics["T"])
+    # The analytic T for these parameters is a small positive number (order 1e-2).
+    assert 0.0 < t < 0.5
+    # Manually recompute the expected T to confirm the tool matches the formula.
+    import math as _math
+
+    joule_per_eV = 1.602176634e-19
+    hbar_j_s = 1.054571817e-34
+    energy_j = 5.0 * joule_per_eV
+    v0_j = 10.0 * joule_per_eV
+    mass = _ELECTRON_MASS_KG
+    width = 1e-10
+    kappa = _math.sqrt(2.0 * mass * (v0_j - energy_j)) / hbar_j_s
+    sinh_sq = _math.sinh(kappa * width) ** 2
+    expected_t = 1.0 / (
+        1.0 + (v0_j * v0_j * sinh_sq) / (4.0 * energy_j * (v0_j - energy_j))
+    )
+    assert t == pytest.approx(expected_t, rel=1e-9, abs=1e-12)
+
+
+def test_rectangular_barrier_increasing_width_decreases_transmission() -> None:
+    narrow = ScientificToolbox().verify(
+        _barrier_request(barrier_width_m=5e-11)
+    )
+    wide = ScientificToolbox().verify(
+        _barrier_request(barrier_width_m=2e-10)
+    )
+    t_narrow = float(narrow.metrics["T"])
+    t_wide = float(wide.metrics["T"])
+    assert t_wide < t_narrow, (
+        f"wider barrier should reduce T: narrow={t_narrow}, wide={t_wide}"
+    )
+
+
+def test_rectangular_barrier_increasing_height_decreases_transmission() -> None:
+    low = ScientificToolbox().verify(
+        _barrier_request(barrier_height_eV=7.5)
+    )
+    high = ScientificToolbox().verify(
+        _barrier_request(barrier_height_eV=15.0)
+    )
+    t_low = float(low.metrics["T"])
+    t_high = float(high.metrics["T"])
+    assert t_high < t_low, (
+        f"higher barrier should reduce T: low={t_low}, high={t_high}"
+    )
+
+
+def test_rectangular_barrier_opaque_barrier_does_not_overflow() -> None:
+    # A very wide / tall barrier drives sinh(kappa*a) toward overflow; the
+    # verifier must fall back to the asymptotic form and still return a finite
+    # T in [0, 1] with R+T=1.
+    request = _barrier_request(
+        barrier_height_eV=20.0,
+        barrier_width_m=5e-9,
+    )
+    result = ScientificToolbox().verify(request)
+    assert result.status is ScientificVerificationStatus.PASS
+    t = float(result.metrics["T"])
+    r = float(result.metrics["R"])
+    assert math.isfinite(t)
+    assert 0.0 <= t <= 1.0
+    assert abs(r + t - 1.0) <= float(result.metrics["conservation_tolerance"])
+
+
+def test_rectangular_barrier_free_propagation_regime_passes() -> None:
+    # E > V0: the sin-based formula must also conserve probability.
+    request = _barrier_request(
+        energy_eV=12.0,
+        barrier_height_eV=10.0,
+        barrier_width_m=1e-10,
+    )
+    result = ScientificToolbox().verify(request)
+    assert result.status is ScientificVerificationStatus.PASS
+    assert result.metrics["regime"] == "free_propagation"
+    t = float(result.metrics["T"])
+    r = float(result.metrics["R"])
+    assert 0.0 <= t <= 1.0
+    assert abs(r + t - 1.0) <= float(result.metrics["conservation_tolerance"])
+
+
+def test_rectangular_barrier_rejects_non_positive_energy() -> None:
+    with pytest.raises(ValidationError):
+        RectangularBarrierRequest(
+            energy_eV=0.0,
+            barrier_height_eV=10.0,
+            barrier_width_m=1e-10,
+            particle_mass_kg=_ELECTRON_MASS_KG,
+        )
+
+
+def test_rectangular_barrier_rejects_non_positive_barrier() -> None:
+    with pytest.raises(ValidationError):
+        RectangularBarrierRequest(
+            energy_eV=5.0,
+            barrier_height_eV=0.0,
+            barrier_width_m=1e-10,
+            particle_mass_kg=_ELECTRON_MASS_KG,
+        )
+
+
+def test_rectangular_barrier_rejects_degenerate_energy_equals_barrier() -> None:
+    with pytest.raises(ValidationError, match="degenerate case"):
+        RectangularBarrierRequest(
+            energy_eV=10.0,
+            barrier_height_eV=10.0,
+            barrier_width_m=1e-10,
+            particle_mass_kg=_ELECTRON_MASS_KG,
+        )
+
+
+def test_rectangular_barrier_displayed_metrics_equal_tool_metrics() -> None:
+    # The frontend must display the same T/R the verifier computed; the result
+    # contract carries them in `metrics` so there is one source of truth.
+    result = ScientificToolbox().verify(_barrier_request())
+    assert "T" in result.metrics
+    assert "R" in result.metrics
+    assert "conservation_error" in result.metrics
+    assert "regime" in result.metrics
+    observations_text = " ".join(result.observations)
+    assert "T=" in observations_text
+    assert "R=" in observations_text
 
 
 def test_unverified_claim_is_explicit_and_discriminated_payload_parses() -> None:

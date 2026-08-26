@@ -221,6 +221,49 @@ async function maybeSubmitSoloAttempt(page: Page, response: string): Promise<boo
 }
 
 /**
+ * PRD V3.0 P0-3: switch to run_experiments mode and arm the real
+ * rectangular-barrier tunnelling request, then send a turn.  The frontend
+ * builds a ``rectangular_barrier_tunnelling`` scientific_request from the
+ * barrier energy/height/width sliders; the backend scientific_tools node
+ * runs the authoritative Python tool; the result is rendered in the
+ * ``tunnelling-metrics`` testid.  This is the hard-asserted real physics
+ * verification — no mock, no fabrication.
+ */
+async function sendRealTunnellingTurn(
+  page: Page,
+  message: string,
+): Promise<void> {
+  // Switch to run_experiments mode (labelled "实验" in the mode strip).
+  const experimentsButton = page.getByRole("button", { name: /^实验/ });
+  await expect(experimentsButton).toBeVisible();
+  await experimentsButton.click();
+
+  // Arm the rectangular-barrier tunnelling request via the golden-tunnelling
+  // checkbox.  The default slider values are E=5 eV, V0=10 eV, a=1e-10 m,
+  // electron mass — the canonical E<V0 tunnelling regime.
+  const tunnellingToggle = page.getByLabel(/量子隧穿/);
+  if (await tunnellingToggle.isVisible().catch(() => false)) {
+    const isChecked = await tunnellingToggle.isChecked();
+    if (!isChecked) await tunnellingToggle.check();
+  }
+
+  const streamResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/teaching/turns/stream" &&
+      response.request().method() === "POST",
+    { timeout: 240_000 },
+  );
+  const messageBox = page.getByLabel("给 Quantum Agent 的问题");
+  await messageBox.fill(message);
+  const sendButton = page.getByRole("button", { name: /发送|运行/ });
+  await expect(sendButton).toBeEnabled();
+  await sendButton.click();
+  const response = await streamResponse;
+  expect(response.ok(), await response.text().catch(() => "")).toBe(true);
+  await waitForWorkflowTerminal(page);
+}
+
+/**
  * Snapshot the LearningEvidenceStatistics for the course/edition using the
  * TA token.  This reads directly from PostgreSQL — not frontend state.
  */
@@ -342,6 +385,34 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
     );
     terminal = await waitForWorkflowTerminal(page);
     expect(terminal).toBe("completed");
+
+    // ── Stage 3b: HARD-ASSERTED real rectangular-barrier tunnelling tool ──
+    // PRD V3.0 P0-3: the live test must prove the authoritative Python
+    // rectangular-barrier tool ran and produced a real T/R pair with
+    // conservation |R+T-1|<=tolerance.  We switch to run_experiments mode
+    // and arm the golden-tunnelling request, which sends a real
+    // ``rectangular_barrier_tunnelling`` scientific_request through the
+    // FastAPI → LangGraph → scientific_tools_node → toolbox.verify path.
+    // No mock, no fabrication: the displayed T/R must come from the tool.
+    await sendRealTunnellingTurn(
+      page,
+      "请用矩势垒散射工具计算 E=5eV, V0=10eV, a=1e-10m 的透射概率 T 和反射概率 R，并验证 R+T=1。",
+    );
+    // The tunnelling-metrics panel must render with real tool-derived values.
+    await expect(page.getByTestId("tunnelling-metrics")).toBeVisible({ timeout: 30_000 });
+    // The regime must be "tunnelling" (E<V0 for the default parameters).
+    await expect(page.getByTestId("tunnelling-regime")).toContainText(/tunnelling/);
+    // The T and R values must be finite numbers in [0,1].  We assert the
+    // panel shows numeric text matching the tool's toPrecision(6) output
+    // (0 < T < 1, 0 < R < 1).  For E=5,V0=10,a=1e-10 the analytic T is
+    // ~0.3337, R ~0.6663 — we assert the panel shows non-trivial values
+    // (not 0, not 1, not empty).
+    const metricsText = await page.getByTestId("tunnelling-metrics").textContent();
+    expect(metricsText, "tunnelling-metrics must show a non-trivial T in (0,1)").toMatch(/透射 T = 0\.\d+/);
+    expect(metricsText, "tunnelling-metrics must show a non-trivial R in (0,1)").toMatch(/反射 R = 0\.\d+/);
+    expect(metricsText, "tunnelling-metrics must show the conservation error").toMatch(/守恒/);
+    // Switch back to learn_concepts for the remaining pedagogical stages.
+    await page.getByRole("button", { name: /^概念/ }).click();
 
     // ── Stage 4: prediction-vs-result comparison + student explanation ──
     await sendStudentMessage(

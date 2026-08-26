@@ -16,9 +16,9 @@ the persistence and the LLM calls.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -56,6 +56,31 @@ __all__ = [
     "TeachBackProposal",
     "TransferProposal",
 ]
+
+
+# PRD V3.0 P1-1: a stable bucket UUID for evidence rows that are not tagged
+# with a concept candidate.  Using a fixed UUID (instead of ``uuid4()`` on
+# every ``build_cognitive_mirror`` call) means untagged observations group
+# together across turns rather than each appearing under a fresh concept id.
+_UNTAGGED_CONCEPT_BUCKET: UUID = UUID("00000000-0000-4000-8000-000000000000")
+
+
+@dataclass(frozen=True, slots=True)
+class _CurrentTurnEvidenceView:
+    """A read-only view that quacks like a ``LearningEvidence`` row.
+
+    The Cognitive Mirror merges current-turn observations (which are not yet
+    flushed to the database) with persisted history.  This view exposes the
+    small attribute surface the mirror reads (``kind``, ``observation``,
+    ``evidence_json``, ``concept_candidate_id``, ``created_at``) without
+    pretending to be a real SQLAlchemy row.
+    """
+
+    kind: LearningEvidenceKind
+    observation: str
+    evidence_json: dict[str, object]
+    concept_candidate_id: UUID | None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +154,20 @@ class LearningNativePolicy:
 
     MINIMUM_COMMITMENT_LENGTH: int = 2
     MAXIMUM_COMMITMENT_LENGTH: int = 4_000
+    # Minimum meaningful length for a free-text student_attempt to count as a
+    # cognitive commitment.  A single character like "a" or "。" is not a
+    # prediction; a real prediction is at least a few characters of reasoning.
+    MINIMUM_ATTEMPT_LENGTH: int = 3
+
+    # Deterministic fallback commitment prompt used when the model is
+    # unavailable or returns garbage.  This is the PRD V3.0 Axiom 1
+    # fail-closed guarantee: model failure must never bypass the gate.
+    FALLBACK_COMMITMENT_PROMPT: str = (
+        "在看解释前，先写下你目前的预测或第一步推理，并给出一条理由。"
+    )
+    FALLBACK_COMMITMENT_REASON: str = (
+        "承诺门失败闭合：模型未生成承诺提示，使用确定性回退提示。"
+    )
 
     def decide_pre_generation(
         self,
@@ -175,11 +214,23 @@ class LearningNativePolicy:
 
         Returns the resolved ``CognitiveCommitment``, the policy action the
         tutor should surface, and any evidence observations to persist.
+
+        Fail-closed semantics (PRD V3.0 Axiom 1): when the release level is
+        QUESTION_ONLY (the deterministic eligibility policy already decided a
+        commitment is required), a missing model proposal does NOT bypass the
+        gate.  We use a deterministic fallback prompt instead.  Model failure
+        can never release the answer.
         """
 
-        # When the student has already committed an attempt this turn, the
-        # gate is satisfied by construction; we do not ask twice.
+        # When the student has already committed a meaningful attempt this
+        # turn, the gate is satisfied by construction; we do not ask twice.
+        # A trivially short attempt (e.g. "a") does NOT satisfy the gate.
         if request_has_attempt and submission is None:
+            # The caller passes request_has_attempt=True when student_attempt
+            # is non-None.  We re-check the attempt length here via the
+            # submission_confidence path is not applicable; the meaningfulness
+            # check is done by the caller before setting request_has_attempt.
+            # See ``attempt_is_meaningful``.
             return (
                 CognitiveCommitment(
                     gate_decision=CommitmentGateDecision.PROCEED,
@@ -193,7 +244,8 @@ class LearningNativePolicy:
             )
 
         # If the deterministic policy never enforces a gate for this release
-        # level (e.g. a teacher-configured full-solution release), proceed.
+        # level (e.g. a teacher-configured full-solution release, or a factual
+        # lookup that legitimately bypasses), proceed without a commitment.
         if not release_is_question_only and proposal is None and submission is None:
             return (
                 CognitiveCommitment(
@@ -207,22 +259,7 @@ class LearningNativePolicy:
                 [],
             )
 
-        # No proposal means we cannot elicit a commitment; proceed without one
-        # rather than blocking the student.
-        if proposal is None and submission is None:
-            return (
-                CognitiveCommitment(
-                    gate_decision=CommitmentGateDecision.PROCEED,
-                    attempt_required=False,
-                    candidate_prompt="",
-                    reason_summary="本轮未生成承诺提示，未阻止回答。",
-                    accepted=True,
-                ),
-                LearningPolicyAction.GIVE_HINT,
-                [],
-            )
-
-        # The student submitted a commitment; validate it deterministically.
+        # The student submitted a formal commitment; validate it deterministically.
         if submission is not None and submission.attempt_required:
             accepted = self._submission_accepted(submission, submission_confidence)
             resolved = submission.model_copy(
@@ -279,7 +316,23 @@ class LearningNativePolicy:
                 )
             return resolved, action, evidence
 
-        # We have a proposal and no submission: enforce the gate.
+        # Fail-closed: the release level requires a commitment (QUESTION_ONLY)
+        # but the model did not propose a prompt.  Use the deterministic
+        # fallback prompt rather than releasing the answer.  This is the
+        # critical P0-1 fix: model unavailability cannot bypass the gate.
+        if release_is_question_only and proposal is None and submission is None:
+            fallback = CognitiveCommitment(
+                gate_decision=CommitmentGateDecision.ATTEMPT_REQUIRED,
+                attempt_required=True,
+                attempt_type=CommitmentKind.PREDICTION,
+                candidate_prompt=self.FALLBACK_COMMITMENT_PROMPT,
+                reason_summary=self.FALLBACK_COMMITMENT_REASON,
+                accepted=False,
+            )
+            return fallback, LearningPolicyAction.ASK_COMMITMENT, []
+
+        # We have a proposal and no submission: enforce the gate with the
+        # model-proposed prompt (the model only chose the wording).
         assert proposal is not None  # narrowed above
         gate = CognitiveCommitment(
             gate_decision=CommitmentGateDecision.ATTEMPT_REQUIRED,
@@ -290,6 +343,25 @@ class LearningNativePolicy:
             accepted=False,
         )
         return gate, LearningPolicyAction.ASK_COMMITMENT, []
+
+    @classmethod
+    def attempt_is_meaningful(cls, attempt: str | None) -> bool:
+        """Deterministic check: does this free-text attempt count as a commitment?
+
+        A trivially short or whitespace-only attempt does NOT satisfy the
+        gate.  This is used by the caller to decide whether
+        ``request_has_attempt`` should be True for gate purposes.
+        """
+
+        if attempt is None:
+            return False
+        text = attempt.strip()
+        if len(text) < cls.MINIMUM_ATTEMPT_LENGTH:
+            return False
+        # Reject attempts that are only punctuation / whitespace.
+        if not any(character.isalnum() for character in text):
+            return False
+        return True
 
     @staticmethod
     def _submission_accepted(
@@ -440,74 +512,38 @@ class LearningNativePolicy:
             assistance_locked=True,
             unlock_reason="",
         )
+        # PRD V3.0 P1-1: emit TRANSFER_ASSIGNED + SOLO_ASSIGNED so the Cognitive
+        # Mirror cannot promote a learner on task generation alone.  The task
+        # id (the first source concept id) correlates later attempts to this
+        # assignment; only a TRANSFER_VERIFIED row with the same task id
+        # contributes to TRANSFER_READY / unaided_retrieval.
+        task_id = str(task.source_concept_ids[0]) if task.source_concept_ids else ""
         evidence = [
             LearningNativeEvidence(
-                kind=LearningEvidenceKind.TRANSFER,
+                kind=LearningEvidenceKind.TRANSFER_ASSIGNED,
                 observation=(
-                    f"系统构造 {task.transfer_type.value} 迁移任务并进入 Solo Mode。"
+                    f"系统构造 {task.transfer_type.value} 迁移任务（仅指派，不计为已验证迁移）。"
                 ),
                 evidence_json={
                     "transfer_type": task.transfer_type.value,
                     "verifiable": task.verifiable,
                     "source_concept_ids": [str(cid) for cid in task.source_concept_ids],
+                    "active_transfer_task_id": task_id,
+                    "outcome": "TRANSFER_ASSIGNED",
+                    "verified": False,
                 },
-            )
+            ),
+            LearningNativeEvidence(
+                kind=LearningEvidenceKind.SOLO_ASSIGNED,
+                observation="系统进入 Solo Mode，等待学生独立完成迁移任务。",
+                evidence_json={
+                    "active_transfer_task_id": task_id,
+                    "outcome": "SOLO_ASSIGNED",
+                    "verified": False,
+                },
+            ),
         ]
         return task, solo, evidence
-
-    def record_transfer_attempt(
-        self,
-        *,
-        solo: SoloMode,
-        response: str,
-        confidence: float | None,
-        verified: bool,
-    ) -> tuple[SoloMode, list[LearningNativeEvidence]]:
-        """Record a student's transfer/solo attempt and decide whether to exit."""
-
-        text = response.strip()
-        if not text:
-            return solo, []
-        observations: list[LearningNativeEvidence] = [
-            LearningNativeEvidence(
-                kind=LearningEvidenceKind.SOLO_ATTEMPT,
-                observation=(
-                    "学生在 Solo Mode 下提交迁移尝试；"
-                    f"确定性验证状态={'verified' if verified else 'unverified'}。"
-                ),
-                evidence_json={
-                    "response_length": len(text),
-                    "verified": verified,
-                    "confidence": confidence,
-                    "transfer_type": (
-                        solo.active_transfer.transfer_type.value
-                        if solo.active_transfer
-                        else None
-                    ),
-                },
-            )
-        ]
-        if confidence is not None:
-            observations.append(
-                LearningNativeEvidence(
-                    kind=LearningEvidenceKind.CONFIDENCE,
-                    observation=f"迁移尝试自报置信度 {round(confidence, 3)}。",
-                    evidence_json={
-                        "confidence": confidence,
-                        "scale": "percent_normalized",
-                        "context": "solo_attempt",
-                    },
-                )
-            )
-        # Exit Solo Mode once the student has submitted a non-empty attempt.
-        exited = solo.model_copy(
-            update={
-                "status": SoloModeStatus.EXITED,
-                "assistance_locked": False,
-                "unlock_reason": "学生已提交迁移尝试，恢复 AI 辅助。",
-            }
-        )
-        return exited, observations
 
     @staticmethod
     def exit_solo(solo: SoloMode) -> SoloMode:
@@ -531,12 +567,20 @@ class LearningNativePolicy:
         target_concept_id: UUID | None,
         diagnosis: DiagnosisOutput,
         evidence_packet: EvidencePacket,
+        current_turn_evidence: Sequence[LearningNativeEvidence] | None = None,
     ) -> CognitiveMirror:
         """Aggregate evidence-based concept state from persisted observations.
 
         No personality, no mastery percentage.  The mirror only reports the
         bounded observation history the deterministic workflow already
         recorded, plus the diagnosis status of the current turn.
+
+        PRD V3.0 P1-1: the current-turn evidence (commitment, teach-back,
+        transfer / solo lifecycle) is passed in explicitly and merged with
+        the persisted rows so the mirror reflects this turn's observations
+        even though they are flushed to the database only in the later
+        ``assemble_result`` node.  This gives the mirror transactionally
+        equivalent semantics without reordering the graph.
         """
 
         # Pull the recent learning evidence for this student.  We deliberately
@@ -554,9 +598,28 @@ class LearningNativePolicy:
         )
         rows = list(result.scalars().all())
 
+        # PRD V3.0 P1-1: merge the current-turn evidence observations so the
+        # mirror sees this turn's commitment / teach-back / transfer verdicts
+        # even though the durable rows are written by the later assemble node.
+        # We synthesise lightweight LearningEvidence-like rows keyed by kind +
+        # observation so the grouping logic below picks them up.  These are
+        # views, not persisted rows, so they do not need a real id.
+        merged_rows: list[LearningEvidence | _CurrentTurnEvidenceView] = list(rows)
+        if current_turn_evidence:
+            for observation in current_turn_evidence:
+                merged_rows.insert(
+                    0,
+                    _CurrentTurnEvidenceView(
+                        kind=observation.kind,
+                        observation=observation.observation,
+                        evidence_json=observation.evidence_json,
+                        concept_candidate_id=target_concept_id,
+                    ),
+                )
+
         # Group observations by concept candidate id, if any.
-        by_concept: dict[UUID | None, list[LearningEvidence]] = {}
-        for row in rows:
+        by_concept: dict[UUID | None, list[LearningEvidence | _CurrentTurnEvidenceView]] = {}
+        for row in merged_rows:
             by_concept.setdefault(row.concept_candidate_id, []).append(row)
 
         concept_states: list[ConceptMirrorState] = []
@@ -578,7 +641,7 @@ class LearningNativePolicy:
             target_concept_id=target_concept_id,
             evidence_packet=evidence_packet,
             diagnosis=diagnosis,
-            total_observations=len(rows),
+            total_observations=len(merged_rows),
         )
         return CognitiveMirror(
             current_concept_id=target_concept_id,
@@ -591,38 +654,71 @@ class LearningNativePolicy:
     def _concept_state(
         *,
         concept_id: UUID | None,
-        observations: Sequence[LearningEvidence],
+        observations: Sequence[LearningEvidence | _CurrentTurnEvidenceView],
         diagnosis: DiagnosisOutput | None,
     ) -> ConceptMirrorState:
         kinds = {row.kind for row in observations}
         has_attempt = LearningEvidenceKind.STUDENT_ATTEMPT in kinds
         has_commitment = LearningEvidenceKind.COMMITMENT in kinds
         has_teach_back = LearningEvidenceKind.TEACH_BACK in kinds
-        has_transfer = LearningEvidenceKind.SOLO_ATTEMPT in kinds or (
-            LearningEvidenceKind.TRANSFER in kinds
+        # PRD V3.0 P1-1: a transfer task being ASSIGNED is not evidence of
+        # transfer competence.  Only a VERIFIED, task-correlated, unaided
+        # attempt counts.  We honour both the new separated kinds
+        # (TRANSFER_VERIFIED) and the legacy SOLO_ATTEMPT / TRANSFER rows,
+        # but only when their evidence_json marks the attempt as verified.
+        verified_transfer_kinds = {
+            LearningEvidenceKind.TRANSFER_VERIFIED,
+        }
+        verified_transfer_rows = [
+            row
+            for row in observations
+            if row.kind in verified_transfer_kinds
+            and bool(row.evidence_json.get("verified", False))
+        ]
+        # Legacy compatibility: pre-remediation SOLO_ATTEMPT rows recorded
+        # outcome='SOLO_VERIFIED' + verified=True for successful attempts.
+        # Count them only when verified; the unverified legacy rows must NOT
+        # contribute to readiness.
+        for row in observations:
+            if row.kind is LearningEvidenceKind.SOLO_ATTEMPT and bool(
+                row.evidence_json.get("verified", False)
+            ):
+                verified_transfer_rows.append(row)
+        has_verified_transfer = bool(verified_transfer_rows)
+        has_assigned_transfer = (
+            LearningEvidenceKind.TRANSFER_ASSIGNED in kinds
+            or LearningEvidenceKind.SOLO_ASSIGNED in kinds
+            or LearningEvidenceKind.TRANSFER in kinds
         )
         has_tool_pass = any(
             row.kind is LearningEvidenceKind.TOOL_OBSERVATION
             and row.evidence_json.get("status") == "pass"
             for row in observations
         )
-        if has_transfer and has_teach_back:
+        if has_verified_transfer and has_teach_back:
             label = ConceptStateLabel.TRANSFER_READY
         elif has_teach_back and has_tool_pass:
             label = ConceptStateLabel.DEMONSTRATED
-        elif has_attempt or has_commitment:
+        elif has_verified_transfer:
+            # A verified transfer without a recorded teach-back is still
+            # demonstrated, not merely developing.
+            label = ConceptStateLabel.DEMONSTRATED
+        elif has_attempt or has_commitment or has_assigned_transfer:
             label = ConceptStateLabel.DEVELOPING
         elif observations:
             label = ConceptStateLabel.EXPOSED
         else:
             label = ConceptStateLabel.UNKNOWN
 
-        # Fragile when the latest diagnosis observed a misconception.
+        # Fragile when the latest diagnosis observed a misconception, or when
+        # a transfer attempt was submitted but failed verification.
         if (
             diagnosis is not None
             and diagnosis.status is DiagnosisStatus.MODEL_INFERENCE
             and diagnosis.likely_misconception
         ):
+            label = ConceptStateLabel.FRAGILE
+        if LearningEvidenceKind.TRANSFER_FAILED in kinds:
             label = ConceptStateLabel.FRAGILE
 
         confidence_history: list[tuple[float, bool]] = []
@@ -638,22 +734,24 @@ class LearningNativePolicy:
                 hint_dependency.append("学生在解释前提交了承诺。")
             elif row.kind is LearningEvidenceKind.STUDENT_ATTEMPT:
                 hint_dependency.append("学生提交了尝试。")
+            elif row.kind is LearningEvidenceKind.TRANSFER_ASSIGNED:
+                hint_dependency.append("系统指派了迁移任务（尚未验证）。")
+            elif row.kind is LearningEvidenceKind.TRANSFER_VERIFIED:
+                hint_dependency.append("学生通过确定性验证完成了独立迁移。")
 
         misconception_candidates: list[str] = []
         if diagnosis is not None and diagnosis.likely_misconception:
             misconception_candidates.append(diagnosis.likely_misconception)
 
         return ConceptMirrorState(
-            concept_candidate_id=concept_id or uuid4(),
+            concept_candidate_id=concept_id or _UNTAGGED_CONCEPT_BUCKET,
             label=label,
             evidence_summary=[row.observation[:200] for row in observations[:10]],
             confidence_history=confidence_history[:24],
             calibration_gap=None,
-            unaided_retrieval=has_transfer,
+            unaided_retrieval=has_verified_transfer,
             transfer_evidence=[
-                row.observation[:200]
-                for row in observations
-                if row.kind is LearningEvidenceKind.SOLO_ATTEMPT
+                row.observation[:200] for row in verified_transfer_rows
             ][:6],
             hint_dependency=hint_dependency[:6],
             misconception_candidates=misconception_candidates[:6],

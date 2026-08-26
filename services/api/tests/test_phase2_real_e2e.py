@@ -267,6 +267,12 @@ async def test_real_course_evidence_drives_attempt_gated_teaching_workflow(
                 request=TeachingTurnInput(
                     mode=TeachingMode.LEARN_CONCEPTS,
                     message=CONCEPT_LABEL,
+                    # PRD V3.0 P0-1: a concept question with no factual-lookup
+                    # marker requires a commitment.  Submit a student attempt
+                    # so the gate is satisfied and the concept-explanation
+                    # path (FULL_EXPLANATION with the taxonomy citation) is
+                    # exercised, matching the test's intent.
+                    student_attempt="我预测波函数的统计解释与概率密度有关。",
                 ),
             )
             exercise_turn = await machine.run(

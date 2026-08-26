@@ -300,10 +300,10 @@ const GOLDEN_LOOP_STAGES: Array<{
         orientation: "现在运行真实模拟，对比你的预测。",
         claims: [
           {
-            text: "透射概率 T = 0.0821，反射概率 R = 0.9179，R+T=1 守恒。",
+            text: "透射概率 T = 0.3337，反射概率 R = 0.6663，R+T=1 守恒。",
             support_basis: "numerical_verification",
             evidence_ids: [],
-            scientific_result_ids: [`numerical_unitarity:${"a".repeat(64)}`],
+            scientific_result_ids: [`rectangular_barrier_tunnelling:${"a".repeat(64)}`],
           },
         ],
         next_question: "哪一个原先假设与你看到的结果冲突？",
@@ -312,14 +312,30 @@ const GOLDEN_LOOP_STAGES: Array<{
       },
       scientific_results: [
         {
-          kind: "numerical_unitarity",
+          kind: "rectangular_barrier_tunnelling",
           method: "numerical",
           status: "pass",
           tool: { name: "NumPy", version: "2.0" },
           inputs_sha256: "a".repeat(64),
-          observations: ["透射概率 T = 0.0821", "反射概率 R = 0.9179", "R+T=1 守恒通过"],
-          limitations: ["仅验证矩形势垒离散化结果。"],
-          metrics: { T: 0.0821, R: 0.9179, conservation: 1.0 },
+          observations: [
+            "Rectangular barrier: E=5 eV, V0=10 eV, a=1e-10 m.",
+            "Transmission T=0.333682287217, reflection R=0.666317712783, |R+T-1|=0.000e+00.",
+          ],
+          limitations: [
+            "Stationary scattering calculation; does not model wave-packet dispersion or finite-time effects.",
+            "Uses the analytic rectangular-barrier formula; the E≈V0 degenerate band is rejected by the request validator.",
+          ],
+          metrics: {
+            T: 0.333682287217,
+            R: 0.666317712783,
+            conservation_error: 0.0,
+            conservation_tolerance: 1e-9,
+            energy_eV: 5.0,
+            barrier_height_eV: 10.0,
+            barrier_width_m: 1e-10,
+            particle_mass_kg: 9.1093837015e-31,
+            regime: "tunnelling",
+          },
           visualization: null,
           error_code: null,
         },
@@ -336,8 +352,13 @@ const GOLDEN_LOOP_STAGES: Array<{
     }),
     assert: async (page) => {
       await expect(page.getByTestId("agent-tutor-result")).toBeVisible({ timeout: 15000 });
-      await expect(page.getByText(/0\.0821/).first()).toBeVisible();
-      await expect(page.getByText(/守恒/).first()).toBeVisible();
+      // PRD V3.0 P0-3: the displayed T/R must come from the authoritative
+      // rectangular_barrier_tunnelling tool, not a fabricated numerical_unitarity.
+      await expect(page.getByTestId("tunnelling-metrics")).toBeVisible();
+      // Number(0.333682287217).toPrecision(6) === "0.333682"
+      await expect(page.getByText(/0\.333682/).first()).toBeVisible();
+      await expect(page.getByText(/0\.666318/).first()).toBeVisible();
+      await expect(page.getByText(/tunnelling/).first()).toBeVisible();
     },
   },
   {

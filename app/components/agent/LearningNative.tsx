@@ -88,6 +88,8 @@ export function CommitmentCard({
       solo_attempt: null,
       request_transfer: false,
       request_solo_exit: false,
+      request_teach_back: false,
+      request_transfer_task: false,
     });
   }
 
@@ -187,6 +189,8 @@ export function TeachBackCard({
       solo_attempt: null,
       request_transfer: false,
       request_solo_exit: false,
+      request_teach_back: false,
+      request_transfer_task: false,
     });
   }
 
@@ -271,6 +275,8 @@ export function TransferCard({
       solo_attempt: { response: trimmed, confidence: confidence / 100 },
       request_transfer: false,
       request_solo_exit: false,
+      request_teach_back: false,
+      request_transfer_task: false,
     });
   }
 
@@ -283,6 +289,8 @@ export function TransferCard({
       solo_attempt: null,
       request_transfer: false,
       request_solo_exit: true,
+      request_teach_back: false,
+      request_transfer_task: false,
     });
   }
 

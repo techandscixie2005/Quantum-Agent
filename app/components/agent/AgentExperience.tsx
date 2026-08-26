@@ -15,20 +15,23 @@ import {
   Image as ImageIcon,
   Link2,
   LoaderCircle,
+  Lock,
   Menu,
   Network,
   PanelRight,
   Paperclip,
+  PenLine,
   Plus,
   Send,
   Sigma,
   Sparkles,
+  Target,
   Upload,
   X,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
 
 import {
   assertHitlScope,
@@ -87,6 +90,14 @@ type UploadRecord = Readonly<{
   error: string | null;
 }>;
 
+// PRD V3.0 P1-2: generate a client-side idempotency key for each turn so a
+// browser retry after a lost response cannot create duplicate AgentTrace or
+// LearningEvidence rows.  crypto.randomUUID is available in all modern
+// browsers and in the Node server runtime.
+function newClientRequestId(): string {
+  return crypto.randomUUID();
+}
+
 type TurnRequest = Readonly<{
   scope: TeachingScope;
   mode: TeachingMode;
@@ -96,6 +107,7 @@ type TurnRequest = Readonly<{
   attachmentIds: readonly string[];
   scientificRequest: Record<string, unknown> | null;
   learningNative: LearningNativeSubmission | null;
+  clientRequestId: string | null;
 }>;
 
 function isHitlOutcome(value: TeachingWorkflowOutcome): value is HitlInterruptResponse {
@@ -381,6 +393,73 @@ function SourcePreview({
   );
 }
 
+function SessionRequiredView({
+  onReload,
+  error,
+}: {
+  onReload: () => void;
+  error: unknown;
+}) {
+  const [secret, setSecret] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  async function submitDemoLogin(event: FormEvent) {
+    event.preventDefault();
+    if (!secret.trim() || submitting) return;
+    setSubmitting(true);
+    setLoginError(null);
+    try {
+      const response = await fetch("/api/auth/demo-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret: secret.trim() }),
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        setLoginError(detail.error ?? "Demo 登录被拒绝。");
+        return;
+      }
+      setSecret("");
+      onReload();
+    } catch {
+      setLoginError("无法连接 demo 登录服务。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className={styles.bootError}>
+      <Atom size={34} />
+      <p className={styles.kicker}>QUANTUM AGENT / SESSION REQUIRED</p>
+      <h1>无法进入课程工作台</h1>
+      <p>{error instanceof Error ? error.message : "课程会话不可用。"}</p>
+      <form onSubmit={submitDemoLogin} className={styles.demoLogin} aria-label="Demo 登录表单">
+        <p className={styles.kicker}>COMPETITION DEMO LOGIN</p>
+        <label htmlFor="demo-secret">Demo 密钥</label>
+        <input
+          id="demo-secret"
+          type="password"
+          autoComplete="off"
+          value={secret}
+          onChange={(event) => setSecret(event.target.value)}
+          maxLength={256}
+          placeholder="输入竞赛组织者提供的 demo 密钥"
+          aria-label="Demo 登录密钥"
+        />
+        <button type="submit" disabled={submitting || secret.trim().length < 8}>
+          {submitting ? "正在登录…" : "使用 demo 密钥进入"}
+        </button>
+        {loginError ? (
+          <p className={styles.hitlError} aria-live="polite"><CircleAlert /> {loginError}</p>
+        ) : null}
+      </form>
+      <button onClick={onReload}>重新检查会话</button>
+    </main>
+  );
+}
+
 export function AgentExperience() {
   const contextQuery = useQuery({
     queryKey: ["agent-course-context"],
@@ -407,6 +486,10 @@ export function AgentExperience() {
   const [rabiFrequency, setRabiFrequency] = useState(1);
   const [detuning, setDetuning] = useState(0);
   const [duration, setDuration] = useState(8);
+  const [goldenTunnelling, setGoldenTunnelling] = useState(false);
+  const [barrierEnergy, setBarrierEnergy] = useState(5);
+  const [barrierHeight, setBarrierHeight] = useState(10);
+  const [barrierWidth, setBarrierWidth] = useState(1e-10);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewUrlsRef = useRef(new Set<string>());
 
@@ -416,6 +499,35 @@ export function AgentExperience() {
       setCourseKey(`${courses[0].course_id}:${courses[0].curriculum_edition_id}`);
     }
   }, [courseKey, courses]);
+  // PRD V3.0 P0-2: persist the conversation ID across refresh / new tab so
+  // Solo Mode and the durable Learning Phase survive a page reload.  The
+  // backend is the source of truth; this only restores the thread identity.
+  useEffect(() => {
+    if (conversationId) {
+      try {
+        window.localStorage.setItem("qa_conversation_id", conversationId);
+      } catch {
+        // localStorage may be unavailable (private mode); fail silently.
+      }
+    } else {
+      try {
+        window.localStorage.removeItem("qa_conversation_id");
+      } catch {
+        // ignore
+      }
+    }
+  }, [conversationId]);
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem("qa_conversation_id");
+      if (stored && !conversationId) {
+        setConversationId(stored);
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const activeCourse =
     courses.find(
       (course) => `${course.course_id}:${course.curriculum_edition_id}` === courseKey,
@@ -436,6 +548,7 @@ export function AgentExperience() {
         attachment_ids: input.attachmentIds,
         scientific_request: input.scientificRequest,
         learning_native: input.learningNative,
+        client_request_id: input.clientRequestId,
       });
       const query = new URLSearchParams({
         course_id: input.scope.courseId,
@@ -608,18 +721,27 @@ export function AgentExperience() {
     }[mode];
     const scientificRequest =
       mode === "run_experiments"
-        ? {
-            kind: "two_level_simulation",
-            initial_state: [
-              { real: 1, imag: 0 },
-              { real: 0, imag: 0 },
-            ],
-            rabi_frequency: rabiFrequency,
-            detuning,
-            duration,
-            steps: 400,
-            absolute_tolerance: 1e-7,
-          }
+        ? goldenTunnelling
+          ? {
+              kind: "rectangular_barrier_tunnelling",
+              energy_eV: barrierEnergy,
+              barrier_height_eV: barrierHeight,
+              barrier_width_m: barrierWidth,
+              particle_mass_kg: 9.1093837015e-31,
+              conservation_tolerance: 1e-9,
+            }
+          : {
+              kind: "two_level_simulation",
+              initial_state: [
+                { real: 1, imag: 0 },
+                { real: 0, imag: 0 },
+              ],
+              rabi_frequency: rabiFrequency,
+              detuning,
+              duration,
+              steps: 400,
+              absolute_tolerance: 1e-7,
+            }
         : null;
     turnMutation.mutate({
       scope,
@@ -630,6 +752,7 @@ export function AgentExperience() {
       attachmentIds: ready.flatMap((item) => (item.remote ? [item.remote.id] : [])),
       scientificRequest,
       learningNative: null,
+      clientRequestId: newClientRequestId(),
     });
   }
 
@@ -644,6 +767,7 @@ export function AgentExperience() {
       attachmentIds: [],
       scientificRequest: null,
       learningNative: submission,
+      clientRequestId: newClientRequestId(),
     });
   }
 
@@ -651,6 +775,7 @@ export function AgentExperience() {
     if (!scope || interrupt || turnMutation.isPending) return;
     setMessage("我想学习量子隧穿：为什么 E<V0 时粒子仍可能透射？请用 Learning-Native 循环引导我。");
     setMode("run_experiments");
+    setGoldenTunnelling(true);
     setResult(null);
     setInterrupt(null);
     setConversationId(null);
@@ -687,20 +812,16 @@ export function AgentExperience() {
   const interpretation = reviewed?.interpretation ?? null;
   const reviewedVisualSpec = scientificResults.find((item) => item.visualization)?.visualization;
   const activeMode = MODES.find((item) => item.id === mode) ?? MODES[0]!;
+  const answerWithheldByGate = Boolean(
+    result?.learning_native?.commitment?.gate_decision === "attempt_required"
+    && !result.learning_native.commitment.accepted,
+  );
 
   if (contextQuery.isPending) {
     return <main className={styles.boot}><Atom /><p>正在建立课程边界与证据索引…</p></main>;
   }
   if (contextQuery.isError || !contextQuery.data) {
-    return (
-      <main className={styles.bootError}>
-        <Atom size={34} />
-        <p className={styles.kicker}>QUANTUM AGENT / SESSION REQUIRED</p>
-        <h1>无法进入课程工作台</h1>
-        <p>{contextQuery.error instanceof Error ? contextQuery.error.message : "课程会话不可用。"}</p>
-        <button onClick={() => void contextQuery.refetch()}>重新检查会话</button>
-      </main>
-    );
+    return <SessionRequiredView onReload={() => void contextQuery.refetch()} error={contextQuery.error} />;
   }
   if (!activeCourse || !scope) {
     return <main className={styles.bootError}><h1>尚无已发布课程</h1><p>请联系任课教师开通课程版本。</p></main>;
@@ -824,10 +945,38 @@ export function AgentExperience() {
           {mode === "run_experiments" ? (
             <section className={styles.experimentGrid}>
               <div className={styles.parameterPanel}>
-                <p className={styles.kicker}>NUMERICAL INPUT</p><h2>二能级系统</h2>
-                <label>Rabi 频率 <strong>{rabiFrequency.toFixed(2)}</strong><input type="range" min="0.1" max="4" step="0.1" value={rabiFrequency} onChange={(event) => setRabiFrequency(Number(event.target.value))} /></label>
-                <label>失谐量 <strong>{detuning.toFixed(2)}</strong><input type="range" min="-4" max="4" step="0.1" value={detuning} onChange={(event) => setDetuning(Number(event.target.value))} /></label>
-                <label>演化时间 <strong>{duration.toFixed(1)}</strong><input type="range" min="1" max="20" step="0.5" value={duration} onChange={(event) => setDuration(Number(event.target.value))} /></label>
+                <p className={styles.kicker}>NUMERICAL INPUT</p>
+                <div className={styles.experimentModeToggle}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={goldenTunnelling}
+                      onChange={(event) => setGoldenTunnelling(event.target.checked)}
+                      aria-label="切换到量子隧穿矩势垒模拟"
+                    />
+                    <span>矩势垒隧穿（Golden Loop）</span>
+                  </label>
+                </div>
+                {goldenTunnelling ? (
+                  <>
+                    <h2>矩势垒散射</h2>
+                    <label>粒子能量 E (eV) <strong>{barrierEnergy.toFixed(2)}</strong><input type="range" min="0.5" max="9" step="0.1" value={barrierEnergy} onChange={(event) => setBarrierEnergy(Number(event.target.value))} /></label>
+                    <label>势垒高度 V₀ (eV) <strong>{barrierHeight.toFixed(2)}</strong><input type="range" min="1" max="20" step="0.1" value={barrierHeight} onChange={(event) => setBarrierHeight(Number(event.target.value))} /></label>
+                    <label>势垒宽度 a (nm) <strong>{(barrierWidth * 1e9).toFixed(3)}</strong><input type="range" min="0.05" max="5" step="0.05" value={barrierWidth * 1e9} onChange={(event) => setBarrierWidth(Number(event.target.value) * 1e-9)} /></label>
+                    <small data-testid="tunnelling-regime-hint">
+                      {barrierEnergy < barrierHeight
+                        ? "E < V₀：量子隧穿区（解析 T 公式）"
+                        : "E > V₀：自由传播区（振荡 T 公式）"}
+                    </small>
+                  </>
+                ) : (
+                  <>
+                    <h2>二能级系统</h2>
+                    <label>Rabi 频率 <strong>{rabiFrequency.toFixed(2)}</strong><input type="range" min="0.1" max="4" step="0.1" value={rabiFrequency} onChange={(event) => setRabiFrequency(Number(event.target.value))} /></label>
+                    <label>失谐量 <strong>{detuning.toFixed(2)}</strong><input type="range" min="-4" max="4" step="0.1" value={detuning} onChange={(event) => setDetuning(Number(event.target.value))} /></label>
+                    <label>演化时间 <strong>{duration.toFixed(1)}</strong><input type="range" min="1" max="20" step="0.5" value={duration} onChange={(event) => setDuration(Number(event.target.value))} /></label>
+                  </>
+                )}
               </div>
               <div className={styles.plotPanel}>
                 <p className={styles.kicker}>VERIFIED PLOT</p>
@@ -846,6 +995,33 @@ export function AgentExperience() {
               pending={turnMutation.isPending || resumeMutation.isPending}
               onSubmit={submitLearningNative}
             />
+          ) : null}
+
+          {result && !answerWithheldByGate && !result.learning_native?.solo?.assistance_locked ? (
+            <section className={styles.learningNativeActions} aria-label="Learning-Native 阶段切换">
+              <button
+                type="button"
+                className={styles.phaseButton}
+                onClick={() => submitLearningNative({ commitment: null, confidence: null, teach_back: null, transfer_attempt: null, solo_attempt: null, request_transfer: false, request_solo_exit: false, request_teach_back: true, request_transfer_task: false })}
+                disabled={turnMutation.isPending || resumeMutation.isPending}
+                aria-label="请求 Teach-Back 重构"
+                data-testid="request-teach-back-button"
+              >
+                <PenLine size={13} />
+                进入 Teach-Back
+              </button>
+              <button
+                type="button"
+                className={styles.phaseButton}
+                onClick={() => submitLearningNative({ commitment: null, confidence: null, teach_back: null, transfer_attempt: null, solo_attempt: null, request_transfer: false, request_solo_exit: false, request_teach_back: false, request_transfer_task: true })}
+                disabled={turnMutation.isPending || resumeMutation.isPending}
+                aria-label="请求迁移任务并进入 Solo Mode"
+                data-testid="request-transfer-button"
+              >
+                <Target size={13} />
+                进入迁移 / Solo
+              </button>
+            </section>
           ) : null}
 
           {!result && !interrupt ? (
@@ -948,12 +1124,18 @@ export function AgentExperience() {
             </section>
             <section className={styles.sideCard}>
               <div className={styles.cardTitle}><span><BookOpen /></span><strong>课程引文</strong><em>{evidencePacket.evidence.length}</em></div>
+              {answerWithheldByGate ? (
+                <p className={styles.gatedEvidence} data-testid="evidence-gated-notice" role="status" aria-live="polite">
+                  <Lock aria-hidden="true" /> 承诺门激活期间，答案级引文已脱敏；提交预测后释放完整内容。
+                </p>
+              ) : null}
               {evidencePacket.evidence.map((evidence, index) => (
                 <button
                   className={styles.citation}
                   key={evidence.evidence_id}
                   onClick={() => setSelectedSource(evidence)}
                   data-testid="agent-citation"
+                  aria-label={`引文 ${index + 1}：${evidence.document_title}${answerWithheldByGate ? "（已脱敏）" : ""}`}
                 >
                   <span>E{String(index + 1).padStart(2, "0")}</span><div><strong>{evidence.document_title}</strong><small>{sourceLocator(evidence)} · {evidence.chapter ?? "课程材料"}</small><p>{evidence.evidence_snippet}</p></div><Link2 />
                 </button>
@@ -968,7 +1150,26 @@ export function AgentExperience() {
             </section>
             <section className={styles.sideCard}>
               <div className={styles.cardTitle}><span><Check /></span><strong>验证器</strong><em>{scientificResults.length}</em></div>
-              {scientificResults.length ? scientificResults.map((tool) => <article className={styles.toolResult} key={`${tool.kind}:${tool.inputs_sha256}`}><strong>{tool.kind.replaceAll("_", " ")}</strong><span data-status={tool.status}>{tool.status}</span><p>{tool.observations[0] ?? "验证已运行"}</p><small>{tool.tool.name} {tool.tool.version}</small></article>) : <p className={styles.noEvidence}>本轮没有需要运行的确定性工具。</p>}
+              {scientificResults.length ? scientificResults.map((tool) => {
+                const isBarrier = tool.kind === "rectangular_barrier_tunnelling";
+                const metrics = tool.metrics ?? {};
+                return (
+                  <article className={styles.toolResult} key={`${tool.kind}:${tool.inputs_sha256}`} data-testid="scientific-tool-result" data-tool-kind={tool.kind}>
+                    <strong>{tool.kind.replaceAll("_", " ")}</strong>
+                    <span data-status={tool.status}>{tool.status}</span>
+                    <p>{tool.observations[0] ?? "验证已运行"}</p>
+                    {isBarrier && typeof metrics.T === "number" && typeof metrics.R === "number" ? (
+                      <div data-testid="tunnelling-metrics" className={styles.tunnellingMetrics}>
+                        <span>透射 T = <strong>{Number(metrics.T).toPrecision(6)}</strong></span>
+                        <span>反射 R = <strong>{Number(metrics.R).toPrecision(6)}</strong></span>
+                        <span>守恒 |R+T−1| = <strong>{Number(metrics.conservation_error ?? 0).toExponential(3)}</strong></span>
+                        <span data-testid="tunnelling-regime">{String(metrics.regime ?? "")}</span>
+                      </div>
+                    ) : null}
+                    <small>{tool.tool.name} {tool.tool.version}</small>
+                  </article>
+                );
+              }) : <p className={styles.noEvidence}>本轮没有需要运行的确定性工具。</p>}
             </section>
             <section className={styles.policyCard}>
               <p className={styles.kicker}>POLICY GATE</p><h3>{interrupt ? "拟议回答正在等待复核" : `回答已限制为 ${release.release_level.replaceAll("_", " ")}`}</h3><p>{release.reason_code}</p><div><span>引用</span><strong>{validation.citation_ids_valid ? "通过" : "失败"}</strong></div><div><span>科学引用</span><strong>{validation.scientific_references_valid ? "通过" : "失败"}</strong></div>

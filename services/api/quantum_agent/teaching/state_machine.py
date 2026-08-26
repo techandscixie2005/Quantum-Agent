@@ -548,6 +548,7 @@ class TeachingStateMachine:
             prior_attempts=started.prior_attempts,
             has_current_attempt=request.student_attempt is not None,
             coverage=packet.coverage,
+            message=request.message,
         )
         trace.extend(
             [

@@ -405,6 +405,20 @@ class LearningEvidenceKind(StrEnum):
     SOLO = "solo"
     SOLO_ATTEMPT = "solo_attempt"
     RETRIEVAL_PRACTICE = "retrieval_practice"
+    # PRD V3.0 P1-1: separated transfer / solo lifecycle kinds so the
+    # Cognitive Mirror cannot promote a learner on task-generation alone.
+    # TRANSFER_ASSIGNED is recorded when a transfer task is issued; only
+    # TRANSFER_VERIFIED (a verified, task-correlated, unaided attempt)
+    # contributes to TRANSFER_READY / unaided_retrieval.  The legacy
+    # TRANSFER / SOLO_ATTEMPT kinds remain for backward compatibility with
+    # rows written before this remediation.
+    TRANSFER_ASSIGNED = "transfer_assigned"
+    TRANSFER_ATTEMPTED = "transfer_attempted"
+    TRANSFER_VERIFIED = "transfer_verified"
+    TRANSFER_FAILED = "transfer_failed"
+    SOLO_ASSIGNED = "solo_assigned"
+    SOLO_VERIFIED = "solo_verified"
+    SOLO_ABORTED = "solo_aborted"
 
 
 class AttachmentKind(StrEnum):
@@ -2053,6 +2067,10 @@ class TeachingConversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=utc_now,
         server_default=func.now(),
         nullable=False,
+    )
+    learning_phase_json: Mapped[dict[str, object] | None] = mapped_column(
+        JSON,
+        nullable=True,
     )
 
     __table_args__ = (

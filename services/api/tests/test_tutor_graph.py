@@ -390,9 +390,14 @@ async def test_tutor_graph_matches_state_machine_tool_and_release(
         await session.commit()
 
     assert isinstance(second, TeachingTurnResult)
-    assert first.release.release_level is AnswerReleaseLevel.HINT
+    # PRD V3.0 Axiom 1 (P0-1): an exercise question with no prior attempt now
+    # requires a commitment, so the release level is QUESTION_ONLY (not HINT).
+    assert first.release.release_level is AnswerReleaseLevel.QUESTION_ONLY
+    assert first.release.reason_code == "commitment_required_before_explanation"
     assert first.scientific_results == []
     assert first.trace[6].status is WorkflowStepStatus.SKIPPED
+    # After the student submits an attempt, the commitment gate is satisfied
+    # and the release level advances to SCAFFOLD.
     assert second.release.release_level is AnswerReleaseLevel.SCAFFOLD
     assert second.scientific_results[0].passed is True
     assert second.trace[6].status is WorkflowStepStatus.COMPLETED
@@ -572,7 +577,7 @@ async def test_hitl_rejects_reviewer_response_outside_release_envelope(
             curriculum_edition_id=seeded.edition_id,
             request=TeachingTurnInput(
                 mode=TeachingMode.LEARN_CONCEPTS,
-                message="@TA 请检查这次解释。",
+                message="@TA 请检查这次解释：什么是厄米算符？",
             ),
         )
         assert isinstance(interrupted, HitlInterruptResponse)
@@ -865,3 +870,69 @@ async def test_tutor_attachment_resolution_hides_cross_user_ids(
                     attachment_ids=[attachment.id],
                 ),
             )
+
+
+async def test_client_request_id_replays_completed_turn_instead_of_duplicating(
+    teaching_database: async_sessionmaker[AsyncSession],
+) -> None:
+    """PRD V3.0 P1-2: a retried turn with the same client_request_id must
+    replay the original completed turn, not create a duplicate.  This
+    prevents duplicate AgentTrace / LearningEvidence rows when the browser
+    retries after a lost response.
+    """
+
+    async with teaching_database() as session:
+        seeded = await _seed(session)
+        await session.commit()
+        graph = TutorGraph(
+            evidence_retriever=StaticRetriever(
+                _packet(seeded.actor.course_id, seeded.edition_id, found=True)
+            ),
+            model_gateway=None,
+            checkpointer=InMemorySaver(),
+            enable_hitl=False,
+        )
+        request_id = "client-req-12345678"
+        first = await graph.run(
+            session=session,
+            actor=seeded.actor,
+            curriculum_edition_id=seeded.edition_id,
+            request=TeachingTurnInput(
+                mode=TeachingMode.LEARN_CONCEPTS,
+                message="什么是厄米算符？",
+                client_request_id=request_id,
+            ),
+        )
+        await session.commit()
+        first_turn_id = first.turn_id
+        first_conversation_id = first.conversation_id
+
+        # Replay the same request with the same client_request_id.
+        replay = await graph.run(
+            session=session,
+            actor=seeded.actor,
+            curriculum_edition_id=seeded.edition_id,
+            request=TeachingTurnInput(
+                mode=TeachingMode.LEARN_CONCEPTS,
+                message="什么是厄米算符？",
+                conversation_id=first_conversation_id,
+                client_request_id=request_id,
+            ),
+        )
+        await session.commit()
+
+        # The replay must return the SAME turn id — no duplicate turn,
+        # no duplicate AgentTrace, no duplicate LearningEvidence.
+        assert replay.turn_id == first_turn_id, (
+            "client_request_id replay must return the original turn, not a duplicate"
+        )
+
+        # Exactly one turn row for this conversation.
+        turn_count = await session.scalar(
+            select(func.count(TeachingTurn.id)).where(
+                TeachingTurn.conversation_id == first_conversation_id
+            )
+        )
+        assert turn_count == 1, (
+            f"client_request_id replay must not create a duplicate turn (found {turn_count})"
+        )

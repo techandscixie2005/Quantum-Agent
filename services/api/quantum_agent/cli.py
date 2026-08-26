@@ -577,6 +577,109 @@ def _seed_live_e2e(arguments: argparse.Namespace) -> int:
     return asyncio.run(_seed_live_e2e_async(arguments))
 
 
+async def _seed_demo_account_async(arguments: argparse.Namespace) -> int:
+    """Seed the competition demo student account (PRD V3.0 P1-4).
+
+    Creates (or re-activates) the demo student with an active membership in
+    the first active published course, so a judge can POST
+    ``/api/v1/auth/demo-login`` with the shared ``DEMO_LOGIN_SECRET`` to
+    receive a ``qa_session`` cookie without manual SQL.  No session token is
+    issued here — the demo-login endpoint mints one on demand.
+    """
+
+    settings = Settings()
+    if settings.environment == "production":
+        raise RuntimeError("Demo accounts cannot be seeded in production")
+    engine = create_database_engine(settings)
+    session_factory = create_session_factory(engine)
+    now = datetime.now(UTC)
+    email = settings.demo_login_course_email
+    try:
+        async with session_factory() as session:
+            row = (
+                await session.execute(
+                    select(Course, CurriculumEdition)
+                    .join(CurriculumEdition, CurriculumEdition.course_id == Course.id)
+                    .where(CurriculumEdition.status == CurriculumEditionStatus.PUBLISHED)
+                    .order_by(
+                        (Course.status == CourseStatus.ACTIVE).desc(),
+                        CurriculumEdition.published_at.desc(),
+                        CurriculumEdition.id.asc(),
+                    )
+                    .limit(1)
+                )
+            ).one_or_none()
+            if row is None:
+                raise RuntimeError(
+                    "A published curriculum edition is required for the demo account"
+                )
+            course, edition = row
+            if course.status != CourseStatus.ACTIVE:
+                if not arguments.activate_course:
+                    raise RuntimeError(
+                        "The selected course is not active; pass --activate-course explicitly"
+                    )
+                course.status = CourseStatus.ACTIVE
+
+            user = await session.scalar(select(User).where(User.email == email).limit(1))
+            if user is None:
+                user = User(
+                    email=email,
+                    display_name="Competition Demo Student",
+                    system_role=SystemRole.USER,
+                    status=UserStatus.ACTIVE,
+                )
+                session.add(user)
+                await session.flush()
+            else:
+                user.display_name = "Competition Demo Student"
+                user.status = UserStatus.ACTIVE
+            membership = await session.scalar(
+                select(CourseMembership)
+                .where(
+                    CourseMembership.course_id == course.id,
+                    CourseMembership.user_id == user.id,
+                )
+                .limit(1)
+            )
+            if membership is None:
+                membership = CourseMembership(
+                    course_id=course.id,
+                    user_id=user.id,
+                    role=CourseRole.STUDENT,
+                    status=MembershipStatus.ACTIVE,
+                    joined_at=now,
+                )
+                session.add(membership)
+            else:
+                membership.role = CourseRole.STUDENT
+                membership.status = MembershipStatus.ACTIVE
+                membership.joined_at = membership.joined_at or now
+                membership.ended_at = None
+            await session.commit()
+
+        _json_output(
+            {
+                "status": "complete",
+                "demo_email": email,
+                "course_id": str(course.id),
+                "curriculum_edition_id": str(edition.id),
+                "course_activated": bool(arguments.activate_course),
+                "next_step": (
+                    "POST /api/v1/auth/demo-login with the DEMO_LOGIN_SECRET "
+                    "to receive a session token."
+                ),
+            }
+        )
+        return 0
+    finally:
+        await engine.dispose()
+
+
+def _seed_demo_account(arguments: argparse.Namespace) -> int:
+    return asyncio.run(_seed_demo_account_async(arguments))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="quantum-agent")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -637,6 +740,13 @@ def build_parser() -> argparse.ArgumentParser:
     live_e2e.add_argument("--expires-hours", type=int, default=2)
     live_e2e.add_argument("--activate-course", action="store_true")
     live_e2e.set_defaults(handler=_seed_live_e2e)
+
+    demo = commands.add_parser(
+        "seed-demo-account",
+        help="seed the competition demo student account for /api/v1/auth/demo-login",
+    )
+    demo.add_argument("--activate-course", action="store_true")
+    demo.set_defaults(handler=_seed_demo_account)
     return parser
 
 

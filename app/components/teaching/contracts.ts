@@ -50,10 +50,20 @@ export type TwoLevelSimulationRequest = Readonly<{
   absolute_tolerance: number;
 }>;
 
+export type RectangularBarrierRequest = Readonly<{
+  kind: "rectangular_barrier_tunnelling";
+  energy_eV: number;
+  barrier_height_eV: number;
+  barrier_width_m: number;
+  particle_mass_kg: number;
+  conservation_tolerance: number;
+}>;
+
 export type SupportedScientificRequest =
   | SymbolicEquivalenceRequest
   | NumericalNormalizationRequest
-  | TwoLevelSimulationRequest;
+  | TwoLevelSimulationRequest
+  | RectangularBarrierRequest;
 
 export type TeachingTurnRequest = Readonly<{
   conversation_id: string | null;
@@ -63,6 +73,10 @@ export type TeachingTurnRequest = Readonly<{
   attachment_ids: readonly string[];
   scientific_request: SupportedScientificRequest | null;
   learning_native: LearningNativeSubmission | null;
+  // PRD V3.0 P1-2: client-generated idempotency key.  The browser sends the
+  // same key on a retry so the backend can return the original completed
+  // turn instead of creating a duplicate.
+  client_request_id: string | null;
 }>;
 
 export const WORKFLOW_ORDER = [
@@ -242,6 +256,7 @@ export type ScientificResult = Readonly<{
     | "numerical_normalization"
     | "numerical_unitarity"
     | "two_level_simulation"
+    | "rectangular_barrier_tunnelling"
     | "line_visualization"
     | "code_test"
     | "unverified";
@@ -394,6 +409,8 @@ export type LearningNativeSubmission = Readonly<{
   solo_attempt: Readonly<{ response: string; confidence: number | null }> | null;
   request_transfer: boolean;
   request_solo_exit: boolean;
+  request_teach_back: boolean;
+  request_transfer_task: boolean;
 }>;
 
 export type TeachingTurnResult = Readonly<{
@@ -661,7 +678,12 @@ function parseScientificRequest(value: unknown, path: string): SupportedScientif
   const input = record(value, path);
   const kind = oneOf(
     input.kind,
-    ["symbolic_equivalence", "numerical_normalization", "two_level_simulation"] as const,
+    [
+      "symbolic_equivalence",
+      "numerical_normalization",
+      "two_level_simulation",
+      "rectangular_barrier_tunnelling",
+    ] as const,
     `${path}.kind`,
   );
   if (kind === "symbolic_equivalence") {
@@ -689,6 +711,41 @@ function parseScientificRequest(value: unknown, path: string): SupportedScientif
       state: stateValues.map((item, index) => parseComplex(item, `${path}.state[${index}]`)),
       target_norm_squared: bounded(input.target_norm_squared, `${path}.target_norm_squared`, Number.MIN_VALUE, 1e12),
       absolute_tolerance: bounded(input.absolute_tolerance, `${path}.absolute_tolerance`, Number.MIN_VALUE, 1e-2),
+    };
+  }
+
+  if (kind === "rectangular_barrier_tunnelling") {
+    exactKeys(
+      input,
+      [
+        "kind",
+        "energy_eV",
+        "barrier_height_eV",
+        "barrier_width_m",
+        "particle_mass_kg",
+        "conservation_tolerance",
+      ],
+      path,
+    );
+    const energy = bounded(input.energy_eV, `${path}.energy_eV`, Number.MIN_VALUE, 1e6);
+    const height = bounded(input.barrier_height_eV, `${path}.barrier_height_eV`, Number.MIN_VALUE, 1e6);
+    const width = bounded(input.barrier_width_m, `${path}.barrier_width_m`, Number.MIN_VALUE, 1e-3);
+    const mass = bounded(input.particle_mass_kg, `${path}.particle_mass_kg`, Number.MIN_VALUE, 1e-21);
+    if (Math.abs(energy - height) <= 1e-9 * height) {
+      fail(`${path}.energy_eV`, "not approximately equal to barrier_height_eV");
+    }
+    return {
+      kind,
+      energy_eV: energy,
+      barrier_height_eV: height,
+      barrier_width_m: width,
+      particle_mass_kg: mass,
+      conservation_tolerance: bounded(
+        input.conservation_tolerance,
+        `${path}.conservation_tolerance`,
+        Number.MIN_VALUE,
+        1e-2,
+      ),
     };
   }
 
@@ -739,6 +796,7 @@ export function parseTeachingTurnRequest(value: unknown): TeachingTurnRequest {
       "attachment_ids",
       "scientific_request",
       "learning_native",
+      "client_request_id",
     ],
     "turnRequest",
   );
@@ -755,6 +813,12 @@ export function parseTeachingTurnRequest(value: unknown): TeachingTurnRequest {
   if (attachmentIds.length > 8 || new Set(attachmentIds).size !== attachmentIds.length) {
     fail("turnRequest.attachment_ids", "at most eight unique attachment UUIDs");
   }
+  // PRD V3.0 P1-2: optional client-generated idempotency key.  When present
+  // it must be a bounded ASCII string so the backend can index it.
+  const clientRequestId =
+    input.client_request_id === undefined || input.client_request_id === null
+      ? null
+      : text(input.client_request_id, "turnRequest.client_request_id", 128).trim();
   return {
     conversation_id: nullableUuid(input.conversation_id, "turnRequest.conversation_id"),
     mode,
@@ -769,6 +833,7 @@ export function parseTeachingTurnRequest(value: unknown): TeachingTurnRequest {
       input.learning_native === undefined || input.learning_native === null
         ? null
         : parseLearningNativeSubmission(input.learning_native, "turnRequest.learning_native"),
+    client_request_id: clientRequestId || null,
   };
 }
 
@@ -784,6 +849,8 @@ function parseLearningNativeSubmission(value: unknown, path: string): LearningNa
       "solo_attempt",
       "request_transfer",
       "request_solo_exit",
+      "request_teach_back",
+      "request_transfer_task",
     ],
     path,
   );
@@ -814,6 +881,14 @@ function parseLearningNativeSubmission(value: unknown, path: string): LearningNa
       input.request_solo_exit === undefined
         ? false
         : bool(input.request_solo_exit, `${path}.request_solo_exit`),
+    request_teach_back:
+      input.request_teach_back === undefined
+        ? false
+        : bool(input.request_teach_back, `${path}.request_teach_back`),
+    request_transfer_task:
+      input.request_transfer_task === undefined
+        ? false
+        : bool(input.request_transfer_task, `${path}.request_transfer_task`),
   };
 }
 
@@ -1892,6 +1967,7 @@ function parseScientificResult(value: unknown, path: string): ScientificResult {
         "numerical_normalization",
         "numerical_unitarity",
         "two_level_simulation",
+        "rectangular_barrier_tunnelling",
         "line_visualization",
         "code_test",
         "unverified",

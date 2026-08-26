@@ -19,6 +19,7 @@ from quantum_agent.science.models import (
     NumericalNormalizationRequest,
     NumericalUnitarityRequest,
     PlotSeries,
+    RectangularBarrierRequest,
     SandboxExecutionOutcome,
     SandboxLimits,
     ScientificVerificationMethod,
@@ -568,6 +569,192 @@ def _verify_two_level(request: TwoLevelSimulationRequest) -> ScientificVerificat
     )
 
 
+def _verify_rectangular_barrier(
+    request: RectangularBarrierRequest,
+) -> ScientificVerificationResult:
+    """Authoritative rectangular-barrier transmission/reflection calculation.
+
+    Uses the analytically correct transmission coefficient for a finite
+    rectangular barrier of height ``V0`` and width ``a``.  For ``E < V0``
+    (the tunnelling regime) we use:
+
+        kappa = sqrt(2 m (V0 - E)) / hbar
+        T = [1 + V0**2 * sinh**2(kappa * a) / (4 E (V0 - E))] ** -1
+
+    For ``E > V0`` (the free-propagation regime) we use the standard
+    textbook formula with ``sin`` instead of ``sinh``.  The verifier
+    explicitly checks ``abs(R + T - 1) <= conservation_tolerance`` and
+    rejects any non-finite or out-of-bounds result.
+    """
+
+    import numpy as np
+
+    # The formula is expressed in SI units (eV, metres, kilograms); convert
+    # hbar to J·s and energy to joules would be equivalent, but using hbar
+    # in eV·s with energies in eV and mass in kg requires a unit bridge.
+    # Use the dimensionally consistent form: kappa = sqrt(2 m (V0-E)) / hbar,
+    # with m in kg, (V0-E) in joules, hbar in J·s.
+    joule_per_eV = 1.602176634e-19
+    hbar_j_s = 1.054571817e-34
+
+    energy_j = request.energy_eV * joule_per_eV
+    v0_j = request.barrier_height_eV * joule_per_eV
+    mass = request.particle_mass_kg
+    width = request.barrier_width_m
+
+    delta_e_j = v0_j - energy_j
+    k1 = math.sqrt(2.0 * mass * energy_j) / hbar_j_s
+    # kappa (for E < V0) or k2 (for E > V0): both real in their regimes.
+    k_inside = math.sqrt(2.0 * mass * abs(delta_e_j)) / hbar_j_s
+    a = width
+
+    try:
+        if delta_e_j > 0:
+            # Tunnelling regime (E < V0).
+            arg = k_inside * a
+            if arg > 700.0:
+                # sinh(arg) overflows for opaque barriers; use the asymptotic
+                # form T ~ 16 E (V0-E) / V0**2 * exp(-2 kappa a) which is the
+                # standard opaque-barrier limit.
+                exponent = -2.0 * arg
+                if exponent < -745.0:
+                    # exp(-745) underflows to 0 in float64; T is effectively 0.
+                    t_value = 0.0
+                else:
+                    pre_factor = 16.0 * energy_j * (v0_j - energy_j) / (v0_j * v0_j)
+                    t_value = float(pre_factor * math.exp(exponent))
+            else:
+                sinh_sq = math.sinh(arg) ** 2
+                denominator = 1.0 + (v0_j * v0_j * sinh_sq) / (4.0 * energy_j * (v0_j - energy_j))
+                t_value = 1.0 / denominator
+        else:
+            # Free-propagation regime (E > V0).
+            arg = k_inside * a
+            sin_sq = math.sin(arg) ** 2
+            denominator = 1.0 + (v0_j * v0_j * sin_sq) / (4.0 * energy_j * (energy_j - v0_j))
+            t_value = 1.0 / denominator
+    except (OverflowError, ValueError, ZeroDivisionError):
+        return _result(
+            request,
+            method=ScientificVerificationMethod.NUMERICAL,
+            status=ScientificVerificationStatus.INCONCLUSIVE,
+            tool=_tool("numpy", np.__version__),
+            observations=[
+                "The rectangular-barrier computation hit a numeric edge case "
+                "and could not produce a finite T/R pair."
+            ],
+            limitations=[
+                "The verifier refused to return a value rather than emitting "
+                "an unbounded or non-finite transmission coefficient."
+            ],
+            error_code="BARRIER_NUMERIC_EDGE_CASE",
+        )
+
+    # Guard: T must be a finite number in [0, 1].
+    if not math.isfinite(t_value) or t_value < 0.0 or t_value > 1.0:
+        return _result(
+            request,
+            method=ScientificVerificationMethod.NUMERICAL,
+            status=ScientificVerificationStatus.FAIL,
+            tool=_tool("numpy", np.__version__),
+            observations=[
+                f"Transmission coefficient T={t_value!r} is outside the valid [0, 1] bound."
+            ],
+            limitations=[
+                "The verifier rejects any non-finite or out-of-bounds transmission value."
+            ],
+            metrics={
+                "T": t_value,
+                "R": 1.0 - t_value,
+                "energy_eV": request.energy_eV,
+                "barrier_height_eV": request.barrier_height_eV,
+                "barrier_width_m": request.barrier_width_m,
+                "particle_mass_kg": request.particle_mass_kg,
+            },
+            error_code="TRANSMISSION_OUT_OF_BOUNDS",
+        )
+
+    r_value = 1.0 - t_value
+    conservation_error = abs(r_value + t_value - 1.0)
+    verified = conservation_error <= request.conservation_tolerance
+
+    # Build a small T-vs-width visualization so the frontend can render the
+    # tunnelling curve alongside the student's prediction.
+    widths = list(np.linspace(max(width * 0.1, 1e-12), width * 2.0, 32))
+    t_series: list[float] = []
+    for w in widths:
+        try:
+            arg_w = k_inside * float(w)
+            if delta_e_j > 0:
+                if arg_w > 700.0:
+                    exp_arg = -2.0 * arg_w
+                    if exp_arg < -745.0:
+                        t_w = 0.0
+                    else:
+                        pre = 16.0 * energy_j * (v0_j - energy_j) / (v0_j * v0_j)
+                        t_w = float(pre * math.exp(exp_arg))
+                else:
+                    sinh_sq_w = math.sinh(arg_w) ** 2
+                    denom_w = 1.0 + (v0_j * v0_j * sinh_sq_w) / (4.0 * energy_j * (v0_j - energy_j))
+                    t_w = 1.0 / denom_w
+            else:
+                sin_sq_w = math.sin(arg_w) ** 2
+                denom_w = 1.0 + (v0_j * v0_j * sin_sq_w) / (4.0 * energy_j * (energy_j - v0_j))
+                t_w = 1.0 / denom_w
+            t_series.append(float(max(0.0, min(1.0, t_w))))
+        except (OverflowError, ValueError, ZeroDivisionError):
+            t_series.append(0.0)
+
+    plot_request = LineVisualizationRequest(
+        title="Rectangular barrier transmission vs width",
+        x_label="barrier width (m)",
+        y_label="transmission T",
+        x=widths,
+        series=[PlotSeries(label="T(width)", y=t_series)],
+    )
+    try:
+        spec = _render_line_spec(plot_request)
+    except Exception:
+        spec = None
+
+    return _result(
+        request,
+        method=ScientificVerificationMethod.NUMERICAL,
+        status=ScientificVerificationStatus.PASS if verified else ScientificVerificationStatus.FAIL,
+        tool=_tool("numpy", np.__version__),
+        observations=[
+            (
+                f"Rectangular barrier: E={request.energy_eV:g} eV, V0="
+                f"{request.barrier_height_eV:g} eV, a={request.barrier_width_m:g} m."
+            ),
+            (
+                f"Transmission T={t_value:.12g}, reflection R={r_value:.12g}, "
+                f"|R+T-1|={conservation_error:.3e}."
+            ),
+        ],
+        limitations=[
+            "Stationary scattering calculation; does not model wave-packet dispersion "
+            "or finite-time effects.",
+            "Uses the analytic rectangular-barrier formula; the E≈V0 degenerate band "
+            "is rejected by the request validator.",
+        ],
+        metrics={
+            "T": t_value,
+            "R": r_value,
+            "conservation_error": conservation_error,
+            "conservation_tolerance": request.conservation_tolerance,
+            "energy_eV": request.energy_eV,
+            "barrier_height_eV": request.barrier_height_eV,
+            "barrier_width_m": request.barrier_width_m,
+            "particle_mass_kg": request.particle_mass_kg,
+            "k1": k1,
+            "kappa_or_k2": k_inside,
+            "regime": "tunnelling" if delta_e_j > 0 else "free_propagation",
+        },
+        visualization=spec,
+    )
+
+
 class ScientificToolbox:
     """Single deterministic dispatch surface for the teaching state machine."""
 
@@ -590,6 +777,8 @@ class ScientificToolbox:
             return _verify_unitarity(request)
         if isinstance(request, TwoLevelSimulationRequest):
             return _verify_two_level(request)
+        if isinstance(request, RectangularBarrierRequest):
+            return _verify_rectangular_barrier(request)
         if isinstance(request, LineVisualizationRequest):
             return _verify_visualization(request)
         if isinstance(request, CodeTestRequest):

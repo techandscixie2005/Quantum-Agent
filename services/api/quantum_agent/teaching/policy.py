@@ -19,6 +19,71 @@ from quantum_agent.db_models import (
 from quantum_agent.knowledge.evidence_packets import RetrievalCoverage
 from quantum_agent.teaching.models import PolicySnapshot, ReleaseDecision
 
+# Deterministic markers that distinguish a factual / definition lookup from a
+# reasoning / exercise / prediction task.  A factual lookup may legitimately
+# bypass the commitment gate; a reasoning task must not.
+_FACTUAL_LOOKUP_MARKERS: tuple[str, ...] = (
+    "什么是", "是什么", "定义", "是指", "意思是", "请给出定义",
+    "what is", "definition of", "define ",
+)
+
+
+def commitment_eligibility(
+    *,
+    mode: TeachingMode,
+    task_kind: TeachingTaskKind,
+    message: str,
+    has_current_attempt: bool,
+) -> bool:
+    """Deterministic decision: does this turn require a cognitive commitment?
+
+    The LLM never decides this.  Eligibility is a pure function of the
+    teaching mode, the deterministic task kind, and the student's message
+    text.  A factual/definition lookup (e.g. "什么是厄米算符?") bypasses the
+    gate; reasoning, exercise, derivation, prediction, and experiment tasks
+    require a commitment before the answer is released.
+
+    A student who has already submitted an attempt this turn is treated as
+    having satisfied the gate (the attempt itself is the commitment).
+    """
+
+    # A student who already submitted an attempt has, by definition, committed
+    # a prediction / first step / reasoning step.  The gate does not ask twice.
+    if has_current_attempt:
+        return False
+
+    # Experiment and project modes always require a prediction before the
+    # simulation / milestone coaching is released.
+    if mode in {TeachingMode.RUN_EXPERIMENTS, TeachingMode.WORK_ON_PROJECTS}:
+        return True
+
+    # Derivation review always requires the student's derivation first.
+    if mode is TeachingMode.REVIEW_DERIVATIONS:
+        return True
+
+    # In LEARN_CONCEPTS mode, distinguish factual lookups from reasoning tasks.
+    # PRD V3.0 Axiom 1 (fail-closed): the DEFAULT for a concept question is to
+    # require a commitment, because a generic concept request such as
+    # "解释波函数" or "讲一下隧穿" is a reasoning/explanation task, not a
+    # definition lookup.  Only an explicit factual/definition lookup bypasses
+    # the gate.  This inverts the previous default-bypass behaviour that let a
+    # student phrase any concept query to avoid the commitment gate.
+    if mode is TeachingMode.LEARN_CONCEPTS:
+        if task_kind is TeachingTaskKind.EXERCISE_HELP:
+            return True
+        if task_kind is TeachingTaskKind.DERIVATION_CHECK:
+            return True
+        # CONCEPT_QUESTION: a bare factual/definition lookup bypasses; every
+        # other concept request (including unmarked "解释X" / "讲一下X") is
+        # treated as a reasoning task that requires a commitment.
+        lowered = message.lower().strip()
+        has_factual_marker = any(marker in lowered for marker in _FACTUAL_LOOKUP_MARKERS)
+        if has_factual_marker:
+            return False
+        return True
+
+    return False
+
 
 def safe_default_policy(mode: TeachingMode) -> PolicySnapshot:
     """Fail-conservative defaults used until a teacher publishes a policy."""
@@ -92,6 +157,7 @@ class AnswerReleaseEngine:
         prior_attempts: int,
         has_current_attempt: bool,
         coverage: RetrievalCoverage,
+        message: str | None = None,
     ) -> ReleaseDecision:
         attempts = prior_attempts + int(has_current_attempt)
         if coverage is RetrievalCoverage.NOT_FOUND:
@@ -100,6 +166,24 @@ class AnswerReleaseEngine:
                 release_level=AnswerReleaseLevel.QUESTION_ONLY,
                 attempts_observed=attempts,
                 reason_code="course_evidence_not_found",
+            )
+
+        # PRD V3.0 Axiom 1: if the deterministic commitment policy requires a
+        # commitment and the student has not submitted one yet, the release
+        # level must be QUESTION_ONLY regardless of the underlying task kind.
+        # This ensures the learning_native_pre node's commitment gate fires
+        # for reasoning / exercise / prediction tasks, not just RUN_EXPERIMENTS.
+        if message is not None and commitment_eligibility(
+            mode=mode,
+            task_kind=task_kind,
+            message=message,
+            has_current_attempt=has_current_attempt,
+        ):
+            return ReleaseDecision(
+                action=TeachingAction.ASK_DIAGNOSTIC_QUESTION,
+                release_level=AnswerReleaseLevel.QUESTION_ONLY,
+                attempts_observed=attempts,
+                reason_code="commitment_required_before_explanation",
             )
 
         if mode is TeachingMode.LEARN_CONCEPTS and task_kind is TeachingTaskKind.CONCEPT_QUESTION:

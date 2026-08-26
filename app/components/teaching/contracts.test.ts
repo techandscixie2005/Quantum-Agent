@@ -565,6 +565,8 @@ test("rejects a Learning-Native submission with an invalid commitment kind", () 
         solo_attempt: null,
         request_transfer: false,
         request_solo_exit: false,
+        request_teach_back: false,
+        request_transfer_task: false,
       },
     }),
   );

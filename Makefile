@@ -9,7 +9,7 @@ MANIFEST ?= content/quantum_course/manifest.toml
 GRAPH_SYNC_BATCH_SIZE ?= 100
 
 .PHONY: \
-	help doctor require-secrets compose-schema compose-config build up bootstrap \
+	help doctor require-secrets compose-schema compose-config build up bootstrap demo-bootstrap \
 	down ps logs migrate ingest graph-sync graph-worker graph-worker-stop \
 	test test-api test-web test-container lint lint-api lint-web lint-container \
 	test-live-infra test-live-model test-live-e2e
@@ -45,6 +45,13 @@ up: require-secrets ## Start databases, migrate, and launch healthy API/web serv
 	$(COMPOSE) -f compose.yaml up --build --detach postgres neo4j redis migrate api web
 
 bootstrap: up ingest ## Start the stack, then ingest the checksum-verified real manifest.
+
+demo-bootstrap: require-secrets ## Seed the competition demo student account for /api/v1/auth/demo-login.
+	$(COMPOSE) -f compose.yaml exec -T api quantum-agent seed-demo-account --activate-course
+	@echo ""
+	@echo "Demo account seeded. Set DEMO_LOGIN_SECRET on the API container, then"
+	@echo "POST /api/auth/demo-login with {\"secret\": \"...\"} from the browser to enter /agent."
+	@echo "See DEMO.md for the full judge entry procedure."
 
 down: ## Stop all stack services while preserving named data volumes.
 	$(COMPOSE) -f compose.yaml --profile jobs --profile workers --profile tools down --remove-orphans

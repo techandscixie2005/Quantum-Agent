@@ -44,10 +44,16 @@ from quantum_agent.teaching.learning_native import (
 )
 from quantum_agent.teaching.models import (
     CognitiveCommitment,
+    CommitmentGateDecision,
+    DurableLearningPhase,
+    LearningPhase,
     LearningPolicyAction,
     SoloMode,
     SoloModeStatus,
     StudentSnapshot,
+    TeachBackAnalysis,
+    TransferTask,
+    TransferType,
     ValidationReport,
     WorkflowStep,
     WorkflowStepName,
@@ -232,6 +238,7 @@ async def apply_policy_node(
         prior_attempts=started.prior_attempts,
         has_current_attempt=request.student_attempt is not None,
         coverage=packet.coverage,
+        message=request.message,
     )
     trace = list(state.get("trace", []))
     trace.extend(
@@ -326,6 +333,12 @@ async def learning_native_pre_node(
     produces a deterministic "elicit a commitment first" response.  The
     LLM only proposes the commitment prompt; code decides whether to
     withhold the answer.
+
+    PRD V3.0 P0-2: this node also enforces the durable Learning Phase.  When
+    the conversation is in ``SOLO_ACTIVE``, normal Ask AI requests are
+    blocked BEFORE the LLM is called — the student must submit a solo
+    attempt or explicitly exit Solo.  Refresh / new tab / retry cannot
+    escape the lock because the phase is persisted on the conversation.
     """
 
     request = state["request"]
@@ -333,20 +346,85 @@ async def learning_native_pre_node(
     model_gateway = runtime.context.model_gateway
     submission = request.learning_native
     release_is_question_only = release.release_level is AnswerReleaseLevel.QUESTION_ONLY
+    # When the course evidence is not found, the commitment gate does not
+    # fire: there is nothing to commit to.  The tutor will surface the
+    # insufficient-evidence response instead.
+    evidence_not_found = release.reason_code == "course_evidence_not_found"
+
+    # PRD V3.0 P0-2: load the durable Learning Phase.  Solo Mode is
+    # server-authoritative and restored BEFORE generation, so a normal Ask
+    # AI request during Solo is blocked here rather than after the LLM
+    # has already written an answer.
+    durable_phase = runtime.context.started_turn.durable_phase
+    solo_active = durable_phase.phase is LearningPhase.SOLO_ACTIVE
+    solo_submission = (
+        submission is not None
+        and (submission.solo_attempt is not None or submission.transfer_attempt is not None)
+    )
+    solo_exit_requested = submission is not None and submission.request_solo_exit
+
+    if solo_active and not solo_submission and not solo_exit_requested:
+        # The student is in Solo Mode but is asking for AI help (not
+        # submitting a solo attempt or exiting Solo).  Block the LLM call
+        # and return a deterministic "Solo Mode active" response.
+        solo_commitment = CognitiveCommitment(
+            gate_decision=CommitmentGateDecision.PROCEED,
+            attempt_required=False,
+            candidate_prompt="",
+            reason_summary=(
+                "Solo Mode 激活中：AI 辅助暂时不可用。请独立完成迁移任务，"
+                "或点击“退出 Solo”按钮（将记录为 SOLO_ABORTED）。"
+            ),
+            accepted=True,
+        )
+        solo_pre_decision: dict[str, Any] = {
+            "commitment": solo_commitment.model_dump(mode="json"),
+            "learning_action": LearningPolicyAction.ENTER_SOLO.value,
+            "withhold_answer": True,
+            "commitment_evidence": [],
+            "solo_blocked": True,
+        }
+        return {
+            "learning_native_pre_decision": solo_pre_decision,
+            "answer_withheld_by_gate": True,
+            "learning_native_evidence": [],
+            "solo_assistance_locked": True,
+        }
 
     commitment_proposal = await propose_commitment(
         message=request.message,
-        release_is_question_only=release_is_question_only,
+        release_is_question_only=release_is_question_only and not evidence_not_found,
         model_gateway=model_gateway,
     )
     policy = LearningNativePolicy()
-    commitment, learning_action, withhold, commitment_evidence = policy.decide_pre_generation(
-        request_has_attempt=request.student_attempt is not None,
-        release_is_question_only=release_is_question_only,
-        proposal=commitment_proposal,
-        submission=submission.commitment if submission is not None else None,
-        submission_confidence=submission.confidence if submission is not None else None,
-    )
+    # PRD V3.0 Axiom 1: a trivially short attempt (e.g. "a") does NOT satisfy
+    # the commitment gate.  Use the deterministic meaningfulness check so the
+    # gate cannot be bypassed by a one-character student_attempt.
+    request_has_attempt = LearningNativePolicy.attempt_is_meaningful(request.student_attempt)
+    # When evidence is not found, bypass the gate so the tutor can surface the
+    # insufficient-evidence response.  The gate is only meaningful when there
+    # is course evidence to withhold.
+    if evidence_not_found:
+        commitment, learning_action, withhold, commitment_evidence = (
+            CognitiveCommitment(
+                gate_decision=CommitmentGateDecision.PROCEED,
+                attempt_required=False,
+                candidate_prompt="",
+                reason_summary="课程证据不足，承诺门未激活。",
+                accepted=True,
+            ),
+            LearningPolicyAction.GIVE_CUE,
+            False,
+            list[LearningNativeEvidence](),
+        )
+    else:
+        commitment, learning_action, withhold, commitment_evidence = policy.decide_pre_generation(
+            request_has_attempt=request_has_attempt,
+            release_is_question_only=release_is_question_only,
+            proposal=commitment_proposal,
+            submission=submission.commitment if submission is not None else None,
+            submission_confidence=submission.confidence if submission is not None else None,
+        )
 
     # Stash the pre-decision so the post node can assemble the final state
     # without re-running the commitment logic.
@@ -406,39 +484,56 @@ async def generate_response_node(
         )
         candidate_prompt = str(commitment_data.get("candidate_prompt") or "")
         reason_summary = str(commitment_data.get("reason_summary") or "")
+        solo_blocked = bool(pre_decision.get("solo_blocked"))
         question_level = AnswerReleaseLevel.QUESTION_ONLY
-        orientation_text = (
-            candidate_prompt or reason_summary or _orientation(question_level)
-        )
-        next_question_text = (
-            candidate_prompt or _next_question(request.mode, question_level)
-        )
+        if solo_blocked:
+            orientation_text = reason_summary or candidate_prompt or _orientation(question_level)
+            next_question_text = "请独立完成当前的迁移任务；提交后系统会确定性验证你的答案。"
+            limitation_text = (
+                "Solo Mode active: AI assistance is blocked until the student "
+                "submits an independent transfer attempt or explicitly exits Solo."
+            )
+            generate_detail = (
+                "Solo Mode blocked the LLM answer; the student must submit an "
+                "independent transfer attempt before AI assistance resumes."
+            )
+            warning_code = "answer_blocked_by_solo_mode"
+        else:
+            orientation_text = (
+                candidate_prompt or reason_summary or _orientation(question_level)
+            )
+            next_question_text = (
+                candidate_prompt or _next_question(request.mode, question_level)
+            )
+            limitation_text = (
+                "Commitment gate active: the AI explanation is withheld until "
+                "the student submits a cognitive commitment."
+            )
+            generate_detail = (
+                "Commitment gate withheld the LLM answer; the AI elicits a "
+                "prediction / first step / physical reason before any "
+                "explanation is released."
+            )
+            warning_code = "answer_withheld_by_commitment_gate"
         withheld_response = TeachingResponse(
             status=ResponseStatus.GROUNDED,
             orientation=orientation_text[:1200],
             claims=[],
             next_question=next_question_text[:1000],
-            limitations=[
-                "Commitment gate active: the AI explanation is withheld until "
-                "the student submits a cognitive commitment."
-            ],
+            limitations=[limitation_text],
         )
         withheld_validation = ValidationReport(
             passed=True,
             citation_ids_valid=True,
             literal_course_claims_valid=True,
             scientific_references_valid=True,
-            warnings=["answer_withheld_by_commitment_gate"],
+            warnings=[warning_code],
         )
         trace.append(
             WorkflowStep(
                 name=WorkflowStepName.GENERATE_RESPONSE,
                 status=WorkflowStepStatus.SKIPPED,
-                detail=(
-                    "Commitment gate withheld the LLM answer; the AI elicits a "
-                    "prediction / first step / physical reason before any "
-                    "explanation is released."
-                ),
+                detail=generate_detail,
             )
         )
         trace.append(
@@ -699,6 +794,14 @@ async def assemble_result_node(
     curriculum_edition_id = runtime.context.curriculum_edition_id
     started = runtime.context.started_turn
 
+    # PRD V3.0 Axiom 1: when the commitment gate withheld the answer, redact
+    # answer-bearing evidence snippets from the student-facing result.  The
+    # frontend still sees that evidence exists (provenance preserved) but
+    # cannot read the exact answer text until the gate is satisfied.
+    evidence_packet = state["evidence_packet"]
+    if state.get("answer_withheld_by_gate"):
+        evidence_packet = evidence_packet.redacted_for_gate()
+
     result = TeachingTurnResult(
         conversation_id=started.conversation.id,
         turn_id=started.turn.id,
@@ -707,7 +810,7 @@ async def assemble_result_node(
         diagnosis=state["diagnosis"],
         policy=state["policy"],
         release=state["release"],
-        evidence_packet=state["evidence_packet"],
+        evidence_packet=evidence_packet,
         response=state["response"],
         validation=state["validation"],
         scientific_results=state["scientific_results"],
@@ -818,6 +921,14 @@ async def learning_native_node(
     policy = LearningNativePolicy()
     submission = request.learning_native
 
+    # PRD V3.0 P0-2: the durable Learning Phase is the single source of truth
+    # for Solo Mode, transfer-task identity, and phase transitions.  It was
+    # loaded from the conversation row in ``start_turn`` and is available on
+    # the started turn.  We mutate a local copy and persist it at the end.
+    durable_phase = runtime.context.started_turn.durable_phase
+    conversation = runtime.context.started_turn.conversation
+    repository = TeachingRepository(session)
+
     # Recover the pre-decision (commitment + evidence already persisted there).
     pre_decision_raw = state.get("learning_native_pre_decision") or {}
     pre_decision: dict[str, Any] = (
@@ -867,21 +978,62 @@ async def learning_native_node(
             submission_text=submission.teach_back.reconstruction,
             proposal=proposal,
         )
-
-    # Transfer / Solo Mode.  Restore the prior Solo Mode from the durable
-    # conversation state so a student can submit a solo attempt in a follow-up
-    # turn within the same thread.
-    active_solo = _state_solo(state)
-    if active_solo is None:
-        prior_native = await TeachingRepository(session).load_latest_learning_native(
-            conversation_id=runtime.context.started_turn.conversation.id,
+        # PRD V3.0 P0-2: after a teach-back reconstruction is submitted,
+        # advance the durable phase to TRANSFER_REQUIRED so the next turn
+        # can issue a transfer task.
+        if durable_phase.phase is LearningPhase.RECONSTRUCTION_REQUIRED:
+            durable_phase = durable_phase.model_copy(
+                update={"phase": LearningPhase.TRANSFER_REQUIRED}
+            )
+    elif submission is not None and submission.request_teach_back:
+        # PRD V3.0 P0-2: the UI requests a Teach-Back transition.  Set the
+        # durable phase so the next turn requires a reconstruction.  The
+        # frontend renders the TeachBackCard from the learning_native state.
+        if durable_phase.phase in {
+            LearningPhase.OPEN,
+            LearningPhase.ATTEMPT_RECEIVED,
+            LearningPhase.INTERVENTION,
+        }:
+            durable_phase = durable_phase.model_copy(
+                update={"phase": LearningPhase.RECONSTRUCTION_REQUIRED}
+            )
+        # Surface a teach-back prompt even without a model proposal so the
+        # frontend can render the card.
+        teach_back = TeachBackAnalysis(
+            covered_relations=[],
+            missing_relations=[],
+            contradictions=[],
+            unsupported_claims=[],
+            recommended_probe=(
+                "不看上面的解释，现在用自己的话向一个第一次学这个概念的同学"
+                "重新解释这个结论。"
+            ),
+            verified=False,
+            is_model_inference=False,
         )
-        if prior_native is not None:
-            prior_solo = prior_native.get("solo")
-            if isinstance(prior_solo, dict):
-                prior_status = prior_solo.get("status")
-                if prior_status == SoloModeStatus.ACTIVE.value:
-                    active_solo = SoloMode.model_validate(prior_solo)
+
+    # PRD V3.0 P0-2: Transfer / Solo Mode is driven by the durable phase, not
+    # by ad-hoc submission flags.  The durable phase is the single source of
+    # truth for whether Solo is active and which transfer task is in flight.
+    active_solo: SoloMode | None = None
+    if durable_phase.phase is LearningPhase.SOLO_ACTIVE:
+        active_solo = SoloMode(
+            status=SoloModeStatus.ACTIVE,
+            active_transfer=TransferTask(
+                transfer_type=TransferType.NEAR,
+                prompt=durable_phase.active_transfer_task_prompt,
+                source_concept_ids=[],
+                key_parameters=[],
+                expected_observable="",
+                verifiable=False,
+            )
+            if durable_phase.active_transfer_task_prompt
+            else None,
+            started_at=durable_phase.solo_started_at,
+            assistance_locked=durable_phase.solo_assistance_locked,
+            unlock_reason="",
+        )
+
     transfer: Any = None
     solo: SoloMode = active_solo or SoloMode(
         status=SoloModeStatus.INACTIVE,
@@ -890,25 +1042,137 @@ async def learning_native_node(
         unlock_reason="",
     )
     transfer_evidence: list[LearningNativeEvidence] = []
-    if submission is not None and submission.request_solo_exit:
-        solo = policy.exit_solo(solo)
-    if submission is not None and submission.transfer_attempt is not None and solo.active_transfer:
-        verified = _attempt_verified(state, submission.transfer_attempt.response)
-        solo, transfer_evidence = policy.record_transfer_attempt(
-            solo=solo,
-            response=submission.transfer_attempt.response,
-            confidence=submission.transfer_attempt.confidence,
-            verified=verified,
+
+    # Handle explicit Solo exit (marks ABORTED, not SUCCESS).
+    if (
+        submission is not None
+        and submission.request_solo_exit
+        and durable_phase.phase is LearningPhase.SOLO_ACTIVE
+    ):
+        solo = SoloMode(
+            status=SoloModeStatus.ABORTED,
+            active_transfer=None,
+            assistance_locked=False,
+            unlock_reason="学生主动退出 Solo Mode（记录为 SOLO_ABORTED）。",
         )
-    elif submission is not None and submission.solo_attempt is not None and solo.active_transfer:
-        verified = _attempt_verified(state, submission.solo_attempt.response)
-        solo, transfer_evidence = policy.record_transfer_attempt(
-            solo=solo,
-            response=submission.solo_attempt.response,
-            confidence=submission.solo_attempt.confidence,
-            verified=verified,
+        durable_phase = durable_phase.model_copy(
+            update={
+                "phase": LearningPhase.ABORTED,
+                "solo_assistance_locked": False,
+            }
         )
-    elif submission is not None and submission.request_transfer:
+        transfer_evidence = [
+            LearningNativeEvidence(
+                kind=LearningEvidenceKind.SOLO_ABORTED,
+                observation="学生主动退出 Solo Mode；记录为 SOLO_ABORTED，不计为已验证的独立迁移。",
+                evidence_json={
+                    "outcome": "SOLO_ABORTED",
+                    "verified": False,
+                    "active_transfer_task_id": (
+                        str(durable_phase.active_transfer_task_id)
+                        if durable_phase.active_transfer_task_id
+                        else None
+                    ),
+                },
+            )
+        ]
+
+    # Handle a solo / transfer attempt.  PRD V3.0 P0-2: the attempt must be
+    # task-correlated (the durable phase must be SOLO_ACTIVE) and verified
+    # before Solo unlocks.  An incorrect attempt does NOT exit Solo.
+    elif (
+        submission is not None
+        and durable_phase.phase is LearningPhase.SOLO_ACTIVE
+        and (submission.solo_attempt is not None or submission.transfer_attempt is not None)
+    ):
+        solo_attempt = submission.solo_attempt
+        transfer_attempt = submission.transfer_attempt
+        if solo_attempt is not None:
+            attempt_text = solo_attempt.response
+            attempt_confidence = solo_attempt.confidence
+        else:
+            assert transfer_attempt is not None
+            attempt_text = transfer_attempt.response
+            attempt_confidence = transfer_attempt.confidence
+        verified = _attempt_verified(state, attempt_text)
+        task_id = (
+            str(durable_phase.active_transfer_task_id)
+            if durable_phase.active_transfer_task_id
+            else None
+        )
+        if verified:
+            solo = SoloMode(
+                status=SoloModeStatus.EXITED,
+                active_transfer=None,
+                assistance_locked=False,
+                unlock_reason="学生提交了通过确定性验证的迁移尝试，Solo Mode 解除。",
+            )
+            durable_phase = durable_phase.model_copy(
+                update={
+                    "phase": LearningPhase.COMPLETE,
+                    "solo_assistance_locked": False,
+                }
+            )
+            transfer_evidence = [
+                LearningNativeEvidence(
+                    kind=LearningEvidenceKind.TRANSFER_VERIFIED,
+                    observation=(
+                        "学生在 Solo Mode 下提交迁移尝试并通过确定性验证；"
+                        "Solo Mode 解除，迁移任务完成。"
+                    ),
+                    evidence_json={
+                        "response_length": len(attempt_text),
+                        "verified": True,
+                        "confidence": attempt_confidence,
+                        "outcome": "TRANSFER_VERIFIED",
+                        "active_transfer_task_id": task_id,
+                        "unaided": True,
+                    },
+                ),
+                LearningNativeEvidence(
+                    kind=LearningEvidenceKind.SOLO_VERIFIED,
+                    observation="Solo Mode 以已验证的独立迁移结束。",
+                    evidence_json={
+                        "outcome": "SOLO_VERIFIED",
+                        "verified": True,
+                        "active_transfer_task_id": task_id,
+                    },
+                ),
+            ]
+        else:
+            # Incorrect attempt: Solo stays active.  Persist the evidence but
+            # do NOT unlock.  This is TRANSFER_ATTEMPTED (not verified), which
+            # must NOT contribute to TRANSFER_READY / unaided_retrieval.
+            transfer_evidence = [
+                LearningNativeEvidence(
+                    kind=LearningEvidenceKind.TRANSFER_ATTEMPTED,
+                    observation=(
+                        "学生在 Solo Mode 下提交迁移尝试，但未通过确定性验证；"
+                        "Solo Mode 保持激活。"
+                    ),
+                    evidence_json={
+                        "response_length": len(attempt_text),
+                        "verified": False,
+                        "confidence": attempt_confidence,
+                        "outcome": "TRANSFER_ATTEMPTED_NOT_VERIFIED",
+                        "active_transfer_task_id": task_id,
+                        "unaided": True,
+                    },
+                ),
+                LearningNativeEvidence(
+                    kind=LearningEvidenceKind.TRANSFER_FAILED,
+                    observation="迁移尝试未通过确定性验证。",
+                    evidence_json={
+                        "verified": False,
+                        "outcome": "TRANSFER_FAILED",
+                        "active_transfer_task_id": task_id,
+                    },
+                ),
+            ]
+
+    # PRD V3.0 P0-2: the UI can request a Teach-Back or Transfer transition.
+    # The policy honours the request only when the durable phase allows it.
+    elif submission is not None and submission.request_transfer_task:
         source_concept_ids = [
             node.id for node in evidence_packet.graph_nodes[:6]
         ]
@@ -925,11 +1189,30 @@ async def learning_native_node(
             source_concept_ids=source_concept_ids,
             active_solo=active_solo,
         )
+        if solo.status is SoloModeStatus.ACTIVE and transfer is not None:
+            durable_phase = DurableLearningPhase(
+                phase=LearningPhase.SOLO_ACTIVE,
+                active_transfer_task_id=transfer.source_concept_ids[0]
+                if transfer.source_concept_ids
+                else None,
+                active_transfer_task_prompt=transfer.prompt,
+                solo_started_at=solo.started_at,
+                solo_assistance_locked=True,
+                expected_attempt_kind="transfer",
+            )
+
+    # Persist the durable phase so the next turn in this conversation
+    # restores Solo / transfer state BEFORE generation.
+    await repository.save_durable_learning_phase(
+        conversation=conversation,
+        phase=durable_phase,
+    )
 
     # Cognitive mirror — aggregate persisted evidence for the focus concept.
     target_concept_id = (
         evidence_packet.graph_nodes[0].id if evidence_packet.graph_nodes else None
     )
+    all_evidence = [*commitment_evidence, *teach_back_evidence, *transfer_evidence]
     cognitive_mirror = await policy.build_cognitive_mirror(
         course_id=actor.course_id,
         curriculum_edition_id=curriculum_edition_id,
@@ -938,9 +1221,9 @@ async def learning_native_node(
         target_concept_id=target_concept_id,
         diagnosis=diagnosis,
         evidence_packet=evidence_packet,
+        current_turn_evidence=all_evidence,
     )
 
-    all_evidence = [*commitment_evidence, *teach_back_evidence, *transfer_evidence]
     evidence_kinds = [item.kind.value for item in all_evidence]
     native_state = policy.assemble_turn_state(
         commitment=commitment,

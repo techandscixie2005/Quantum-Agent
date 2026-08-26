@@ -365,6 +365,66 @@
 .toolResult > span[data-status="fail"] { color: #a13e34; }
 .toolResult p { margin: 5px 0; color: var(--muted); font-size: 8px; line-height: 1.45; }
 .toolResult small { color: var(--muted); font: 6px var(--font-geist-mono), monospace; }
+.tunnellingMetrics {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--mint) 24%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
+  font: 8px var(--font-geist-mono), monospace;
+  color: var(--ink);
+}
+.tunnellingMetrics strong { color: var(--green-dark); font-weight: 700; }
+.experimentModeToggle { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.experimentModeToggle label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 9px; color: var(--ink); }
+.experimentModeToggle input { accent-color: var(--green); }
+.gatedEvidence {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+  color: var(--ink);
+  font-size: 9px;
+  line-height: 1.45;
+}
+.learningNativeActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--mint) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 28%, transparent);
+}
+.phaseButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--green) 40%, transparent);
+  background: var(--surface);
+  color: var(--green-dark);
+  font: 700 9px var(--font-geist-mono), monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.phaseButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--mint) 40%, transparent);
+}
+.phaseButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .noEvidence { margin: 10px 0 0; color: var(--muted); font-size: 8px; line-height: 1.5; }
 .policyCard { padding: 14px; color: white; border-radius: 10px; background: var(--green-dark); }
 .policyCard .kicker { color: #a8d5c2; }
@@ -395,6 +455,11 @@
 .bootError h1 { margin: 0; color: var(--ink); font: 500 30px Georgia, "Noto Serif SC", serif; }
 .bootError > p:not(.kicker) { max-width: 520px; margin: 0; font-size: 11px; line-height: 1.6; }
 .bootError button { margin-top: 8px; padding: 9px 14px; border: 0; border-radius: 7px; color: white; background: var(--green); cursor: pointer; }
+.demoLogin { display: grid; gap: 8px; margin-top: 18px; padding: 18px; border: 1px solid var(--rule); border-radius: 10px; background: var(--card); text-align: left; max-width: 360px; }
+.demoLogin label { font: 600 10px var(--font-geist-mono), monospace; color: var(--ink); }
+.demoLogin input { padding: 9px 11px; border: 1px solid var(--rule); border-radius: 6px; font-size: 12px; background: var(--paper); color: var(--ink); }
+.demoLogin button { margin-top: 4px; padding: 9px 14px; border: 0; border-radius: 7px; color: white; background: var(--green); cursor: pointer; font-size: 11px; }
+.demoLogin button:disabled { opacity: .55; cursor: not-allowed; }
 .backdrop { display: none; }
 
 @media (max-width: 1180px) {

@@ -82,6 +82,18 @@ class Settings(BaseSettings):
         default="glm-5.2",
         validation_alias="USTC_MODEL_CODE",
     )
+    # PRD V3.0 P1-4: demo-account bootstrap.  When ``DEMO_LOGIN_SECRET`` is
+    # set, the ``/api/v1/auth/demo-login`` endpoint issues a short-lived
+    # student session for the competition demo account in exchange for the
+    # shared secret.  This lets a judge enter /agent without manual SQL or
+    # cookie injection.  When unset, the endpoint refuses all requests.
+    demo_login_secret: SecretStr | None = Field(
+        default=None, validation_alias="DEMO_LOGIN_SECRET"
+    )
+    demo_login_course_email: str = Field(
+        default="demo-student@quantum-agent.local",
+        validation_alias="DEMO_LOGIN_COURSE_EMAIL",
+    )
     ustc_embedding_route_model: str = Field(
         default="qwen3-embedding",
         validation_alias="USTC_MODEL_EMBEDDING",

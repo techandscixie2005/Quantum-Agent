@@ -36,6 +36,7 @@ class ScientificVerificationKind(StrEnum):
     NUMERICAL_NORMALIZATION = "numerical_normalization"
     NUMERICAL_UNITARITY = "numerical_unitarity"
     TWO_LEVEL_SIMULATION = "two_level_simulation"
+    RECTANGULAR_BARRIER_TUNNELLING = "rectangular_barrier_tunnelling"
     LINE_VISUALIZATION = "line_visualization"
     CODE_TEST = "code_test"
     UNVERIFIED = "unverified"
@@ -217,6 +218,56 @@ class TwoLevelSimulationRequest(_RequestBase):
         return self
 
 
+class RectangularBarrierRequest(_RequestBase):
+    """A finite rectangular barrier scattering calculation.
+
+    Models the stationary scattering of a non-relativistic particle of mass
+    ``particle_mass_kg`` and kinetic energy ``energy_eV`` incident on a barrier
+    of height ``barrier_height_eV`` and width ``barrier_width_m``.  The
+    verifier computes the transmission coefficient ``T`` and reflection
+    coefficient ``R`` from the analytically correct rectangular-barrier
+    formula and checks ``abs(R + T - 1) <= conservation_tolerance``.
+
+    The Golden Loop case ``E < V0`` uses the tunnelling formula:
+
+        kappa = sqrt(2 m (V0 - E)) / hbar
+        T = [1 + V0**2 * sinh**2(kappa * a) / (4 E (V0 - E))] ** -1
+        R = 1 - T
+
+    All parameters carry explicit SI units so the result is reproducible
+    without any unit convention ambiguity.
+    """
+
+    kind: Literal[ScientificVerificationKind.RECTANGULAR_BARRIER_TUNNELLING] = (
+        ScientificVerificationKind.RECTANGULAR_BARRIER_TUNNELLING
+    )
+    energy_eV: float = Field(gt=0, le=1e6)
+    barrier_height_eV: float = Field(gt=0, le=1e6)
+    barrier_width_m: float = Field(gt=0, le=1e-3)
+    particle_mass_kg: float = Field(gt=0, le=1e-21)
+    conservation_tolerance: float = Field(default=1e-9, gt=0, le=1e-2)
+
+    @model_validator(mode="after")
+    def finite_physical_parameters(self) -> RectangularBarrierRequest:
+        values = (
+            self.energy_eV,
+            self.barrier_height_eV,
+            self.barrier_width_m,
+            self.particle_mass_kg,
+            self.conservation_tolerance,
+        )
+        if any(not math.isfinite(value) for value in values):
+            raise ValueError("rectangular barrier parameters must be finite")
+        # The analytic formula is numerically unstable when E is extremely
+        # close to V0 (the k1=kappa degenerate case).  Reject that band so the
+        # verifier never reports a noisy T/R pair.
+        if abs(self.energy_eV - self.barrier_height_eV) <= 1e-9 * self.barrier_height_eV:
+            raise ValueError(
+                "energy is too close to barrier height; the degenerate case is rejected"
+            )
+        return self
+
+
 class LineVisualizationRequest(_RequestBase):
     kind: Literal[ScientificVerificationKind.LINE_VISUALIZATION] = (
         ScientificVerificationKind.LINE_VISUALIZATION
@@ -267,6 +318,7 @@ ScientificVerificationRequest = Annotated[
     | NumericalNormalizationRequest
     | NumericalUnitarityRequest
     | TwoLevelSimulationRequest
+    | RectangularBarrierRequest
     | LineVisualizationRequest
     | CodeTestRequest
     | UnverifiedRequest,

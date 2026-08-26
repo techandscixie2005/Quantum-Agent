@@ -215,6 +215,14 @@ export async function proxyTeachingTurn(request: Request): Promise<Response> {
     "/teaching/turns/stream";
   let upstream: Response;
   try {
+    // PRD V3.0 P1-2: forward browser cancellation to the backend so a user
+    // who navigates away or cancels the request does not keep a long model
+    // call running.  We combine the incoming request signal (browser
+    // cancellation) with a 240s timeout using AbortSignal.any.
+    const timeoutSignal = AbortSignal.timeout(240_000);
+    const combinedSignal = request.signal
+      ? AbortSignal.any([request.signal, timeoutSignal])
+      : timeoutSignal;
     upstream = await fetch(new URL(path, baseUrl), {
       method: "POST",
       headers: {
@@ -224,7 +232,7 @@ export async function proxyTeachingTurn(request: Request): Promise<Response> {
       },
       body: JSON.stringify(body),
       cache: "no-store",
-      signal: AbortSignal.timeout(240_000),
+      signal: combinedSignal,
     });
   } catch {
     return teachingError(

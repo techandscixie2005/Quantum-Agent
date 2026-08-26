@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 
 from quantum_agent.api.attachments import router as attachments_router
+from quantum_agent.api.auth import router as auth_router
 from quantum_agent.api.course_context import router as course_context_router
 from quantum_agent.api.graph import router as graph_router
 from quantum_agent.api.retrieval import router as retrieval_router
@@ -138,6 +139,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(teaching_router)
     app.include_router(source_files_router)
     app.include_router(teacher_insights_router)
+    app.include_router(auth_router)
 
     @app.get("/health/live", response_model=HealthResponse, tags=["health"])
     async def liveness() -> HealthResponse:
