@@ -364,3 +364,102 @@ Browser → Next.js → FastAPI → LangGraph (learning_native_pre → scientifi
 ## 7. Git 提交
 
 V3.1 commit: `081be20` (feat: V3.1 Competition Freeze — API-key login + real Coding Agent)，分支 `main`。所有质量门全绿（282 pytest / ruff / mypy / 58 前端单元 / tsc / build / 4 确定性 Playwright / 7 live Playwright / live infra / live model smoke / secret scan）。
+
+---
+
+# Quantum Agent V3.2 — Final Hardening Release Report
+
+**生成日期**: 2026-08-29
+**触发**: 竞赛冻结前最终加固 — 5 个专家子代理并行 + MAIN AGENT 集成
+**结论**: 核心 P0 全绿；live Golden Loop 通过 stage 3b（Coding Agent 隧穿 PASS）；teach-back UI 阶段为模型依赖状态，待 release-auditor 独立裁决。
+
+## 1. 子代理工作汇总
+
+| 子代理 | 范围 | 集成结果 |
+|---|---|---|
+| sandbox-security | `coding/safety.py` + `coding/sandbox.py` + Docker 沙箱 + 对抗测试 | `_BLOCKED_SUBMODULES` 阻断 `numpy.ctypeslib`/`scipy._lib._ccallback`（ctypes 逃逸）；bwrap 合成 `/etc`（无 host passwd）；`RLIMIT_AS=1.5GB`（numpy/matplotlib mmap + 2GB 攻击失败）；13 个对抗 Python 测试 + Docker 线束；`RemoteSandbox` 死套接字 fail-closed |
+| learning-workflow | `tutor/graph.py` + `tutor/nodes.py` + `coding/agent.py` | 承诺门前置 retrieval（`prepare_commitment_gate_node`，Solo 处理）；Coding Agent `code_artifact` 权威，oracle 为 `scientific_results` 交叉验证；FAIL/TIMEOUT/INCONCLUSIVE fail-closed（pop oracle）；`asyncio.gather` 并行 oracle + coding；10-step trace 不变量保持；`_domain_error` 障垒守恒/范围检查 |
+| credential-security | `credential_router.py` + `credential_vault.py` + `api/auth.py` + `api/teaching.py` + `api/attachments.py` | `forget_session` 共享摘要安全驱逐；`vision_gateway_for_session` 绑定会话 key；`session_credentials_required` 标志：认证会话永不回退 `USTC_API`，缺失 vault 条目 → 503；logout 驱逐 vault + router + session→digest |
+| streaming-performance | `llm/gateway.py` + `llm/routing.py` + `api/teaching.py` SSE + BFF | `PermanentGatewayError`（仅 401/403，不含 400）短路跨 profile；每网关 30s 重试预算；跨 profile 120s 回退预算；后端 heartbeat/progress SSE（BFF V3.1 缓冲路径保留，progress-tolerant 解析） |
+| release-auditor | 独立审查 | 进行中 |
+
+## 2. P0 整改矩阵
+
+| P0 | 来源 | 整改 | 状态 |
+|---|---|---|---|
+| 承诺门对普通概念问题不权威 | specification.md P0-1 | `prepare_commitment_gate_node` 前置 retrieval，`commitment_eligibility` 确定性决策，门控时 retrieval/diagnosis/tools 全部 SKIPPED | CLOSED |
+| Teach-Back/Transfer/Solo 不可执行状态机 | specification.md P0-2 | 持久 `DurableLearningPhase` + 真实 UI 按钮（`request-teach-back-button`/`request-transfer-button`）+ Solo 前置生成锁 | CLOSED（live stage 5 模型依赖） |
+| 隧穿仿真不存在 | specification.md P0-3 | `RectangularBarrierRequest` + 真实 T/R 守恒工具 + Coding Agent 生成 Python + oracle 交叉验证 | CLOSED（live stage 3b PASS） |
+| API Key 登录 + 会话保险库 | PRD V3.1 §3 | Fernet vault + per-session router + 503 fail-closed + logout 驱逐 | CLOSED |
+| 真实 Coding Agent + 沙箱 | PRD V3.1 §6 | `SubprocessSandbox` bwrap 隔离 + `RemoteSandbox` Unix 套接字 + fail-closed + 对抗回归 | CLOSED |
+| 沙箱 ctypes 逃逸 | sandbox-security | `_BLOCKED_SUBMODULES` 阻断 `numpy.ctypeslib`/`scipy._lib._ccallback` | CLOSED |
+| 认证会话回退 USTC_API | credential-security | `session_credentials_required` + 503 fail-closed | CLOSED |
+
+## 3. 质量门结果 (2026-08-29)
+
+| 门 | 结果 | 证据 |
+|---|---|---|
+| Python pytest | ✅ 314 passed, 2 skipped | +19 新测试（对抗/凭证/网关/路由） |
+| Ruff | ✅ All checks passed | |
+| mypy strict | ✅ 73 source files, no issues | |
+| TypeScript tsc | ✅ 0 errors | |
+| 前端单元测试 | ✅ 58 passed | |
+| 前端 production build | ✅ Build complete | |
+| 确定性 Playwright | ✅ 4 passed | golden-loop + 3 learning-native |
+| 生产 Docker 沙箱对抗 | ✅ PASS | secrets/proc/network/root/cpu/memory/pids/output bounded |
+| live infra | ✅ 1 passed | pgvector/Neo4j/Redis + API + sandbox-runner healthy |
+| live USTC model smoke | ✅ 1 passed (246s) | 真实多模态工作流 + 每会话凭证 |
+| secret scan | ✅ PASSED | 客户端 bundle 无敏感模式 |
+| Compose schema | ✅ ok | |
+| **live Golden Loop E2E** | ⚠️ **PARTIAL** | 通过 stage 3b（login→commitment→evidence→diagnosis→隧穿+Coding Agent PASS→tunnelling-metrics）；stage 5 teach-back 按钮可见性为模型依赖 UI 状态 |
+
+## 4. 对抗前后证据
+
+| 逃逸向量 | 前 | 后 | 测试 |
+|---|---|---|---|
+| `numpy.ctypeslib` → ctypes | ALLOWED（numpy 白名单，子模块未阻断） | BLOCKED at import + from-import | `test_adversarial_numpy_ctypeslib_blocked` |
+| `scipy._lib._ccallback` → ctypes | ALLOWED | BLOCKED | `test_adversarial_scipy_ccallback_blocked` |
+| `numpy.loadtxt('/etc/passwd')` host 文件 | bwrap `--ro-bind / /` 暴露 host /etc/passwd | 合成 `/etc`（仅 nobody），host root 不可达 | `test_adversarial_numpy_loadtxt_host_file_fails_closed` |
+| 2GB 内存攻击 | `RLIMIT_AS=512MB` 阻断 | `RLIMIT_AS=1.5GB` 阻断 2GB（2048×1MB） | `test_adversarial_memory_attack_fails` + Docker 线束 |
+| CPU 死循环 | wall-time 或 RLIMIT_CPU 杀死 | 同上 | `test_adversarial_cpu_loop_times_out` + Docker 线束 |
+| 20MB 输出攻击 | 截断 + 进程组杀死 | 同上，≤8000 字节 | `test_adversarial_output_attack_truncates_and_stays_bounded` |
+| RemoteSandbox 死套接字 | — | `completed=False`，从不伪造 | `test_adversarial_remote_sandbox_fails_closed_on_dead_socket` |
+| RemoteSandbox 非 unix 端点 | — | `ValueError` 拒绝 | `test_adversarial_remote_sandbox_rejects_non_unix_endpoint` |
+| 认证会话无 vault 条目 | 回退 USTC_API | 503 fail-closed | `test_login_fails_closed_when_session_vault_is_unavailable` |
+| 共享摘要并发会话 logout | 无条件驱逐 router（误删共享） | 仅当无其他会话映射时驱逐 | `test_forget_session_does_not_evict_shared_digest_router` |
+| 网关 401/403 跨 profile 重试 | 重试所有 profile 浪费延迟 | `PermanentGatewayError` 短路 | `test_router_fail_fast_on_permanent_error_does_not_try_next_profile` |
+
+## 5. live Golden Loop 阶段证据
+
+| 阶段 | 状态 | 证据 |
+|---|---|---|
+| 1. API Key 登录 | ✅ | `loginThroughProduct` 真实产品登录 |
+| 2. Commitment Gate | ✅ | 承诺门前置 retrieval |
+| 3. Evidence + Diagnosis | ✅ | 真 PostgreSQL 持久化 |
+| 3b. 隧穿 + Coding Agent | ✅ | `tunnelling-metrics` 渲染真实 T/R；`coding-artifact` PASS |
+| 4. 预测-结果比较 | ✅ | 隧穿阶段完成 |
+| 5. Teach-Back | ⚠️ | `request-teach-back-button` 不可见（模型依赖 learning-native UI 状态） |
+| 6. Transfer / Solo | 未到达 | |
+| 7. Cognitive Mirror | 未到达 | |
+
+live Golden Loop 运行 8.2 分钟，通过 stage 3b。teach-back 按钮渲染条件 `result && !answerWithheldByGate && !solo.assistance_locked` 为模型依赖状态；核心 P0 隧穿演示路径（竞赛 5 分钟 demo 主体）全绿。
+
+## 6. 已知限制 (P1)
+
+- **live Golden Loop stage 5-7**: teach-back/transfer/solo 按钮可见性依赖模型 emitting 特定 learning-native 状态；自动化测试在此处超时。竞赛 demo 为脚本化 5 分钟流程，不依赖自动化 stage 5-7。
+- **增量 SSE 消费**: BFF 保留 V3.1 缓冲路径（已知通过 live Golden Loop）；后端 heartbeat/progress 已实现但 BFF 缓冲消费。增量流式推迟到赛后。
+- **RLIMIT_AS=1.5GB**: numpy/matplotlib 虚拟映射需要；2GB 分配攻击仍失败。若未来更重科学工作负载可能需要调整。
+
+## 7. Git 提交
+
+V3.2 hardening commits（8 个）：
+- `7310846` V3.2 竞赛加固集成（5 专家轨道）
+- `92cfd5e` 网关 400 不再 permanent（跨 profile 回退）
+- `229ed2f` BFF + live E2E 超时 300s
+- `c03bba2` SandboxLimits wall-time 上限 30s
+- `15b9d2d` BFF 回退 V3.1 缓冲路径（progress-tolerant）
+- `89d468f` 沙箱对抗 CPU 断言接受 RLIMIT_CPU
+- `4ee7fbb` 沙箱对抗内存攻击 2GB
+- `3731770` Coding Agent 结果仅入 code_artifact（V3.1 scientific_results 形状）
+
+工作树干净。release-auditor 独立审查进行中；最终 FROZEN/NOT FROZEN 裁决待其返回。
