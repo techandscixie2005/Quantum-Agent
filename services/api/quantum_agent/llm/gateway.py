@@ -22,11 +22,12 @@ T = TypeVar("T")
 _TRANSIENT_STATUS_CODES: frozenset[int] = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
 # Permanent HTTP status codes that must NOT be retried across router
-# profiles either.  401/403/400 indicate a configuration or authorization
-# problem that retrying against another profile cannot fix; the router
-# short-circuits and surfaces the failure to the caller so the turn fails
-# fast rather than burning the proxy deadline.
-_PERMANENT_STATUS_CODES: frozenset[int] = frozenset({400, 401, 403})
+# profiles.  401/403 are credential/authorization errors: the same key is
+# used for every profile, so retrying against another profile cannot fix
+# them and only burns the proxy deadline.  400 is NOT included here: a bad
+# request may be profile-specific (e.g. a model that rejects a large
+# prompt), so the router should still try the next profile.
+_PERMANENT_STATUS_CODES: frozenset[int] = frozenset({401, 403})
 
 
 class GatewayError(RuntimeError):

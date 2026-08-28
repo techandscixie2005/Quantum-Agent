@@ -386,12 +386,13 @@ def test_router_is_disabled_without_server_secret_but_registry_remains_available
 
 
 async def test_router_fail_fast_on_permanent_error_does_not_try_next_profile() -> None:
-    """PRD V3.1 P1-2: 401/403/400 must NOT be retried across router profiles.
+    """PRD V3.1 P1-2: 401/403 must NOT be retried across router profiles.
 
-    A permanent error on one profile is almost certainly permanent on every
-    other profile (same upstream auth, same request body).  The router must
-    short-circuit and surface the PermanentGatewayError to the caller
-    instead of burning latency on the remaining profiles.
+    A credential/authorization error (401/403) on one profile is almost
+    certainly permanent on every other profile (same upstream key), so the
+    router short-circuits and surfaces the PermanentGatewayError instead of
+    burning latency on the remaining profiles.  400 is NOT permanent: a bad
+    request may be profile-specific, so the router still tries the next.
     """
 
     router, constructed, _ = _router_with_outcomes(

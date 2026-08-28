@@ -295,10 +295,12 @@ async def test_retry_transient_deadline_caps_total_retry_budget() -> None:
 
 
 async def test_structured_generate_classifies_401_as_permanent() -> None:
-    """PRD V3.1 P1-2: 401/403/400 must raise PermanentGatewayError.
+    """PRD V3.1 P1-2: 401/403 must raise PermanentGatewayError.
 
-    The router relies on this distinct type to short-circuit across
-    profiles instead of retrying a permanent error against every fallback.
+    400 is NOT permanent: a bad request may be profile-specific (a model
+    that rejects a large prompt), so the router should still try the next
+    profile.  401/403 are credential errors (same key for every profile),
+    so the router short-circuits instead of burning the proxy deadline.
     """
 
     calls = {"n": 0}
