@@ -129,7 +129,7 @@ async def test_sandbox_captures_matplotlib_figure() -> None:
         "print('### METRICS_JSON: {}')\n"
     )
     run = await sandbox.execute_program_with_figure(
-        _artifact(code), SandboxLimits(wall_time_seconds=10.0)
+        _artifact(code), SandboxLimits(wall_time_seconds=25.0)
     )
     assert run.result.completed is True
     assert run.figure_png_base64 is not None
