@@ -158,6 +158,7 @@ class LearningEvidenceStatistics(BaseModel):
     observed_check_responses: EvidenceEventAggregate
     deterministic_tool_observations: EvidenceEventAggregate
     diagnosis_inferences: EvidenceEventAggregate
+    events_by_kind: dict[LearningEvidenceKind, EvidenceEventAggregate]
     inferred_misconceptions: list[InferredMisconceptionAggregate]
     inferred_misconception_label_count: int = Field(ge=0)
     inferred_misconceptions_truncated: bool
@@ -443,6 +444,7 @@ async def learning_statistics(
             empty,
         ),
         diagnosis_inferences=counts.get(LearningEvidenceKind.DIAGNOSIS_INFERENCE, empty),
+        events_by_kind={kind: counts.get(kind, empty) for kind in LearningEvidenceKind},
         inferred_misconceptions=[
             InferredMisconceptionAggregate(
                 inferred_label=str(label)[:500],

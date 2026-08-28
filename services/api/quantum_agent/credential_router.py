@@ -28,7 +28,9 @@ from quantum_agent.llm.routing import (
     ModelCapabilityRegistry,
     ModelProfile,
     ModelRouter,
+    ModelTask,
 )
+from quantum_agent.llm.vision import VisionGateway
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +78,7 @@ class CredentialScopedRouterFactory:
         self._vault = vault
         self._base_url = base_url.rstrip("/")
         self._routers: OrderedDict[str, ModelRouter] = OrderedDict()
+        self._session_digests: OrderedDict[UUID, str] = OrderedDict()
         self._lock = asyncio.Lock()
 
     def _build_router(self, api_key: SecretStr) -> ModelRouter:
@@ -109,15 +112,52 @@ class CredentialScopedRouterFactory:
             if router is None:
                 router = self._build_router(api_key)
             self._routers[digest] = router
+            self._session_digests.pop(session_id, None)
+            self._session_digests[session_id] = digest
             self._evict_if_needed()
         return router
 
+    async def vision_gateway_for_session(self, session_id: UUID) -> VisionGateway | None:
+        """Build a vision/OCR gateway from the same logged-in credential."""
+
+        if self._vault is None:
+            return None
+        api_key = await self._vault.load(session_id)
+        if api_key is None or not api_key.get_secret_value():
+            return None
+        digest = digest_api_key(api_key)
+        async with self._lock:
+            self._session_digests.pop(session_id, None)
+            self._session_digests[session_id] = digest
+            self._evict_session_digests_if_needed()
+        profile = self._registry.profiles_for(ModelTask.VISION)[0]
+        return VisionGateway(
+            api_key=api_key,
+            base_url=self._base_url,
+            model=profile.provider_model,
+        )
+
     async def forget_session(self, session_id: UUID) -> None:
-        api_key = await self._vault.load(session_id) if self._vault is not None else None
-        if api_key is not None:
-            await self.forget_digest(digest_api_key(api_key))
+        """Evict the vault entry, drop the session→digest mapping, and remove
+        the cached router for that digest **only if no other live session
+        still maps to it**.
+
+        Two sessions sharing the same API key share one cached router; logout
+        of one must not tear down the other's router.  The vault entry is
+        always removed (each session has its own vault slot).
+        """
+
         if self._vault is not None:
             await self._vault.forget(session_id)
+        async with self._lock:
+            digest = self._session_digests.pop(session_id, None)
+            if digest is None:
+                return
+            still_in_use = any(
+                other_digest == digest for other_digest in self._session_digests.values()
+            )
+            if not still_in_use:
+                self._routers.pop(digest, None)
 
     async def forget_digest(self, digest: str) -> None:
         async with self._lock:
@@ -125,7 +165,19 @@ class CredentialScopedRouterFactory:
 
     def _evict_if_needed(self) -> None:
         while len(self._routers) > _LRU_MAX:
-            self._routers.popitem(last=False)
+            digest, _router = self._routers.popitem(last=False)
+            stale_sessions = [
+                session_id
+                for session_id, cached_digest in self._session_digests.items()
+                if cached_digest == digest
+            ]
+            for session_id in stale_sessions:
+                self._session_digests.pop(session_id, None)
+        self._evict_session_digests_if_needed()
+
+    def _evict_session_digests_if_needed(self) -> None:
+        while len(self._session_digests) > _LRU_MAX * 4:
+            self._session_digests.popitem(last=False)
 
     def __repr__(self) -> str:
         return "CredentialScopedRouterFactory(cache=<redacted>)"

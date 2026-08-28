@@ -14,6 +14,11 @@ class ExecuteRequest(BaseModel):
     code: str
     limits: SandboxLimits
 
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ready"}
+
 @app.post("/execute")
 async def execute(request: ExecuteRequest) -> dict[str, Any]:
     result = await _sandbox.execute_program(

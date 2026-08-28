@@ -53,11 +53,17 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 type LiveAuth = Readonly<{
   course_id: string;
   curriculum_edition_id: string;
-  student_user_id?: string;
-  student_token: string;
   ta_user_id?: string;
   ta_token: string;
 }>;
+
+function liveApiKey(): string {
+  const key = process.env.USTC_API?.trim();
+  if (!key || key.length < 16 || key.length > 256) {
+    throw new Error("USTC_API is required for the live login path");
+  }
+  return key;
+}
 
 function liveAuth(): LiveAuth {
   const configured = process.env.QA_E2E_AUTH_FILE?.trim();
@@ -76,7 +82,7 @@ function liveAuth(): LiveAuth {
       throw new Error(`The live E2E ${key} is invalid`);
     }
   }
-  for (const key of ["student_token", "ta_token"] as const) {
+  for (const key of ["ta_token"] as const) {
     if (typeof input[key] !== "string" || input[key].length < 32 || input[key].length > 512) {
       throw new Error(`The live E2E ${key} is invalid`);
     }
@@ -84,17 +90,12 @@ function liveAuth(): LiveAuth {
   return input as LiveAuth;
 }
 
-async function installStudentSession(page: Page, auth: LiveAuth): Promise<void> {
-  const origin = process.env.BASE_URL ?? "http://127.0.0.1:3000";
-  await page.context().addCookies([
-    {
-      name: "qa_session",
-      value: auth.student_token,
-      url: origin,
-      httpOnly: true,
-      sameSite: "Lax",
-    },
-  ]);
+async function loginThroughProduct(page: Page): Promise<void> {
+  await page.goto("/agent", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("form", { name: "API Key 登录表单" })).toBeVisible();
+  await page.getByLabel("USTC API Key").fill(liveApiKey());
+  await page.getByRole("button", { name: "连接并进入学习空间" }).click();
+  await expect(page.getByTestId("agent-experience")).toBeVisible({ timeout: 60_000 });
 }
 
 /**
@@ -332,7 +333,7 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
   test("drives prediction → diagnosis → simulation → teach-back → transfer → solo → mirror with real persistence", async ({ page }) => {
     test.setTimeout(900_000); // 15 minutes for the full live loop
     const auth = liveAuth();
-    await installStudentSession(page, auth);
+    await loginThroughProduct(page);
 
     // Snapshot the learning-evidence counts BEFORE the loop so we can prove
     // the loop persisted NEW rows (not pre-existing ones).
@@ -340,9 +341,6 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
     const beforeTotal = Number(beforeStats.total_recorded_events ?? 0);
     const beforeTraces = await fetchAgentTraces(auth);
     const beforeTraceTotal = beforeTraces.total;
-
-    await page.goto("/agent", { waitUntil: "domcontentloaded" });
-    await expect(page.getByTestId("agent-experience")).toBeVisible({ timeout: 30_000 });
 
     // Use learn_concepts mode: it exposes the student-attempt box, which
     // guarantees STUDENT_ATTEMPT LearningEvidence is persisted on each turn.
@@ -360,7 +358,7 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
     await sendStudentMessage(
       page,
       "我想理解量子隧穿：为什么粒子能量 E 小于势垒高度 V0 时仍然可能出现在势垒右侧？",
-      "我预测透射概率严格为零，因为 E<V0 意味着粒子被完全反射，经典上不可能穿越。",
+      null,
     );
     let terminal = await waitForWorkflowTerminal(page);
     expect(terminal).toBe("completed");
@@ -432,27 +430,27 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
     terminal = await waitForWorkflowTerminal(page);
     expect(terminal).toBe("completed");
 
-    // ── Stage 5: Teach-Back / reconstruction ──
-    await sendStudentMessage(
-      page,
-      "我想用自己的话向新同学重新解释为什么 E<V0 仍可能透射，请进入 teach-back。",
-      "波函数在势垒内指数衰减；衰减后的振幅在右侧仍然非零，因此透射概率是一个很小的正数。",
+    // ── Stage 5: explicit Teach-Back transition + reconstruction ──
+    const teachBackResponse = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/teaching/turns/stream",
+      { timeout: 240_000 },
     );
-    terminal = await waitForWorkflowTerminal(page);
-    expect(terminal).toBe("completed");
+    await page.getByTestId("request-teach-back-button").click();
+    expect((await teachBackResponse).ok()).toBe(true);
+    await waitForWorkflowTerminal(page);
     expect(await maybeSubmitTeachBack(
       page,
       "波函数在势垒内不是突变为零，而是指数衰减；衰减后的振幅在右侧仍然非零，因此透射概率是一个很小的正数。",
     ), "Teach-Back phase must be present and submitted").toBe(true);
 
-    // ── Stage 6: transfer task + Solo Mode ──
-    await sendStudentMessage(
-      page,
-      "给我一个迁移任务：把矩势垒的透射规律应用到不同势垒宽度，并进入 Solo Mode 让我独立完成。",
-      "透射率随势垒宽度增加而指数下降。",
+    // ── Stage 6: explicit transfer task + Solo Mode transition ──
+    const transferResponse = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/teaching/turns/stream",
+      { timeout: 240_000 },
     );
-    terminal = await waitForWorkflowTerminal(page);
-    expect(terminal).toBe("completed");
+    await page.getByTestId("request-transfer-button").click();
+    expect((await transferResponse).ok()).toBe(true);
+    await waitForWorkflowTerminal(page);
     expect(await maybeSubmitSoloAttempt(
       page,
       "透射率随势垒宽度增加而指数下降，因为衰减常数不变但积分路径变长，振幅衰减更多。",
@@ -477,6 +475,24 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
       afterTotal,
       `learning-statistics total must increase after the loop (before=${beforeTotal}, after=${afterTotal})`,
     ).toBeGreaterThan(beforeTotal);
+
+    // Every required Learning-Native phase must have new durable evidence.
+    const beforeKinds = (beforeStats.events_by_kind ?? {}) as Record<string, { event_count?: number }>;
+    const afterKinds = (afterStats.events_by_kind ?? {}) as Record<string, { event_count?: number }>;
+    for (const kind of ["commitment", "teach_back", "transfer_assigned", "solo_assigned"]) {
+      expect(
+        Number(afterKinds[kind]?.event_count ?? 0),
+        `${kind} evidence must increase during the live loop`,
+      ).toBeGreaterThan(Number(beforeKinds[kind]?.event_count ?? 0));
+    }
+    const transferAttemptsAfter =
+      Number(afterKinds.transfer_attempted?.event_count ?? 0) +
+      Number(afterKinds.transfer_verified?.event_count ?? 0);
+    const transferAttemptsBefore =
+      Number(beforeKinds.transfer_attempted?.event_count ?? 0) +
+      Number(beforeKinds.transfer_verified?.event_count ?? 0);
+    expect(transferAttemptsAfter, "a durable Solo transfer attempt must be recorded")
+      .toBeGreaterThan(transferAttemptsBefore);
 
     // The course must have at least one student attempt persisted (recorded
     // because we filled the attempt box in learn_concepts mode).
@@ -511,16 +527,25 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
       "trace must persist workflow steps",
     ).toBeGreaterThan(0);
 
-    // Soft assertion: the Cognitive Mirror card MAY render (if the model
-    // emitted one).  We do not hard-assert it (the model may defer), but if
-    // it is visible, it must be evidence-only.
+    const beforeTraceIds = new Set(beforeTraces.items.map((item) => String(item.id)));
+    const newTraceDetails = await Promise.all(
+      afterTraces.items
+        .filter((item) => !beforeTraceIds.has(String(item.id)))
+        .map((item) => fetchAgentTraceDetail(auth, String(item.id))),
+    );
+    const generatedResult = newTraceDetails
+      .flatMap((detail) => detail.scientific_results as Array<Record<string, unknown>>)
+      .find(
+        (item) => (item.tool as { name?: string } | undefined)?.name === "coding-agent-isolated-python",
+      );
+    expect(generatedResult, "PostgreSQL must persist the verified Coding Agent result").toBeTruthy();
+    expect(generatedResult?.status).toBe("pass");
+
+    // Cognitive Mirror is a required phase and must be evidence-backed.
     const mirrorVisible = await page.getByTestId("cognitive-mirror").isVisible().catch(() => false);
-    if (mirrorVisible) {
-      await expect(page.getByTestId("cognitive-mirror")).toBeVisible();
-    }
+    expect(mirrorVisible, "Cognitive Mirror must render after durable evidence updates").toBe(true);
 
     // Surface what was actually persisted for the final report.
-    // eslint-disable-next-line no-console
     console.log(
       `[golden-loop-live] persistence: events ${beforeTotal}→${afterTotal}, ` +
         `traces ${beforeTraceTotal}→${afterTraces.total}, mirrorVisible=${mirrorVisible}`,

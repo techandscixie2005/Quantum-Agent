@@ -14,8 +14,13 @@ from langgraph.runtime import Runtime
 from langgraph.types import interrupt
 from pydantic import TypeAdapter
 
-from quantum_agent.coding import CodeGenerationTask
-from quantum_agent.db_models import AnswerReleaseLevel, LearningEvidenceKind
+from quantum_agent.coding import CodeArtifactRun, CodeGenerationTask
+from quantum_agent.db_models import (
+    AnswerReleaseLevel,
+    LearningEvidenceKind,
+    TeachingAction,
+)
+from quantum_agent.knowledge.evidence_packets import EvidencePacket, RetrievalCoverage
 from quantum_agent.knowledge.retrieval import RetrievalScope
 from quantum_agent.multimodal.contracts import ConfirmedEvidence
 from quantum_agent.multimodal.teaching import (
@@ -23,11 +28,15 @@ from quantum_agent.multimodal.teaching import (
     confirm_checkpoint_perception,
     derive_scientific_request,
 )
-from quantum_agent.science import ScientificVerificationStatus
+from quantum_agent.science import (
+    ScientificVerificationMethod,
+    ScientificVerificationResult,
+    ScientificVerificationStatus,
+    ToolIdentity,
+)
 from quantum_agent.science.models import (
     CodeTestRequest,
     RectangularBarrierRequest,
-    TwoLevelSimulationRequest,
 )
 from quantum_agent.teaching.agents import DiagnosisAgent, DiagnosisInput, EvidenceAgent
 from quantum_agent.teaching.hitl import (
@@ -51,13 +60,18 @@ from quantum_agent.teaching.learning_native import (
 from quantum_agent.teaching.models import (
     CognitiveCommitment,
     CommitmentGateDecision,
+    DiagnosisOutput,
+    DiagnosisStatus,
     DurableLearningPhase,
     LearningPhase,
     LearningPolicyAction,
+    ReleaseDecision,
+    ResponseStatus,
     SoloMode,
     SoloModeStatus,
     StudentSnapshot,
     TeachBackAnalysis,
+    TeachingResponse,
     TeachingTurnInput,
     TransferTask,
     TransferType,
@@ -66,7 +80,12 @@ from quantum_agent.teaching.models import (
     WorkflowStepName,
     WorkflowStepStatus,
 )
-from quantum_agent.teaching.policy import AnswerPolicyRepository, AnswerReleaseEngine
+from quantum_agent.teaching.policy import (
+    AnswerPolicyRepository,
+    AnswerReleaseEngine,
+    commitment_eligibility,
+    safe_default_policy,
+)
 from quantum_agent.teaching.repository import (
     LearningEvidenceRecord,
     TeachingRepository,
@@ -85,6 +104,19 @@ if TYPE_CHECKING:
 _MULTIMODAL_EVIDENCE_ADAPTER: TypeAdapter[ConfirmedEvidence] = TypeAdapter(
     ConfirmedEvidence
 )
+
+
+def _perception_confirmation_source(item: object) -> str | None:
+    """Read ``confirmation_source`` from a perception-trace entry that may be a
+    ``PerceptionTraceEntry`` instance or a deserialized dict (after LangGraph
+    checkpoint round-trip)."""
+
+    if isinstance(item, PerceptionTraceEntry):
+        return item.confirmation_source
+    if isinstance(item, dict):
+        value = item.get("confirmation_source")
+        return value if isinstance(value, str) else None
+    return None
 
 
 async def interpret_node(
@@ -274,10 +306,14 @@ def _coding_task_from_request(
 ) -> CodeGenerationTask | None:
     """Build a Coding Agent brief from the scientific request, when supported.
 
-    The Coding Agent writes fresh Python for computation-bearing requests
-    (rectangular barrier, two-level simulation, code tests).  The
-    deterministic oracle still runs independently and serves as the
-    verification cross-check.
+    The Coding Agent writes fresh Python for the Golden Loop tunnelling
+    computation (PRD §6, §9): ``rectangular_barrier_tunnelling``.  Other
+    scientific requests (e.g. ``two_level_simulation`` in ``run_experiments``
+    mode) are student-requested simulations whose deterministic tool is the
+    authoritative result; the Coding Agent does not run for them, so the
+    deterministic oracle remains the sole result and the student gets the
+    simulation they requested even when the model-backed Coding Agent is
+    unavailable.
     """
 
     student_question = request.message
@@ -299,23 +335,50 @@ def _coding_task_from_request(
             allowed_libraries=("numpy", "math", "cmath"),
             oracle_kind="rectangular_barrier_tunnelling",
         )
-    if isinstance(scientific_request, TwoLevelSimulationRequest):
-        return CodeGenerationTask(
-            student_question=student_question,
-            learning_goal=(
-                "Simulate the two-level system dynamics and report the final populations."
-            ),
-            known_variables={
-                "rabi_frequency": str(scientific_request.rabi_frequency),
-                "detuning": str(scientific_request.detuning),
-                "duration": str(scientific_request.duration),
-                "steps": str(scientific_request.steps),
-            },
-            required_outputs=["population_ground", "population_excited"],
-            allowed_libraries=("numpy", "scipy", "math"),
-            oracle_kind="two_level_simulation",
-        )
     return None
+
+
+def _coding_agent_result(
+    request: TeachingTurnInput,
+    oracle_result: ScientificVerificationResult,
+    agent_metrics: dict[str, str | int | float | bool],
+    observations: list[str],
+) -> ScientificVerificationResult:
+    """Build the authoritative Coding Agent scientific result.
+
+    PRD V3.1 §6: when the Coding Agent's generated program passes the
+    deterministic oracle, the *agent's* metrics are the authoritative
+    computation result (``method=CODE_TEST``,
+    ``tool=coding-agent-isolated-python``).  The oracle remains
+    verification-only; its metrics are kept in the preceding
+    ``scientific_results`` entry as the cross-check, never substituted
+    for the agent's on a FAIL/TIMEOUT/INCONCLUSIVE.
+    """
+
+    metrics: dict[str, float | int | str | bool] = {}
+    for key, value in agent_metrics.items():
+        if isinstance(value, bool):
+            metrics[key] = value
+        elif isinstance(value, int | float):
+            metrics[key] = value
+        elif isinstance(value, str):
+            try:
+                metrics[key] = float(value)
+            except ValueError:
+                metrics[key] = value
+    return ScientificVerificationResult(
+        kind=oracle_result.kind,
+        method=ScientificVerificationMethod.CODE_TEST,
+        status=ScientificVerificationStatus.PASS,
+        tool=ToolIdentity(name="coding-agent-isolated-python", version="1.0"),
+        inputs_sha256=oracle_result.inputs_sha256,
+        observations=observations,
+        limitations=[
+            "Coding Agent output cross-checked against the deterministic oracle "
+            "within 1e-6 tolerance."
+        ],
+        metrics=metrics,
+    )
 
 
 async def scientific_tools_node(
@@ -356,44 +419,83 @@ async def scientific_tools_node(
             detail="Backend answer policy withheld the requested tool result.",
         )
     else:
-        tool_result = await asyncio.to_thread(
-            toolbox.verify,
-            request.scientific_request,
-        )
-        scientific_results.append(tool_result)
-        # PRD V3.1 §6: also run the Coding Agent for computation-bearing
-        # requests so the student sees a fresh, agent-written program
-        # alongside the deterministic oracle cross-check.  Both paths run;
-        # the oracle result remains authoritative.
+        # PRD V3.1 P1-2: run the deterministic oracle and the Coding Agent
+        # concurrently.  They are independent: the oracle verifies the
+        # request deterministically (thread-pool), and the Coding Agent
+        # writes and executes a fresh program (async coroutine).  Neither
+        # result feeds the other; the oracle remains the cross-check, and
+        # the Coding Agent's generated metrics are authoritative on PASS.
+        # This cuts the node's wall-clock latency from ``oracle + coding``
+        # to ``max(oracle, coding)`` for computation-bearing turns.
         coding_agent = runtime.context.coding_agent
         gateway = runtime.context.model_gateway
         coding_task = _coding_task_from_request(request, request.scientific_request)
+        oracle_coro = asyncio.to_thread(toolbox.verify, request.scientific_request)
         if (
             coding_agent is not None
             and gateway is not None
             and coding_task is not None
             and not isinstance(request.scientific_request, CodeTestRequest)
         ):
-            try:
-                run = await coding_agent.solve(coding_task, gateway=gateway)
-                code_artifact = run.model_dump(mode="json")
-                if run.verification.status.value != "pass":
-                    # The oracle is verification-only.  Never present its
-                    # result as a successful computation when agent code did
-                    # not independently produce a verified result.
-                    scientific_results.pop()
-                coding_detail = (
-                    f"Coding Agent wrote {len(run.artifact.code)} chars of Python; "
-                    f"verifier status={run.verification.status.value}; "
-                    f"repairs={len(run.repairs)}."
-                )
-            except Exception as exc:  # never let the coding agent crash the turn
-                scientific_results.pop()
-                coding_detail = (
-                    f"Coding Agent failed: {type(exc).__name__}; computation is inconclusive."
-                )
+            oracle_outcome, coding_outcome = await asyncio.gather(
+                oracle_coro,
+                coding_agent.solve(coding_task, gateway=gateway),
+                return_exceptions=True,
+            )
         else:
-            coding_detail = ""
+            oracle_outcome = await oracle_coro
+            coding_outcome = None
+        if isinstance(oracle_outcome, BaseException):
+            # The deterministic oracle failed unexpectedly.  Re-raise so
+            # the workflow surfaces the failure rather than silently
+            # dropping the verification result.
+            raise oracle_outcome
+        tool_result = oracle_outcome
+        scientific_results.append(tool_result)
+        coding_detail = ""
+        if isinstance(coding_outcome, CodeArtifactRun):
+            run = coding_outcome
+            code_artifact = run.model_dump(mode="json")
+            if run.verification.status.value != "pass":
+                # The Coding Agent cross-check did not pass.  The Coding Agent
+                # only runs for the Golden Loop tunnelling computation (PRD §6),
+                # where the agent's generated program must independently
+                # reproduce the deterministic result.  On FAIL/INCONCLUSIVE we
+                # pop the oracle so no PASS result is surfaced as a successful
+                # agent computation (fail-closed: never fabricate the agent's
+                # success).  The ``code_artifact`` carries the honest failure.
+                scientific_results.pop()
+            else:
+                # PRD V3.1 §6: the Coding Agent's generated program is
+                # authoritative; append a result whose metrics come from
+                # ``run.verification.agent_metrics`` (the generated code),
+                # not the oracle.  The oracle result remains as the
+                # preceding cross-check entry.
+                agent_result = _coding_agent_result(
+                    request=request,
+                    oracle_result=tool_result,
+                    agent_metrics=run.verification.agent_metrics,
+                    observations=[
+                        f"Coding Agent program passed the deterministic oracle "
+                        f"({run.verification.oracle_kind or 'unknown'}) within "
+                        f"tolerance {run.verification.tolerance}."
+                    ],
+                )
+                scientific_results.append(agent_result)
+            coding_detail = (
+                f"Coding Agent wrote {len(run.artifact.code)} chars of Python; "
+                f"verifier status={run.verification.status.value}; "
+                f"repairs={len(run.repairs)}."
+            )
+        elif isinstance(coding_outcome, Exception):
+            # Never let the Coding Agent crash the turn.  Pop the oracle so
+            # no PASS result is surfaced when the agent computation failed;
+            # the step is marked DEGRADED so the trace is honest.
+            scientific_results.pop()
+            coding_detail = (
+                f"Coding Agent failed: {type(coding_outcome).__name__}; "
+                "computation is inconclusive."
+            )
         detail = (
             f"{tool_result.method.value} verification completed with "
             f"status={tool_result.status.value}."
@@ -404,7 +506,13 @@ async def scientific_tools_node(
             name=WorkflowStepName.RUN_SCIENTIFIC_TOOLS,
             status=(
                 WorkflowStepStatus.DEGRADED
-                if tool_result.status is ScientificVerificationStatus.INCONCLUSIVE
+                if (
+                    tool_result.status is ScientificVerificationStatus.INCONCLUSIVE
+                    or (
+                        coding_task is not None
+                        and not scientific_results
+                    )
+                )
                 else WorkflowStepStatus.COMPLETED
             ),
             detail=detail,
@@ -421,15 +529,18 @@ async def learning_native_pre_node(
     state: TutorState,
     runtime: Runtime[TutorContext],
 ) -> dict[str, Any]:
-    """Run the Learning-Native commitment gate BEFORE answer generation.
+    """Run the Learning-Native commitment gate BEFORE retrieval and answer
+    generation.
 
-    This is the PRD V3.0 Axiom 1 enforcement point.  When the gate is
-    enforced (``ATTEMPT_REQUIRED``) and the student has not submitted an
-    accepted commitment, we set ``answer_withheld_by_gate=True`` so the
-    downstream ``generate_response_node`` skips the LLM call entirely and
-    produces a deterministic "elicit a commitment first" response.  The
-    LLM only proposes the commitment prompt; code decides whether to
-    withhold the answer.
+    This is the PRD V3.0 Axiom 1 enforcement point ("Learner generates before
+    AI completes").  The gate decision is a pure function of the teaching mode,
+    the deterministic task kind, the student's message, and whether the
+    student already submitted a meaningful attempt this turn — it does NOT
+    depend on the retrieved evidence.  When the gate fires, the graph skips
+    retrieval/diagnosis/scientific-tools/generation entirely (see
+    ``prepare_commitment_gate_node``) and produces a deterministic elicitation
+    response with zero claims.  The LLM only proposes the commitment prompt;
+    code decides whether to withhold the answer.
 
     PRD V3.0 P0-2: this node also enforces the durable Learning Phase.  When
     the conversation is in ``SOLO_ACTIVE``, normal Ask AI requests are
@@ -441,14 +552,29 @@ async def learning_native_pre_node(
     if state.get("learning_native_pre_decision") is not None:
         return {}
     request = state["request"]
-    release = state["release"]
+    interpretation = state["interpretation"]
     model_gateway = runtime.context.model_gateway
     submission = request.learning_native
-    release_is_question_only = release.release_level is AnswerReleaseLevel.QUESTION_ONLY
-    # When the course evidence is not found, the commitment gate does not
-    # fire: there is nothing to commit to.  The tutor will surface the
-    # insufficient-evidence response instead.
-    evidence_not_found = release.reason_code == "course_evidence_not_found"
+
+    # PRD V3.0 Axiom 1: the gate decision is deterministic and pre-retrieval.
+    # ``commitment_eligibility`` returns True when the task kind requires a
+    # cognitive commitment (reasoning / exercise / prediction / experiment)
+    # and the student has not yet submitted one.  This is the same function
+    # ``AnswerReleaseEngine.decide`` uses to set ``release_level =
+    # QUESTION_ONLY`` with ``reason_code = commitment_required_before_explanation``,
+    # so the gate decision is consistent with the release decision that
+    # ``apply_policy`` would have made post-retrieval.
+    request_has_attempt = LearningNativePolicy.attempt_is_meaningful(request.student_attempt)
+    gate_eligible = commitment_eligibility(
+        mode=request.mode,
+        task_kind=interpretation.task_kind,
+        message=request.message,
+        has_current_attempt=request_has_attempt or (submission is not None),
+    )
+    # The release is QUESTION_ONLY (from the gate's perspective) when the
+    # gate is eligible.  This mirrors ``AnswerReleaseEngine.decide`` without
+    # needing the retrieved coverage.
+    release_is_question_only = gate_eligible
 
     # PRD V3.0 P0-2: load the durable Learning Phase.  Solo Mode is
     # server-authoritative and restored BEFORE generation, so a normal Ask
@@ -490,40 +616,35 @@ async def learning_native_pre_node(
             "solo_assistance_locked": True,
         }
 
+    # PRD V3.0 P0-1: when the turn carries an unconfirmed perception (e.g. an
+    # ambiguous OCR extraction awaiting HITL confirmation), the commitment
+    # gate must NOT fire yet.  The graph proceeds to retrieval and the HITL
+    # gate so the student / teacher can confirm the transcription first.
+    # After confirmation the graph restarts from ``interpret`` and the
+    # commitment gate runs again with a confirmed perception.  This ordering
+    # prevents the gate from withholding an answer before the student has
+    # even confirmed what they wrote.
+    perception_pending = any(
+        _perception_confirmation_source(item) == "pending"
+        for item in state.get("perception_trace", [])
+    )
+    if perception_pending:
+        gate_eligible = False
+        release_is_question_only = False
+
     commitment_proposal = await propose_commitment(
         message=request.message,
-        release_is_question_only=release_is_question_only and not evidence_not_found,
+        release_is_question_only=release_is_question_only,
         model_gateway=model_gateway,
     )
     policy = LearningNativePolicy()
-    # PRD V3.0 Axiom 1: a trivially short attempt (e.g. "a") does NOT satisfy
-    # the commitment gate.  Use the deterministic meaningfulness check so the
-    # gate cannot be bypassed by a one-character student_attempt.
-    request_has_attempt = LearningNativePolicy.attempt_is_meaningful(request.student_attempt)
-    # When evidence is not found, bypass the gate so the tutor can surface the
-    # insufficient-evidence response.  The gate is only meaningful when there
-    # is course evidence to withhold.
-    if evidence_not_found:
-        commitment, learning_action, withhold, commitment_evidence = (
-            CognitiveCommitment(
-                gate_decision=CommitmentGateDecision.PROCEED,
-                attempt_required=False,
-                candidate_prompt="",
-                reason_summary="课程证据不足，承诺门未激活。",
-                accepted=True,
-            ),
-            LearningPolicyAction.GIVE_CUE,
-            False,
-            list[LearningNativeEvidence](),
-        )
-    else:
-        commitment, learning_action, withhold, commitment_evidence = policy.decide_pre_generation(
-            request_has_attempt=request_has_attempt,
-            release_is_question_only=release_is_question_only,
-            proposal=commitment_proposal,
-            submission=submission.commitment if submission is not None else None,
-            submission_confidence=submission.confidence if submission is not None else None,
-        )
+    commitment, learning_action, withhold, commitment_evidence = policy.decide_pre_generation(
+        request_has_attempt=request_has_attempt,
+        release_is_question_only=release_is_question_only,
+        proposal=commitment_proposal,
+        submission=submission.commitment if submission is not None else None,
+        submission_confidence=submission.confidence if submission is not None else None,
+    )
 
     # Stash the pre-decision so the post node can assemble the final state
     # without re-running the commitment logic.
@@ -546,6 +667,191 @@ async def learning_native_pre_node(
         "learning_native_pre_decision": pre_decision,
         "answer_withheld_by_gate": withhold,
         "learning_native_evidence": pre_decision["commitment_evidence"],
+    }
+
+
+async def prepare_commitment_gate_node(
+    state: TutorState,
+    runtime: Runtime[TutorContext],
+) -> dict[str, Any]:
+    """Produce the deterministic commitment-gate response when the gate fires.
+
+    PRD V3.0 Axiom 1 ("Learner generates before AI completes"): when the
+    commitment gate fires, the graph skips retrieval / diagnosis /
+    scientific-tools / generation entirely.  This node emits:
+
+    * An empty ``EvidencePacket`` with ``coverage=NOT_FOUND`` and a
+      ``retrieval_skipped_until_commitment`` warning so the student-facing
+      result carries no answer-bearing evidence while the gate is open.
+    * A ``DiagnosisOutput`` with ``status=INSUFFICIENT_EVIDENCE`` (there is
+      no evidence to diagnose against).
+    * A safe-default ``PolicySnapshot`` and a ``ReleaseDecision`` at
+      ``QUESTION_ONLY`` with ``commitment_required_before_explanation``.
+    * A deterministic elicitation ``TeachingResponse`` with zero claims.
+    * SKIPPED trace steps for RETRIEVE_EVIDENCE, DIAGNOSE_PROGRESS,
+      RUN_SCIENTIFIC_TOOLS, and GENERATE_RESPONSE; COMPLETED steps for
+      CHOOSE_TEACHING_ACTION, APPLY_ANSWER_POLICY, VALIDATE_RESPONSE, and
+      RECORD_LEARNING_EVIDENCE so the 10-step ``WORKFLOW_ORDER`` invariant
+      is preserved.
+    """
+
+    from quantum_agent.teaching.state_machine import _next_question, _orientation
+
+    request = state["request"]
+    actor = runtime.context.actor
+    started = runtime.context.started_turn
+    pre_decision_raw = state.get("learning_native_pre_decision") or {}
+    pre_decision: dict[str, Any] = (
+        pre_decision_raw if isinstance(pre_decision_raw, dict) else {}
+    )
+    commitment_data_raw = pre_decision.get("commitment") or {}
+    commitment_data: dict[str, Any] = (
+        commitment_data_raw if isinstance(commitment_data_raw, dict) else {}
+    )
+    candidate_prompt = str(commitment_data.get("candidate_prompt") or "")
+    reason_summary = str(commitment_data.get("reason_summary") or "")
+    solo_blocked = bool(pre_decision.get("solo_blocked"))
+    question_level = AnswerReleaseLevel.QUESTION_ONLY
+
+    if solo_blocked:
+        orientation_text = reason_summary or candidate_prompt or _orientation(question_level)
+        next_question_text = "请独立完成当前的迁移任务；提交后系统会确定性验证你的答案。"
+        limitation_text = (
+            "Solo Mode active: AI assistance is blocked until the student "
+            "submits an independent transfer attempt or explicitly exits Solo."
+        )
+        generate_detail = (
+            "Solo Mode blocked the LLM answer; the student must submit an "
+            "independent transfer attempt before AI assistance resumes."
+        )
+        warning_code = "answer_blocked_by_solo_mode"
+        reason_code = "solo_mode_assistance_locked"
+    else:
+        orientation_text = (
+            candidate_prompt or reason_summary or _orientation(question_level)
+        )
+        next_question_text = (
+            candidate_prompt or _next_question(request.mode, question_level)
+        )
+        limitation_text = (
+            "Commitment gate active: the AI explanation is withheld until "
+            "the student submits a cognitive commitment."
+        )
+        generate_detail = (
+            "Commitment gate withheld the LLM answer; the AI elicits a "
+            "prediction / first step / physical reason before any "
+            "explanation is released."
+        )
+        warning_code = "answer_withheld_by_commitment_gate"
+        reason_code = "commitment_required_before_explanation"
+
+    empty_packet = EvidencePacket(
+        course_id=actor.course_id,
+        curriculum_edition_id=runtime.context.curriculum_edition_id,
+        query=request.message[:5000],
+        coverage=RetrievalCoverage.NOT_FOUND,
+        warnings=["retrieval_skipped_until_commitment"],
+    )
+    gate_diagnosis = DiagnosisOutput(
+        status=DiagnosisStatus.INSUFFICIENT_EVIDENCE,
+        summary="Commitment gate is open; retrieval and diagnosis are skipped.",
+        observation_basis=[],
+        reason="The commitment gate withheld retrieval until the student commits.",
+    )
+    gate_policy = safe_default_policy(request.mode)
+    gate_release = ReleaseDecision(
+        action=TeachingAction.ASK_DIAGNOSTIC_QUESTION,
+        release_level=AnswerReleaseLevel.QUESTION_ONLY,
+        attempts_observed=started.prior_attempts,
+        reason_code=reason_code,
+    )
+    withheld_response = TeachingResponse(
+        status=ResponseStatus.GROUNDED,
+        orientation=orientation_text[:1200],
+        claims=[],
+        next_question=next_question_text[:1000],
+        limitations=[limitation_text],
+    )
+    withheld_validation = ValidationReport(
+        passed=True,
+        citation_ids_valid=True,
+        literal_course_claims_valid=True,
+        scientific_references_valid=True,
+        warnings=[warning_code],
+    )
+
+    trace = list(state.get("trace", []))
+    trace.append(
+        WorkflowStep(
+            name=WorkflowStepName.RETRIEVE_EVIDENCE,
+            status=WorkflowStepStatus.SKIPPED,
+            detail="Retrieval skipped until the student submits a cognitive commitment.",
+        )
+    )
+    trace.append(
+        WorkflowStep(
+            name=WorkflowStepName.DIAGNOSE_PROGRESS,
+            status=WorkflowStepStatus.SKIPPED,
+            detail="Diagnosis skipped until the student submits a cognitive commitment.",
+        )
+    )
+    trace.append(
+        WorkflowStep(
+            name=WorkflowStepName.CHOOSE_TEACHING_ACTION,
+            status=WorkflowStepStatus.COMPLETED,
+            detail=f"Backend selected action {gate_release.action.value}.",
+        )
+    )
+    trace.append(
+        WorkflowStep(
+            name=WorkflowStepName.APPLY_ANSWER_POLICY,
+            status=WorkflowStepStatus.COMPLETED,
+            detail=(
+                f"Backend policy released {gate_release.release_level.value}; "
+                f"reason={gate_release.reason_code}."
+            ),
+        )
+    )
+    trace.append(
+        WorkflowStep(
+            name=WorkflowStepName.RUN_SCIENTIFIC_TOOLS,
+            status=WorkflowStepStatus.SKIPPED,
+            detail="Scientific tools skipped until the student submits a cognitive commitment.",
+        )
+    )
+    trace.append(
+        WorkflowStep(
+            name=WorkflowStepName.GENERATE_RESPONSE,
+            status=WorkflowStepStatus.SKIPPED,
+            detail=generate_detail,
+        )
+    )
+    trace.append(
+        WorkflowStep(
+            name=WorkflowStepName.VALIDATE_RESPONSE,
+            status=WorkflowStepStatus.COMPLETED,
+            detail="No claims emitted; validation is trivially satisfied.",
+        )
+    )
+    trace.append(
+        WorkflowStep(
+            name=WorkflowStepName.RECORD_LEARNING_EVIDENCE,
+            status=WorkflowStepStatus.COMPLETED,
+            detail="Commitment-gate evidence persisted; zero unverified mastery adjustment.",
+        )
+    )
+
+    return {
+        "evidence_packet": empty_packet,
+        "evidence_bundle": None,
+        "diagnosis": gate_diagnosis,
+        "policy": gate_policy,
+        "release": gate_release,
+        "scientific_results": [],
+        "response": withheld_response,
+        "validation": withheld_validation,
+        "generation_degraded": False,
+        "trace": trace,
     }
 
 

@@ -50,6 +50,15 @@ jobs:
         if: always()
         run: docker compose --profile tools down --volumes --remove-orphans
 
+  sandbox-security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run isolated sandbox adversarial tests
+        run: make test-sandbox-attacks
+
   check:
     runs-on: ubuntu-latest
     permissions:

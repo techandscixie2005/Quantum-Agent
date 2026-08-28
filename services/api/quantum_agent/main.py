@@ -40,7 +40,6 @@ from quantum_agent.gateways import (
     build_model_capability_registry,
     build_model_gateway,
     build_sandbox,
-    build_vision_gateway,
 )
 from quantum_agent.knowledge.explorer import GraphExplorerService
 from quantum_agent.knowledge.retrieval import (
@@ -66,7 +65,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     graph_store = build_graph_store(resolved_settings)
     embedding_gateway = build_embedding_gateway(resolved_settings)
     model_gateway = build_model_gateway(resolved_settings)
-    vision_gateway = build_vision_gateway(resolved_settings)
+    # Session-authenticated image/OCR requests receive a request-scoped
+    # gateway below.  Do not bind attachment processing to USTC_API here.
+    vision_gateway = None
     attachment_runtime = build_attachment_runtime(
         resolved_settings,
         vision_gateway=vision_gateway,
@@ -156,6 +157,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.attachment_runtime = attachment_runtime
     app.state.credential_vault = credential_vault
     app.state.credential_router_factory = credential_router_factory
+    app.state.session_credentials_required = credential_vault is not None
     app.state.coding_agent = coding_agent
     app.state.sandbox = sandbox
     app.state.source_file_repository = SourceFileRepository(

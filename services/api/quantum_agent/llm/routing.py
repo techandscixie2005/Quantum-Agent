@@ -23,6 +23,7 @@ from quantum_agent.llm.gateway import (
     Message,
     ModelGateway,
     ModelTier,
+    PermanentGatewayError,
 )
 
 T = TypeVar("T")
@@ -482,6 +483,12 @@ class ModelRouter:
         gateway_factory: GatewayFactory,
         cooldown_seconds: float = 30.0,
         max_cooldown_seconds: float = 300.0,
+        # PRD V3.1 P1-2: cap the total cross-profile fallback budget at
+        # ~120s, well under the 240s proxy limit.  When the next profile
+        # attempt would cross the deadline, the router surfaces the last
+        # error instead of starting it.  This leaves headroom for the BFF
+        # to emit the terminal SSE event and for the browser to render.
+        fallback_budget_seconds: float = 120.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._registry = registry
@@ -492,6 +499,8 @@ class ModelRouter:
             max_cooldown_seconds=max_cooldown_seconds,
             clock=clock,
         )
+        self._fallback_budget_seconds = max(1.0, fallback_budget_seconds)
+        self._clock = clock
 
     def _gateway(self, profile: ModelProfile) -> ModelGateway:
         gateway = self._gateways.get(profile.profile_id)
@@ -517,12 +526,23 @@ class ModelRouter:
                 f"Capability {capability_task.value!r} is not a structured chat task"
             )
 
+        # PRD V3.1 P1-2: a single turn's total cross-profile fallback budget.
+        # Each profile attempt runs against this wall-clock deadline; when
+        # the next attempt would cross it, we surface the last error rather
+        # than starting a call that cannot complete under the proxy limit.
+        deadline = self._clock() + self._fallback_budget_seconds
         failures = 0
         cooling = 0
+        last_exc: BaseException | None = None
         for profile in profiles:
             if not await self._health.acquire(profile.profile_id):
                 cooling += 1
                 continue
+            # If the budget is already exhausted, fail fast instead of
+            # starting another profile call that cannot complete under
+            # the proxy limit.
+            if self._clock() >= deadline:
+                break
             try:
                 output = await self._gateway(profile).structured_generate(
                     task=task,
@@ -533,8 +553,19 @@ class ModelRouter:
                 # Defense in depth: a custom gateway implementation cannot bypass
                 # the structured-output contract enforced by the router boundary.
                 validated = TypeAdapter(output_type).validate_python(output)
-            except (GatewayError, ValidationError):
+            except PermanentGatewayError as exc:
+                # PRD V3.1 P1-2: 401/403/400 is a permanent configuration or
+                # authorization error.  Retrying against the next profile
+                # cannot fix it (same upstream auth, same request body), so
+                # short-circuit and surface the failure to the caller.  This
+                # is the fail-fast classification the Codex review asked for.
                 failures += 1
+                last_exc = exc
+                await self._health.failed(profile.profile_id)
+                break
+            except (GatewayError, ValidationError) as exc:
+                failures += 1
+                last_exc = exc
                 await self._health.failed(profile.profile_id)
             except BaseException:
                 await self._health.abandoned(profile.profile_id)
@@ -542,6 +573,8 @@ class ModelRouter:
             else:
                 await self._health.succeeded(profile.profile_id)
                 return validated
+        if isinstance(last_exc, PermanentGatewayError):
+            raise last_exc
         raise GatewayError(
             f"No model route completed capability {capability_task.value!r} "
             f"after {failures} bounded attempt(s); "

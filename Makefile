@@ -90,6 +90,9 @@ test-web: ## Run the existing deterministic web test/build suite.
 test-container: require-secrets ## Run Python tests in the network-disabled test image.
 	$(COMPOSE) -f compose.yaml --profile tools run --rm --build api-test
 
+test-sandbox-attacks: ## Build the isolated runner and execute adversarial boundary tests.
+	bash scripts/test-sandbox-attacks.sh
+
 test-live-infra: require-secrets ## Exercise PostgreSQL/pgvector, Neo4j, Redis, and the live API.
 	$(COMPOSE) -f compose.yaml --profile tools run --rm --build api-live-test
 

@@ -12,10 +12,12 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from quantum_agent.api.auth import router as auth_router
 from quantum_agent.config import Settings
+from quantum_agent.credential_router import CredentialScopedRouterFactory
 from quantum_agent.credential_vault import (
     CredentialVault,
     MemoryCredentialVaultBackend,
@@ -31,8 +33,11 @@ from quantum_agent.db_models import (
     CurriculumEditionStatus,
     MembershipStatus,
     User,
+    UserSession,
     UserStatus,
 )
+from quantum_agent.llm.gateway import FakeModelGateway
+from quantum_agent.llm.routing import ModelCapabilityRegistry
 
 
 async def _seed_login_account(
@@ -114,6 +119,13 @@ def _build_app(
         else None
     )
     app.state.credential_vault = vault
+    app.state.credential_router_factory = CredentialScopedRouterFactory(
+        registry=ModelCapabilityRegistry.ustc_default(),
+        gateway_factory=lambda **_kwargs: FakeModelGateway(),
+        fallback_router=None,
+        vault=vault,
+        base_url=settings.ustc_base_url,
+    )
 
     async def app_session_dependency() -> AsyncSession:
         async with session_factory() as session:
@@ -246,3 +258,53 @@ async def test_login_validation_error_never_echoes_api_key(
 
     assert response.status_code == 422
     assert rejected_key not in response.text
+
+
+async def test_login_fails_closed_when_session_vault_is_unavailable(
+    login_database: async_sessionmaker[AsyncSession],
+) -> None:
+    async with login_database() as session:
+        await _seed_login_account(session, email="demo-student@quantum-agent.local")
+    app = _build_app(session_factory=login_database, fernet_key=None)
+
+    with patch("quantum_agent.api.auth.httpx.AsyncClient", side_effect=_mock_probe_ok):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/auth/login",
+                json={"api_key": "sk-session-only-key-1234567890"},
+            )
+
+    assert response.status_code == 503
+    assert "sk-session-only" not in response.text
+
+
+async def test_logout_evicts_vault_and_cached_router(
+    login_database: async_sessionmaker[AsyncSession],
+) -> None:
+    async with login_database() as session:
+        await _seed_login_account(session, email="demo-student@quantum-agent.local")
+    app = _build_app(session_factory=login_database, fernet_key=_fernet_key())
+    factory = app.state.credential_router_factory
+    vault = app.state.credential_vault
+
+    with patch("quantum_agent.api.auth.httpx.AsyncClient", side_effect=_mock_probe_ok):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            login = await client.post(
+                "/api/v1/auth/login",
+                json={"api_key": "sk-logout-key-1234567890abcdef"},
+            )
+            token = login.json()["session_token"]
+            async with login_database() as session:
+                user_session = (await session.execute(select(UserSession).limit(1))).scalar_one()
+            assert await factory.router_for_session(user_session.id) is not None
+            assert factory._routers
+
+            logout = await client.post(
+                "/api/v1/auth/logout",
+                headers={"Authorization": f"Bearer {token}"},
+                json={},
+            )
+
+    assert logout.status_code == 200
+    assert await vault.load(user_session.id) is None
+    assert not factory._routers

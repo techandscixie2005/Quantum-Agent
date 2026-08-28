@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import time
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from typing import Any, Protocol, TypeVar
@@ -20,9 +21,27 @@ T = TypeVar("T")
 # Auth (401/403) and other 4xx configuration errors are NOT retried.
 _TRANSIENT_STATUS_CODES: frozenset[int] = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
+# Permanent HTTP status codes that must NOT be retried across router
+# profiles either.  401/403/400 indicate a configuration or authorization
+# problem that retrying against another profile cannot fix; the router
+# short-circuits and surfaces the failure to the caller so the turn fails
+# fast rather than burning the proxy deadline.
+_PERMANENT_STATUS_CODES: frozenset[int] = frozenset({400, 401, 403})
+
 
 class GatewayError(RuntimeError):
     """Sanitized provider failure safe to persist in an internal trace."""
+
+
+class PermanentGatewayError(GatewayError):
+    """A gateway failure that retrying cannot fix (401/403/400).
+
+    The router treats this as a terminal signal: it must NOT attempt the
+    next profile, because a permanent error on one credential/profile is
+    almost certainly permanent on the others (same upstream auth, same
+    request body).  Surfacing this distinct type lets the router fail
+    fast and keep the total turn latency bounded.
+    """
 
 
 def _is_transient_exception(exc: BaseException) -> bool:
@@ -44,6 +63,24 @@ def _is_transient_exception(exc: BaseException) -> bool:
     return False
 
 
+def _permanent_status(exc: BaseException) -> int | None:
+    """Return the permanent HTTP status code carried by ``exc``, if any.
+
+    Used by the router to decide whether to short-circuit across profiles.
+    A permanent status (401/403/400) on one profile is almost certainly
+    permanent on every other profile (same upstream auth, same request
+    body), so retrying against the next profile only burns latency.
+    """
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status if status in _PERMANENT_STATUS_CODES else None
+    raw_status = getattr(exc, "status_code", None)
+    if isinstance(raw_status, int) and raw_status in _PERMANENT_STATUS_CODES:
+        return raw_status
+    return None
+
+
 async def _retry_transient(
     operation: Any,
     *,
@@ -51,12 +88,20 @@ async def _retry_transient(
     base_delay: float,
     max_delay: float,
     label: str,
+    deadline: float | None = None,
+    clock: Any = time.monotonic,
 ) -> Any:
     """Run ``operation`` with bounded exponential backoff + jitter on transient errors.
 
     Non-transient errors propagate immediately.  ``operation`` is a zero-arg
     coroutine factory.  The jitter is full jitter (random in [0, capped_delay])
     to decorrelate concurrent clients.
+
+    PRD V3.1 P1-2: ``deadline`` caps the total retry budget for this gateway
+    call (default ~30s).  When the next sleep would cross the deadline, we
+    raise the last exception instead of sleeping.  This keeps a single
+    gateway call from exhausting the 240s proxy deadline and leaves headroom
+    for the router to try the next profile.
     """
 
     last_exc: BaseException | None = None
@@ -70,6 +115,15 @@ async def _retry_transient(
             # Exponential backoff with full jitter, capped at max_delay.
             capped = min(max_delay, base_delay * (2 ** (attempt - 1)))
             delay = random.uniform(0.0, capped)
+            if deadline is not None:
+                remaining = deadline - clock()
+                if remaining <= 0:
+                    # Budget exhausted; surface the last transient error
+                    # rather than sleeping past the deadline.
+                    raise
+                delay = min(delay, remaining)
+                if delay <= 0:
+                    raise
             await asyncio.sleep(delay)
     # Unreachable, but keeps mypy happy.
     if last_exc is not None:
@@ -164,6 +218,11 @@ class PydanticAIModelGateway:
         transient_retry_attempts: int = 4,
         transient_retry_base_delay: float = 0.8,
         transient_retry_max_delay: float = 12.0,
+        # PRD V3.1 P1-2: cap the total retry budget per gateway call at ~30s
+        # so a single transient storm cannot exhaust the 240s proxy deadline.
+        # 4 attempts * 60s timeout already totals 240s; the deadline ensures
+        # the router still has headroom to try the next profile.
+        transient_retry_budget_seconds: float = 30.0,
         model_http_client: httpx2.AsyncClient | None = None,
         probe_http_client: httpx.AsyncClient | None = None,
     ) -> None:
@@ -180,6 +239,7 @@ class PydanticAIModelGateway:
         self._transient_retry_max_delay = max(
             self._transient_retry_base_delay, transient_retry_max_delay
         )
+        self._transient_retry_budget_seconds = max(1.0, transient_retry_budget_seconds)
         self._model_http_client = model_http_client
         self._probe_http_client = probe_http_client
 
@@ -238,6 +298,10 @@ class PydanticAIModelGateway:
             async def _run() -> Any:
                 return await agent.run(conversation)
 
+            # PRD V3.1 P1-2: enforce a per-call retry deadline so a single
+            # gateway call cannot burn the entire 240s proxy budget.  The
+            # deadline is relative to the start of this call.
+            call_deadline = time.monotonic() + self._transient_retry_budget_seconds
             try:
                 result = await _retry_transient(
                     _run,
@@ -245,10 +309,16 @@ class PydanticAIModelGateway:
                     base_delay=self._transient_retry_base_delay,
                     max_delay=self._transient_retry_max_delay,
                     label=task,
+                    deadline=call_deadline,
                 )
             except GatewayError:
                 raise
             except Exception as exc:
+                permanent = _permanent_status(exc)
+                if permanent is not None:
+                    raise PermanentGatewayError(
+                        f"Model provider returned permanent HTTP {permanent}"
+                    ) from exc
                 if _is_transient_exception(exc):
                     raise GatewayError(
                         f"Model provider transient failure exhausted retries: {type(exc).__name__}"

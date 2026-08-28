@@ -88,7 +88,6 @@ export async function POST(request: Request) {
     );
   }
   if (!upstream.ok) {
-    const detail = await upstream.text().catch(() => "");
     const message =
       upstream.status === 401
         ? "API Key 被模型服务拒绝或模型服务不可用。"

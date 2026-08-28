@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 from quantum_agent.llm.gateway import (
     GatewayError,
     Message,
+    PermanentGatewayError,
     PydanticAIModelGateway,
     _is_transient_exception,
     _retry_transient,
@@ -254,3 +255,74 @@ async def test_structured_generate_does_not_retry_auth_401() -> None:
         finally:
             await client.aclose()
     assert calls["n"] == 1, "auth 401 must not be retried"
+
+
+async def test_retry_transient_deadline_caps_total_retry_budget() -> None:
+    """PRD V3.1 P1-2: the retry deadline caps the total retry budget.
+
+    When the next sleep would cross the deadline, the retry loop truncates
+    the sleep to the remaining budget and surfaces the last transient
+    error after the next attempt.  This keeps a single gateway call from
+    burning the entire 240s proxy budget (without the deadline, the loop
+    would sleep 10s between each of 5 attempts).
+    """
+
+    import time as _time
+
+    calls = {"n": 0}
+
+    async def op() -> str:
+        calls["n"] += 1
+        raise httpx.TimeoutException("always transient")
+
+    start = _time.monotonic()
+    with pytest.raises(httpx.TimeoutException):
+        await _retry_transient(
+            op,
+            max_attempts=5,
+            base_delay=10.0,
+            max_delay=10.0,
+            label="test",
+            deadline=start + 0.05,
+        )
+    # The first attempt runs immediately and fails.  The retry loop
+    # truncates the 10s sleep to the remaining ~0.05s budget, runs the
+    # second attempt, and then stops because the deadline has passed.
+    # Without the deadline, the loop would sleep 10s five times.
+    assert calls["n"] == 2
+    elapsed = _time.monotonic() - start
+    assert elapsed < 1.0, "deadline must prevent the full 10s sleep"
+
+
+async def test_structured_generate_classifies_401_as_permanent() -> None:
+    """PRD V3.1 P1-2: 401/403/400 must raise PermanentGatewayError.
+
+    The router relies on this distinct type to short-circuit across
+    profiles instead of retrying a permanent error against every fallback.
+    """
+
+    calls = {"n": 0}
+
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        calls["n"] += 1
+        return httpx2.Response(401, json={"error": "invalid api key"})
+
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    gateway = PydanticAIModelGateway(
+        api_key=SecretStr("backend-test-token"),
+        model_http_client=client,
+        max_retries=0,
+        transient_retry_attempts=5,
+        transient_retry_base_delay=0.001,
+        transient_retry_max_delay=0.01,
+    )
+    with pytest.raises(PermanentGatewayError):
+        try:
+            await gateway.structured_generate(
+                task="structured_probe",
+                messages=[Message(role="user", content="x")],
+                output_type=StructuredProbe,
+            )
+        finally:
+            await client.aclose()
+    assert calls["n"] == 1

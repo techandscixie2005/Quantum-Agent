@@ -77,6 +77,8 @@ from quantum_agent.teaching.models import (
     SoloModeStatus,
     TeachingTurnInput,
     TransferType,
+    WorkflowStepName,
+    WorkflowStepStatus,
 )
 from quantum_agent.tutor.graph import TutorGraph
 
@@ -1298,27 +1300,28 @@ class TestCognitiveMirrorEvidenceSemantics:
         assert gateway.compose_calls == 0, (
             "commitment gate must prevent the LLM from generating an explanation"
         )
-        # PRD V3.0 P0-1: the answer-bearing evidence snippet must be redacted
-        # in the student-facing result while the gate is active.  Provenance
-        # (document title, chapter, locator) is preserved, but the exact
-        # answer text is replaced with the placeholder.
-        assert result.evidence_packet.evidence, "the gated packet still carries provenance"
-        redacted_item = result.evidence_packet.evidence[0]
-        assert "Tunneling through a rectangular barrier." not in redacted_item.evidence_snippet
-        assert "Tunneling through a rectangular barrier." not in redacted_item.source_chunk
-        assert redacted_item.document_title == "Quantum Physics"
-        assert redacted_item.chapter == "Ch. 2"
-        assert redacted_item.locator.physical_page == 42
-        assert "withheld" in redacted_item.evidence_snippet.lower()
+        # PRD V3.0 Axiom 1 (gate-before-retrieval): the commitment gate fires
+        # BEFORE evidence retrieval, so the student-facing result carries NO
+        # evidence while the gate is open — there is nothing to redact because
+        # retrieval was skipped.  The packet warns that retrieval is deferred
+        # until the student commits a prediction / first step.
+        assert result.evidence_packet.evidence == [], (
+            "the gate-fires branch must not surface any evidence; retrieval is "
+            "skipped until the student submits a cognitive commitment"
+        )
+        assert "retrieval_skipped_until_commitment" in result.evidence_packet.warnings
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="P0: evidence retrieval still precedes the authoritative commitment gate",
-    )
     async def test_commitment_precedes_evidence_and_diagnosis(
         self,
         learning_native_database: async_sessionmaker[AsyncSession],
     ) -> None:
+        """PRD V3.0 Axiom 1: the commitment gate fires BEFORE evidence
+        retrieval and diagnosis.  When the gate is enforced (RUN_EXPERIMENTS +
+        no student attempt), retrieval must not run, the RETRIEVE_EVIDENCE and
+        DIAGNOSE_PROGRESS trace steps must be SKIPPED, and the commitment
+        proposal LLM call must occur before any retrieval could have happened.
+        """
+
         class _OrderRetriever(TunnelingRetriever):
             def __init__(self) -> None:
                 self.retrieved = False
@@ -1357,7 +1360,7 @@ class TestCognitiveMirrorEvidenceSemantics:
             enable_hitl=False,
         )
         async with learning_native_database() as session:
-            await graph.run(
+            result = await graph.run(
                 session=session,
                 actor=seed.actor,
                 curriculum_edition_id=seed.edition_id,
@@ -1366,6 +1369,28 @@ class TestCognitiveMirrorEvidenceSemantics:
                     message="为什么 E<V0 时仍可能透射？",
                 ),
             )
+            await session.commit()
+        # The gate fired, so retrieval was never called.
+        assert retriever.retrieved is False, (
+            "the commitment gate must fire BEFORE evidence retrieval; the "
+            "retriever must not be called when the gate withholds the answer"
+        )
+        # The 10-step trace invariant is preserved; steps 3 (RETRIEVE_EVIDENCE)
+        # and 4 (DIAGNOSE_PROGRESS) are SKIPPED because the gate skipped
+        # retrieval and diagnosis.
+        assert [step.name for step in result.trace] == list(WorkflowStepName)
+        assert result.trace[2].name is WorkflowStepName.RETRIEVE_EVIDENCE
+        assert result.trace[2].status is WorkflowStepStatus.SKIPPED
+        assert result.trace[3].name is WorkflowStepName.DIAGNOSE_PROGRESS
+        assert result.trace[3].status is WorkflowStepStatus.SKIPPED
+        # The commitment gate is enforced and the answer is withheld.
+        assert result.learning_native is not None
+        assert result.learning_native.commitment is not None
+        assert (
+            result.learning_native.commitment.gate_decision
+            is CommitmentGateDecision.ATTEMPT_REQUIRED
+        )
+        assert result.response.claims == []
 
 
 # ---------------------------------------------------------------------------

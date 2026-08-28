@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from collections.abc import AsyncIterator
 from typing import Annotated, Any, NoReturn, Protocol, cast
 from uuid import UUID
@@ -137,10 +139,17 @@ async def _resolve_model_gateway_override(
     """
 
     factory = getattr(request.app.state, "credential_router_factory", None)
+    credentials_required = bool(
+        getattr(request.app.state, "session_credentials_required", False)
+    )
     if factory is None:
+        if credentials_required:
+            raise HTTPException(status_code=503, detail="session credential unavailable")
         return None
     try:
         router: ModelGateway | None = await factory.router_for_session(actor.session_id)
+        if router is None and credentials_required:
+            raise HTTPException(status_code=503, detail="session credential unavailable")
         return router
     except Exception as exc:
         # An authenticated request must fail closed; never route it through
@@ -212,6 +221,98 @@ def _sse(event: str, payload: object) -> str:
     return f"event: {event}\ndata: {data}\n\n"
 
 
+def _sse_heartbeat() -> str:
+    """SSE comment line that keeps the connection alive without producing a
+    client-visible event.  Browsers silently consume ``:`` comment lines per
+    the SSE spec; they reset the idle timer and prevent proxies from closing
+    the connection during long model calls.
+    """
+
+    return ": keepalive\n\n"
+
+
+# Heartbeat cadence (seconds).  Emitted between ``workflow.started`` and the
+# terminal event while ``machine.run`` is in flight.  12s stays well below
+# typical proxy idle timeouts (60s) and the 240s BFF deadline, and gives the
+# user visible progress activity during multi-step model calls.
+_HEARTBEAT_INTERVAL_SECONDS = 12.0
+
+
+async def _run_with_heartbeats(
+    machine: TeachingWorkflow,
+    *,
+    session: DatabaseSession,
+    actor: CourseActor,
+    curriculum_edition_id: UUID,
+    request: TeachingTurnInput,
+    model_gateway_override: ModelGateway | None,
+    started_at: float,
+    emit: Any,
+) -> TeachingApiOutcome | HitlInterruptResponse:
+    """Run ``machine.run`` while periodically emitting heartbeat SSE lines.
+
+    ``emit`` is an awaitable callable that writes a chunk to the
+    ``StreamingResponse`` body.  We use ``asyncio.wait`` with FIRST_COMPLETED
+    so the heartbeat task wakes up at the configured cadence and emits a
+    comment line; the moment the workflow task finishes, we cancel the
+    heartbeat and return the result.  This keeps the SSE connection alive
+    and gives the browser visible activity during long model calls without
+    buffering or weakening any teaching gate.
+    """
+
+    workflow_task = asyncio.create_task(
+        machine.run(
+            session=session,
+            actor=actor,
+            curriculum_edition_id=curriculum_edition_id,
+            request=request,
+            model_gateway_override=model_gateway_override,
+        )
+    )
+    heartbeat_task = asyncio.create_task(asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS))
+    try:
+        while True:
+            done, _pending = await asyncio.wait(
+                {workflow_task, heartbeat_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if heartbeat_task in done:
+                elapsed = time.monotonic() - started_at
+                # PRD V3.1 P1-2: emit a comment-only keepalive plus a typed
+                # ``progress`` event so the BFF can forward both to the
+                # browser without parsing them.  The progress payload is
+                # informational and never weakens the terminal contract.
+                await emit(_sse_heartbeat())
+                await emit(
+                    _sse(
+                        "progress",
+                        {
+                            "step": "workflow_running",
+                            "status": "in_flight",
+                            "detail": f"teaching workflow running for {elapsed:.1f}s",
+                            "elapsed_seconds": round(elapsed, 1),
+                        },
+                    )
+                )
+                heartbeat_task = asyncio.create_task(
+                    asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
+                )
+            if workflow_task in done:
+                return await workflow_task
+    finally:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except (asyncio.CancelledError, BaseException):
+            pass
+        if not workflow_task.done():
+            workflow_task.cancel()
+            try:
+                await workflow_task
+            except (asyncio.CancelledError, BaseException):
+                pass
+
+
 @router.post("/turns/stream")
 async def stream_teaching_turn(
     request: Request,
@@ -224,36 +325,118 @@ async def stream_teaching_turn(
     actor = await _actor(request, session, course_id)
     gateway_override = await _resolve_model_gateway_override(request, actor)
 
+    # Buffer of emitted SSE chunks.  The producer coroutine appends chunks
+    # here; the consumer (the async generator returned to FastAPI) drains
+    # them.  This decouples the heartbeat producer from the response body
+    # reader so neither blocks the other.
+    chunk_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def emit(chunk: str) -> None:
+        await chunk_queue.put(chunk)
+
     async def events() -> AsyncIterator[str]:
+        # PRD V3.1 P1-2: emit ``workflow.started`` immediately so the BFF
+        # and the browser see the fixed contract event before any long
+        # model call runs.  Then emit a ``progress`` event announcing the
+        # workflow is running, followed by periodic heartbeats while the
+        # graph is in flight, and finally the terminal event.
         yield _sse(
             "workflow.started",
             {"workflow_version": "teaching-state-machine/1.0.0"},
         )
+        yield _sse(
+            "progress",
+            {
+                "step": "workflow_started",
+                "status": "started",
+                "detail": "teaching workflow started",
+                "elapsed_seconds": 0.0,
+            },
+        )
+        started_at = time.monotonic()
+
+        async def producer() -> None:
+            try:
+                result = await _run_with_heartbeats(
+                    machine,
+                    session=session,
+                    actor=actor,
+                    curriculum_edition_id=curriculum_edition_id,
+                    request=body,
+                    model_gateway_override=gateway_override,
+                    started_at=started_at,
+                    emit=emit,
+                )
+                await session.commit()
+                if isinstance(result, HitlInterruptResponse):
+                    await emit(
+                        _sse(
+                            "progress",
+                            {
+                                "step": "workflow_paused",
+                                "status": "paused",
+                                "detail": "teaching workflow paused for human review",
+                                "elapsed_seconds": round(
+                                    time.monotonic() - started_at, 1
+                                ),
+                            },
+                        )
+                    )
+                    await emit(
+                        _sse("workflow.interrupted", result.model_dump(mode="json"))
+                    )
+                else:
+                    await emit(
+                        _sse(
+                            "progress",
+                            {
+                                "step": "workflow_completed",
+                                "status": "completed",
+                                "detail": "teaching workflow completed",
+                                "elapsed_seconds": round(
+                                    time.monotonic() - started_at, 1
+                                ),
+                            },
+                        )
+                    )
+                    await emit(
+                        _sse("workflow.completed", result.model_dump(mode="json"))
+                    )
+            except (TeachingConversationConflictError, HitlConflictError):
+                await session.rollback()
+                await emit(_sse("workflow.failed", {"code": "CONVERSATION_CONFLICT"}))
+            except TeachingAttachmentNotFoundError:
+                await session.rollback()
+                await emit(_sse("workflow.failed", {"code": "ATTACHMENT_NOT_FOUND"}))
+            except TeachingAttachmentConflictError:
+                await session.rollback()
+                await emit(_sse("workflow.failed", {"code": "ATTACHMENT_NOT_READY"}))
+            except RetrievalError:
+                await session.rollback()
+                await emit(_sse("workflow.failed", {"code": "RETRIEVAL_UNAVAILABLE"}))
+            finally:
+                await chunk_queue.put(None)
+
+        producer_task = asyncio.create_task(producer())
         try:
-            result = await machine.run(
-                session=session,
-                actor=actor,
-                curriculum_edition_id=curriculum_edition_id,
-                request=body,
-                model_gateway_override=gateway_override,
-            )
-            await session.commit()
-            if isinstance(result, HitlInterruptResponse):
-                yield _sse("workflow.interrupted", result.model_dump(mode="json"))
-            else:
-                yield _sse("workflow.completed", result.model_dump(mode="json"))
-        except (TeachingConversationConflictError, HitlConflictError):
-            await session.rollback()
-            yield _sse("workflow.failed", {"code": "CONVERSATION_CONFLICT"})
-        except TeachingAttachmentNotFoundError:
-            await session.rollback()
-            yield _sse("workflow.failed", {"code": "ATTACHMENT_NOT_FOUND"})
-        except TeachingAttachmentConflictError:
-            await session.rollback()
-            yield _sse("workflow.failed", {"code": "ATTACHMENT_NOT_READY"})
-        except RetrievalError:
-            await session.rollback()
-            yield _sse("workflow.failed", {"code": "RETRIEVAL_UNAVAILABLE"})
+            while True:
+                chunk = await chunk_queue.get()
+                if chunk is None:
+                    break
+                yield chunk
+        finally:
+            if not producer_task.done():
+                producer_task.cancel()
+                try:
+                    await producer_task
+                except (asyncio.CancelledError, BaseException):
+                    pass
+            # Drain any remaining chunks to avoid leaking the queue.
+            while not chunk_queue.empty():
+                try:
+                    chunk_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
 
     return StreamingResponse(
         events(),

@@ -34,6 +34,7 @@ from quantum_agent.multimodal.runtime import (
     AttachmentNotFoundError,
     AttachmentRuntime,
     ConfirmationRequest,
+    build_attachment_runtime,
 )
 from quantum_agent.multimodal.security import UploadValidationError
 from quantum_agent.multimodal.storage import AttachmentStorageError
@@ -109,6 +110,44 @@ async def _actor(
         credential=bearer_credential(request),
         course_id=course_id,
     )
+
+
+async def _runtime_for_session(
+    request: Request,
+    *,
+    actor: CourseActor,
+    fallback: AttachmentRuntime,
+) -> AttachmentRuntime:
+    """Bind image and vision-OCR processing to the authenticated session key."""
+
+    if not bool(getattr(request.app.state, "session_credentials_required", False)):
+        return fallback
+    factory = getattr(request.app.state, "credential_router_factory", None)
+    resolver = getattr(factory, "vision_gateway_for_session", None)
+    if not callable(resolver):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="session credential unavailable",
+        )
+    try:
+        vision_gateway = await resolver(actor.session_id)
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="session credential unavailable",
+        ) from error
+    if vision_gateway is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="session credential unavailable",
+        )
+    settings = getattr(request.app.state, "settings", None)
+    if settings is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="attachment processing is unavailable",
+        )
+    return build_attachment_runtime(settings, vision_gateway=vision_gateway)
 
 
 def _extraction_response(extraction: MultimodalExtraction | None) -> ExtractionResponse | None:
@@ -187,6 +226,7 @@ async def upload_attachment(
     runtime: AttachmentService,
 ) -> AttachmentResponse:
     actor = await _actor(request, session, course_id=course_id)
+    runtime = await _runtime_for_session(request, actor=actor, fallback=runtime)
     try:
         created = await runtime.create(
             session,

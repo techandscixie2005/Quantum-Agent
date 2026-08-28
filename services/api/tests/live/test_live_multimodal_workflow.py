@@ -19,6 +19,7 @@ from sqlalchemy import select
 
 from quantum_agent.auth import hash_session_token, issue_opaque_session_token
 from quantum_agent.config import Settings
+from quantum_agent.credential_vault import build_credential_vault
 from quantum_agent.database import create_database_engine, create_session_factory
 from quantum_agent.db_models import (
     Course,
@@ -75,6 +76,7 @@ async def _seed_live_scope() -> LiveScope:
             course, edition = row
             course.status = CourseStatus.ACTIVE
             tokens: dict[CourseRole, str] = {}
+            session_ids: list[UUID] = []
             run_id = uuid4()
             for role in (CourseRole.STUDENT, CourseRole.TA):
                 user = User(
@@ -95,23 +97,38 @@ async def _seed_live_scope() -> LiveScope:
                     )
                 )
                 token = issue_opaque_session_token()
-                session.add(
-                    UserSession(
-                        user_id=user.id,
-                        session_token_sha256=hash_session_token(token),
-                        status=SessionStatus.ACTIVE,
-                        expires_at=now + timedelta(hours=2),
-                        user_agent="quantum-agent-live-model-test",
-                    )
+                user_session = UserSession(
+                    user_id=user.id,
+                    session_token_sha256=hash_session_token(token),
+                    status=SessionStatus.ACTIVE,
+                    expires_at=now + timedelta(hours=2),
+                    user_agent="quantum-agent-live-model-test",
                 )
+                session.add(user_session)
+                await session.flush()
+                session_ids.append(user_session.id)
                 tokens[role] = token
             await session.commit()
-            return LiveScope(
-                course_id=course.id,
-                edition_id=edition.id,
-                student_token=tokens[CourseRole.STUDENT],
-                ta_token=tokens[CourseRole.TA],
-            )
+        # PRD V3.1 §3.3: the live-model test exercises the real per-session
+        # credential path.  Store the deployment USTC_API key in the vault
+        # for every seeded session (student AND TA) so authenticated model,
+        # vision, and HITL-resume calls route through the session credential
+        # (fail-closed would otherwise return 503 for a session with no vault
+        # entry).
+        vault = build_credential_vault(
+            fernet_key=settings.session_vault_key,
+            redis_url=settings.effective_redis_url,
+        )
+        if vault is not None and settings.ustc_api is not None:
+            for sid in session_ids:
+                await vault.store(sid, settings.ustc_api)
+            await vault.close()
+        return LiveScope(
+            course_id=course.id,
+            edition_id=edition.id,
+            student_token=tokens[CourseRole.STUDENT],
+            ta_token=tokens[CourseRole.TA],
+        )
     finally:
         await engine.dispose()
 
@@ -177,13 +194,23 @@ def _events(document: str) -> list[tuple[str, JsonObject]]:
     for block in document.replace("\r\n", "\n").split("\n\n"):
         if not block.strip():
             continue
+        # PRD V3.1 P1-2: the backend now emits ``: keepalive`` comment lines
+        # and ``progress`` events between ``workflow.started`` and the
+        # terminal event.  Comment-only blocks have no ``event:`` or
+        # ``data:`` lines; skip them.  ``progress`` events are informational
+        # and carry no terminal contract; ignore them so the terminal event
+        # remains the last workflow event in the stream.
         event = "message"
         data_lines: list[str] = []
         for line in block.splitlines():
+            if line.startswith(":"):
+                continue
             if line.startswith("event:"):
                 event = line.removeprefix("event:").strip()
             elif line.startswith("data:"):
                 data_lines.append(line.removeprefix("data:").lstrip())
+        if event == "progress" or not data_lines:
+            continue
         payload = json.loads("\n".join(data_lines))
         assert isinstance(payload, dict)
         parsed.append((event, cast(JsonObject, payload)))
@@ -247,8 +274,10 @@ async def _teaching_turn(
     response = await client.post(path, headers=headers, json=body)
     assert response.status_code == 200, response.text[:1000]
     events = _events(response.text)
-    assert next(event for event, _ in events) == "workflow.started"
+    assert events, f"no workflow events parsed from stream: {response.text[:500]!r}"
+    first_event = events[0][0]
     terminal_event, outcome = events[-1]
+    assert first_event == "workflow.started", events
     assert terminal_event in {"workflow.completed", "workflow.interrupted"}, events
     return outcome, terminal_event == "workflow.interrupted"
 

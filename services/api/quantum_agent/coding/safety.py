@@ -50,12 +50,27 @@ _ALLOWED_IMPORTS: frozenset[str] = frozenset(
     }
 )
 
-# Submodules under an allowed top-level package that are NOT safe.  We block
-# the whole package's network/process/file surface even if a sub-module name
-# looks benign.  ``matplotlib.pyplot`` is allowed because the sandbox forces
-# ``MPLBACKEND=Agg`` (no GUI window) and the Coding Agent needs it to save
-# figures via ``savefig``.
-_BLOCKED_SUBMODULES: dict[str, frozenset[str]] = {}
+# Submodules under an allowed top-level package that are NOT safe.  These reach
+# native-library loading (``ctypes``/``cffi``) even though the top-level package
+# (``numpy``/``scipy``) is allowlisted, which would let generated code escape the
+# process sandbox by calling ``system``/``execve`` from a hostile shared library.
+# ``matplotlib.pyplot`` is allowed because the sandbox forces ``MPLBACKEND=Agg``
+# (no GUI window) and the Coding Agent needs it to save figures via ``savefig``.
+_BLOCKED_SUBMODULES: dict[str, frozenset[str]] = {
+    "numpy": frozenset(
+        {
+            "numpy.ctypeslib",
+            "numpy.ctypeslib._ctypeslib",
+            "numpy._core._dtype_ctypes",
+            "numpy.core._dtype_ctypes",
+        }
+    ),
+    "scipy": frozenset(
+        {
+            "scipy._lib._ccallback",
+        }
+    ),
+}
 
 # Callable names that are banned everywhere, even if imported.  ``open`` is
 # banned because file I/O is not needed for an in-memory scientific
@@ -106,6 +121,18 @@ def _is_allowed_import(module_name: str) -> bool:
     if module_name in blocked:
         return False
     return True
+
+
+def _is_blocked_submodule(module_name: str) -> bool:
+    """Return True if ``module_name`` is a blocked submodule under an allowed root.
+
+    Used by ``visit_ImportFrom`` to catch ``from X import Y`` where the composed
+    dotted path ``X.Y`` is a blocked submodule (e.g. ``scipy._lib._ccallback``).
+    """
+
+    root = _module_root(module_name)
+    blocked = _BLOCKED_SUBMODULES.get(root, frozenset())
+    return module_name in blocked
 
 
 class _SafetyVisitor(ast.NodeVisitor):
@@ -160,6 +187,15 @@ class _SafetyVisitor(ast.NodeVisitor):
         for alias in node.names:
             if alias.name.startswith("__") or alias.name.endswith("__"):
                 self._violations.append(f"from-import of forbidden dunder '{alias.name}'")
+            # ``from X import Y`` where Y is itself a blocked submodule (e.g.
+            # ``from scipy._lib import _ccallback``) must be rejected: the
+            # ``module`` check above only inspects ``X``.  Compose the full
+            # dotted path and re-check so a blocked deep submodule cannot be
+            # pulled in by its leaf name.
+            if module and _is_blocked_submodule(f"{module}.{alias.name}"):
+                self._violations.append(
+                    f"from-import of blocked submodule '{module}.{alias.name}'"
+                )
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:

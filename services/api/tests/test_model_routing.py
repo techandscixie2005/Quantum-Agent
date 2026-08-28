@@ -19,6 +19,7 @@ from quantum_agent.llm.gateway import (
     Message,
     ModelGateway,
     ModelTier,
+    PermanentGatewayError,
 )
 from quantum_agent.llm.routing import (
     ModelCapability,
@@ -382,3 +383,102 @@ def test_router_is_disabled_without_server_secret_but_registry_remains_available
     assert build_model_router(settings) is None
     assert build_model_gateway(settings) is None
     assert build_model_capability_registry(settings).public_catalog()
+
+
+async def test_router_fail_fast_on_permanent_error_does_not_try_next_profile() -> None:
+    """PRD V3.1 P1-2: 401/403/400 must NOT be retried across router profiles.
+
+    A permanent error on one profile is almost certainly permanent on every
+    other profile (same upstream auth, same request body).  The router must
+    short-circuit and surface the PermanentGatewayError to the caller
+    instead of burning latency on the remaining profiles.
+    """
+
+    router, constructed, _ = _router_with_outcomes(
+        {
+            "reasoning_primary": PermanentGatewayError("HTTP 401"),
+            "reasoning_second_pass": {"value": 7},
+        }
+    )
+
+    with pytest.raises(PermanentGatewayError):
+        await router.structured_generate(
+            task="diagnose_student_progress",
+            messages=[Message(role="user", content="student attempt")],
+            output_type=StrictOutput,
+        )
+
+    # The router must NOT have attempted the second profile.
+    assert constructed == ["reasoning_primary"]
+
+
+async def test_router_fallback_budget_caps_total_cross_profile_latency() -> None:
+    """PRD V3.1 P1-2: the cross-profile fallback budget caps total latency.
+
+    When the budget is exhausted before the next profile attempt starts,
+    the router surfaces the last error instead of starting a call that
+    cannot complete under the proxy limit.
+    """
+
+    now = [0.0]
+
+    def clock() -> float:
+        return now[0]
+
+    class _ClockAdvancingGateway:
+        def __init__(self, outcome: object | Exception, *, advance: float) -> None:
+            self._outcome = outcome
+            self._advance = advance
+            self.calls: list[tuple[str, ModelTier]] = []
+
+        async def structured_generate(
+            self,
+            *,
+            task: str,
+            messages: Sequence[Message],
+            output_type: type[T],
+            model_tier: ModelTier = ModelTier.DEFAULT,
+        ) -> T:
+            del messages, output_type
+            self.calls.append((task, model_tier))
+            now[0] += self._advance
+            if isinstance(self._outcome, Exception):
+                raise self._outcome
+            return cast(T, self._outcome)
+
+        async def probe(self) -> GatewayCapabilities:
+            return GatewayCapabilities(chat_completions=True, prompted_json=True)
+
+    registry = ModelCapabilityRegistry.ustc_default()
+    constructed: list[str] = []
+
+    def factory(profile: ModelProfile) -> ModelGateway:
+        constructed.append(profile.profile_id)
+        if profile.profile_id == "reasoning_primary":
+            outcome: object | Exception = GatewayError("primary unavailable")
+        elif profile.profile_id == "reasoning_second_pass":
+            outcome = {"value": 7}
+        else:
+            outcome = GatewayError("route unavailable")
+        return _ClockAdvancingGateway(outcome, advance=1.0)  # type: ignore[return-value]
+
+    router = ModelRouter(
+        registry=registry,
+        gateway_factory=factory,
+        cooldown_seconds=0.1,
+        max_cooldown_seconds=0.1,
+        fallback_budget_seconds=0.5,
+        clock=clock,
+    )
+
+    with pytest.raises(GatewayError):
+        await router.structured_generate(
+            task="diagnose_student_progress",
+            messages=[Message(role="user", content="student attempt")],
+            output_type=StrictOutput,
+        )
+
+    # Only the first profile was attempted; the budget was exhausted
+    # before the second attempt started (the first call advanced the
+    # clock from 0.0 to 1.0, crossing the 0.5s deadline).
+    assert constructed == ["reasoning_primary"]

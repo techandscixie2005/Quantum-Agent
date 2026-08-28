@@ -166,13 +166,13 @@ def build_credential_router_factory(
 
 
 def build_sandbox(settings: Settings) -> SubprocessSandbox | RemoteSandbox | SandboxDisabled:
-    """Build the Coding Agent subprocess sandbox (PRD V3.1 §6.2)."""
+    """Build the Coding Agent sandbox without executing code in the API process."""
 
     if not settings.coding_sandbox_enabled:
         return SandboxDisabled()
     if settings.coding_sandbox_url:
         return RemoteSandbox(settings.coding_sandbox_url)
-    return SubprocessSandbox()
+    return SandboxDisabled()
 
 
 def build_coding_agent(

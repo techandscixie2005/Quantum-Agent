@@ -11,6 +11,7 @@ import {
   redactHitlProposedResponse,
   type EvidencePacket,
   type HitlInterruptResponse,
+  type TeachingMode,
   type TeachingScope,
   type TeachingTurnResult,
 } from "@/app/components/teaching/contracts";
@@ -25,6 +26,13 @@ const SAFE_WORKFLOW_FAILURES = new Set([
   "CONVERSATION_CONFLICT",
   "RETRIEVAL_UNAVAILABLE",
 ]);
+
+// PRD V3.1 P1-2: total upstream response size guard.  The BFF streams
+// incrementally but still caps the total bytes to prevent a runaway
+// upstream from consuming the browser connection indefinitely.  5MB is
+// well above any legitimate teaching turn (the terminal event is the
+// largest chunk and is bounded by the evidence packet size).
+const MAX_STREAM_BYTES = 5_000_000;
 
 export function teachingError(
   status: number,
@@ -129,25 +137,6 @@ function encodeSse(event: string, payload: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
 }
 
-async function readBoundedText(response: Response, maxBytes = 2_000_000): Promise<string> {
-  if (!response.body) throw new TeachingContractError("SSE response body is missing");
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let total = 0;
-  let output = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel("teaching response exceeded the bounded payload size");
-      throw new TeachingContractError("SSE response exceeds the bounded payload size");
-    }
-    output += decoder.decode(value, { stream: true });
-  }
-  return output + decoder.decode();
-}
-
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)]
@@ -170,6 +159,138 @@ export async function assertEvidenceDigests(packet: EvidencePacket): Promise<voi
       }
     }),
   );
+}
+
+// PRD V3.1 P1-2: incremental SSE stream parser.  The BFF forwards upstream
+// events to the browser as they arrive instead of buffering the entire
+// body.  ``progress`` events and ``: keepalive`` comment lines are passed
+// through unchanged.  ``workflow.started`` is validated and re-emitted to
+// the browser immediately.  Terminal events (``workflow.completed``,
+// ``workflow.interrupted``, ``workflow.failed``) are buffered, validated
+// against the teaching contract (scope, evidence digests, HITL redaction),
+// and only then re-emitted to the browser.  If validation fails, the BFF
+// emits a synthetic ``workflow.failed`` event so the browser sees a
+// well-formed stream ending in a terminal event.
+type ForwardedEvent =
+  | Readonly<{ kind: "comment"; text: string }>
+  | Readonly<{ kind: "progress"; raw: string }>
+  | Readonly<{ kind: "started"; data: Readonly<{ workflow_version: string }> }>
+  | Readonly<{ kind: "terminal"; raw: string; event: string; data: unknown }>
+  | Readonly<{ kind: "unknown"; raw: string }> ;
+
+type ParsedBlock =
+  | Readonly<{ kind: "comment" }>
+  | Readonly<{ kind: "event"; event: string; data: unknown; raw: string }>;
+
+function parseSseBlock(block: string): ParsedBlock | null {
+  if (!block.trim()) return null;
+  // A comment-only block (``: keepalive``) is emitted as a kind so the
+  // BFF can forward it without parsing.  Comment lines do not carry an
+  // ``event:`` field.
+  let isComment = true;
+  for (const line of block.split("\n")) {
+    if (line && !line.startsWith(":")) {
+      isComment = false;
+      break;
+    }
+  }
+  if (isComment) return { kind: "comment" };
+  let event = "message";
+  const dataLines: string[] = [];
+  for (const line of block.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    else if (line && !line.startsWith(":")) {
+      throw new TeachingContractError("SSE response contains an unsupported field");
+    }
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(dataLines.join("\n"));
+  } catch {
+    throw new TeachingContractError("SSE response contains invalid JSON");
+  }
+  return { kind: "event", event, data, raw: block + "\n\n" };
+}
+
+function classifyBlock(block: ParsedBlock): ForwardedEvent | null {
+  if (block.kind === "comment") {
+    return { kind: "comment", text: ": keepalive\n\n" };
+  }
+  if (block.event === "progress") {
+    return { kind: "progress", raw: block.raw };
+  }
+  if (block.event === "workflow.started") {
+    if (typeof block.data !== "object" || block.data === null || Array.isArray(block.data)) {
+      throw new TeachingContractError("workflow.started payload is invalid");
+    }
+    const workflowVersion = (block.data as Record<string, unknown>).workflow_version;
+    if (
+      typeof workflowVersion !== "string" ||
+      workflowVersion.length < 1 ||
+      workflowVersion.length > 160
+    ) {
+      throw new TeachingContractError("workflow.started version is invalid");
+    }
+    return { kind: "started", data: { workflow_version: workflowVersion } };
+  }
+  if (
+    block.event === "workflow.completed" ||
+    block.event === "workflow.interrupted" ||
+    block.event === "workflow.failed"
+  ) {
+    return { kind: "terminal", raw: block.raw, event: block.event, data: block.data };
+  }
+  // Unknown events are dropped (the upstream contract only allows the
+  // events listed above).  We do NOT forward them to the browser.
+  return { kind: "unknown", raw: block.raw };
+}
+
+async function validateTerminal(
+  event: string,
+  data: unknown,
+  scope: TeachingScope,
+  body: { mode: TeachingMode; conversation_id?: string | null },
+): Promise<string> {
+  if (event === "workflow.completed") {
+    let result: TeachingTurnResult;
+    try {
+      result = parseTeachingTurnResult(data);
+      assertTeachingScope(result, scope, body.mode);
+      await assertEvidenceDigests(result.evidence_packet);
+      if (body.conversation_id && result.conversation_id !== body.conversation_id) {
+        throw new TeachingContractError("conversation id changed across the turn");
+      }
+    } catch {
+      throw new TeachingContractError("completed event failed contract validation");
+    }
+    return encodeSse("workflow.completed", result);
+  }
+  if (event === "workflow.interrupted") {
+    let pause: HitlInterruptResponse;
+    try {
+      pause = redactHitlProposedResponse(parseHitlInterruptResponse(data));
+      assertHitlScope(pause, scope, body.mode);
+      await assertEvidenceDigests(pause.artifacts.evidence_packet);
+      if (body.conversation_id && pause.conversation_id !== body.conversation_id) {
+        throw new TeachingContractError("conversation id changed at the HITL boundary");
+      }
+    } catch {
+      throw new TeachingContractError("interrupted event failed contract validation");
+    }
+    return encodeSse("workflow.interrupted", pause);
+  }
+  if (event === "workflow.failed") {
+    if (typeof data !== "object" || data === null || Array.isArray(data)) {
+      throw new TeachingContractError("workflow.failed payload is invalid");
+    }
+    const code = (data as Record<string, unknown>).code;
+    if (typeof code !== "string" || !SAFE_WORKFLOW_FAILURES.has(code)) {
+      throw new TeachingContractError("workflow.failed code is invalid");
+    }
+    return encodeSse("workflow.failed", { code });
+  }
+  throw new TeachingContractError("unknown terminal event");
 }
 
 export async function proxyTeachingTurn(request: Request): Promise<Response> {
@@ -215,10 +336,13 @@ export async function proxyTeachingTurn(request: Request): Promise<Response> {
     "/teaching/turns/stream";
   let upstream: Response;
   try {
-    // PRD V3.0 P1-2: forward browser cancellation to the backend so a user
-    // who navigates away or cancels the request does not keep a long model
-    // call running.  We combine the incoming request signal (browser
-    // cancellation) with a 240s timeout using AbortSignal.any.
+    // PRD V3.0 P1-2 + V3.1 P1-2: forward browser cancellation to the
+    // backend so a user who navigates away or cancels the request does
+    // not keep a long model call running.  We combine the incoming
+    // request signal (browser cancellation) with a 240s timeout using
+    // AbortSignal.any.  The 240s ceiling matches the proxy limit; the
+    // backend's heartbeat + bounded retry budget keeps the perceived
+    // latency well under this for normal turns.
     const timeoutSignal = AbortSignal.timeout(240_000);
     const combinedSignal = request.signal
       ? AbortSignal.any([request.signal, timeoutSignal])
@@ -259,86 +383,141 @@ export async function proxyTeachingTurn(request: Request): Promise<Response> {
       traceId,
     );
   }
-
-  let events: readonly ParsedSse[];
-  try {
-    events = parseSseDocument(await readBoundedText(upstream));
-  } catch {
+  if (!upstream.body) {
     return teachingError(
       502,
-      "INVALID_UPSTREAM_CONTRACT",
-      "教学事件流不符合固定工作流契约；本页已拒绝显示未经验证的数据。",
+      "INVALID_UPSTREAM_RESPONSE",
+      "教学服务未返回事件流主体；本页已拒绝显示。",
       traceId,
     );
   }
 
-  const started = events.filter((event) => event.event === "workflow.started");
-  const completed = events.filter((event) => event.event === "workflow.completed");
-  const interrupted = events.filter((event) => event.event === "workflow.interrupted");
-  const failed = events.filter((event) => event.event === "workflow.failed");
-  if (
-    started.length !== 1 ||
-    completed.length + interrupted.length + failed.length !== 1 ||
-    events.length !== 2
-  ) {
-    return teachingError(
-      502,
-      "INVALID_UPSTREAM_CONTRACT",
-      "教学事件流缺少唯一的开始或结束事件；本页已拒绝显示。",
-      traceId,
-    );
-  }
+  // PRD V3.1 P1-2: stream the upstream body through a TransformStream
+  // that parses SSE blocks incrementally and forwards them to the
+  // browser as they arrive.  ``progress`` and ``: keepalive`` comment
+  // lines pass through unchanged; ``workflow.started`` is validated and
+  // re-emitted; terminal events are buffered, validated, and re-emitted.
+  // A bounded total size guard cancels upstream if the stream exceeds
+  // MAX_STREAM_BYTES.
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
 
-  let responseBody: string;
-  if (completed.length === 1) {
-    let result: TeachingTurnResult;
-    try {
-      result = parseTeachingTurnResult(completed[0]?.data);
-      assertTeachingScope(result, scope as TeachingScope, body.mode);
-      await assertEvidenceDigests(result.evidence_packet);
-      if (body.conversation_id && result.conversation_id !== body.conversation_id) {
-        throw new TeachingContractError("conversation id changed across the turn");
-      }
-    } catch {
-      return teachingError(
-        502,
-        "INVALID_UPSTREAM_CONTRACT",
-        "教学结果未通过范围、证据或科学结果校验；本页已拒绝显示。",
-        traceId,
-      );
-    }
-    responseBody =
-      encodeSse("workflow.started", started[0]?.data) +
-      encodeSse("workflow.completed", result);
-  } else if (interrupted.length === 1) {
-    let pause: HitlInterruptResponse;
-    try {
-      pause = redactHitlProposedResponse(
-        parseHitlInterruptResponse(interrupted[0]?.data),
-      );
-      assertHitlScope(pause, scope as TeachingScope, body.mode);
-      await assertEvidenceDigests(pause.artifacts.evidence_packet);
-      if (body.conversation_id && pause.conversation_id !== body.conversation_id) {
-        throw new TeachingContractError("conversation id changed at the HITL boundary");
-      }
-    } catch {
-      return teachingError(
-        502,
-        "INVALID_UPSTREAM_CONTRACT",
-        "人工复核状态未通过范围、证据或权限契约；本页已拒绝显示。",
-        traceId,
-      );
-    }
-    responseBody =
-      encodeSse("workflow.started", started[0]?.data) +
-      encodeSse("workflow.interrupted", pause);
-  } else {
-    responseBody =
-      encodeSse("workflow.started", started[0]?.data) +
-      encodeSse("workflow.failed", failed[0]?.data);
-  }
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = upstream.body!.getReader();
+      let buffer = "";
+      let totalBytes = 0;
+      let startedEmitted = false;
+      let terminalEmitted = false;
+      let upstreamClosed = false;
 
-  return new Response(responseBody, {
+      const failClosed = (code: string) => {
+        if (!terminalEmitted) {
+          controller.enqueue(encoder.encode(encodeSse("workflow.failed", { code })));
+          terminalEmitted = true;
+        }
+      };
+
+      try {
+        while (true) {
+          if (terminalEmitted) {
+            // We already emitted the terminal event; drain any remaining
+            // upstream bytes without forwarding them to the browser.
+            await reader.cancel("terminal event already emitted");
+            break;
+          }
+          const { done, value } = await reader.read();
+          if (done) {
+            upstreamClosed = true;
+            break;
+          }
+          totalBytes += value.byteLength;
+          if (totalBytes > MAX_STREAM_BYTES) {
+            await reader.cancel("teaching stream exceeded the bounded payload size");
+            failClosed("RETRIEVAL_UNAVAILABLE");
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          // Split on ``\n\n`` boundaries; keep the trailing partial block
+          // in the buffer for the next chunk.
+          let boundary: number;
+          while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+            const blockText = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            let parsed: ParsedBlock | null;
+            try {
+              parsed = parseSseBlock(blockText);
+            } catch {
+              failClosed("RETRIEVAL_UNAVAILABLE");
+              break;
+            }
+            if (parsed === null) continue;
+            let forwarded: ForwardedEvent | null;
+            try {
+              forwarded = classifyBlock(parsed);
+            } catch {
+              failClosed("RETRIEVAL_UNAVAILABLE");
+              break;
+            }
+            if (forwarded === null) continue;
+            if (forwarded.kind === "comment") {
+              controller.enqueue(encoder.encode(forwarded.text));
+            } else if (forwarded.kind === "progress") {
+              controller.enqueue(encoder.encode(forwarded.raw));
+            } else if (forwarded.kind === "started") {
+              if (!startedEmitted) {
+                controller.enqueue(
+                  encoder.encode(encodeSse("workflow.started", forwarded.data)),
+                );
+                startedEmitted = true;
+              }
+            } else if (forwarded.kind === "terminal") {
+              if (terminalEmitted) continue;
+              let terminalPayload: string;
+              try {
+                terminalPayload = await validateTerminal(
+                  forwarded.event,
+                  forwarded.data,
+                  scope as TeachingScope,
+                  { mode: body.mode, conversation_id: body.conversation_id },
+                );
+              } catch {
+                failClosed("RETRIEVAL_UNAVAILABLE");
+                break;
+              }
+              controller.enqueue(encoder.encode(terminalPayload));
+              terminalEmitted = true;
+            }
+            // ``unknown`` events are dropped (not forwarded).
+          }
+        }
+        if (!terminalEmitted && upstreamClosed) {
+          // Upstream closed without a terminal event; emit a synthetic
+          // failure so the browser sees a well-formed stream ending.
+          failClosed("RETRIEVAL_UNAVAILABLE");
+        }
+      } catch {
+        failClosed("RETRIEVAL_UNAVAILABLE");
+      } finally {
+        try {
+          reader.releaseLock();
+        } catch {
+          // Already released; ignore.
+        }
+        controller.close();
+      }
+    },
+    cancel(reason) {
+      // Browser cancelled the stream; propagate cancellation to upstream.
+      try {
+        upstream.body?.cancel(reason);
+      } catch {
+        // Best-effort; the upstream may already be closed.
+      }
+    },
+  });
+
+  return new Response(stream, {
     status: 200,
     headers: {
       "Cache-Control": "private, no-store",

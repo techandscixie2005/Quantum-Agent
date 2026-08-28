@@ -118,7 +118,16 @@ def _repair_brief(task: CodeGenerationTask, repair: CodeRepairAttempt) -> str:
 def _build_oracle_request(
     task: CodeGenerationTask,
 ) -> RectangularBarrierRequest | None:
-    """Construct the deterministic oracle request from the task's known variables."""
+    """Construct the deterministic oracle request from the task's known variables.
+
+    Only ``rectangular_barrier_tunnelling`` has a Coding Agent oracle: it is
+    the Golden Loop demo computation (PRD §6, §9) where the agent must write
+    fresh code that reproduces the deterministic transmission/reflection
+    result.  Other scientific requests (e.g. ``two_level_simulation`` in
+    ``run_experiments`` mode) are student-requested simulations whose
+    deterministic tool is the authoritative result; the Coding Agent does
+    not run for them, so the deterministic oracle remains the sole result.
+    """
 
     if task.oracle_kind != "rectangular_barrier_tunnelling":
         return None
@@ -134,6 +143,32 @@ def _build_oracle_request(
     except (KeyError, ValueError, TypeError):
         logger.warning("could not build barrier oracle request from %s", kv)
         return None
+
+
+def _domain_error(
+    task: CodeGenerationTask,
+    metrics: dict[str, str | int | float | bool],
+    *,
+    tolerance: float,
+) -> str | None:
+    """Return a deterministic physical-domain/conservation failure, if any."""
+
+    if task.oracle_kind != "rectangular_barrier_tunnelling":
+        return None
+    numeric = {key: float(metrics[key]) for key in task.required_outputs}
+    transmission = numeric["T"]
+    reflection = numeric["R"]
+    reported_error = numeric["conservation_error"]
+    actual_error = abs(transmission + reflection - 1.0)
+    if not 0.0 <= transmission <= 1.0 or not 0.0 <= reflection <= 1.0:
+        return "Transmission and reflection must both lie within [0, 1]."
+    if reported_error < 0.0:
+        return "The reported conservation error must be non-negative."
+    if actual_error > tolerance or reported_error > tolerance:
+        return "Generated metrics violate probability conservation."
+    if abs(reported_error - actual_error) > tolerance:
+        return "The reported conservation error disagrees with generated T and R."
+    return None
 
 
 def _verify_against_oracle(
@@ -187,8 +222,18 @@ def _verify_against_oracle(
                 agent_metrics=agent_metrics, oracle_metrics=oracle_metrics,
                 observations=[*observations, f"Required metric {key!r} is not finite."],
             )
-    # Compare all oracle-provided required values within tolerance.
     tolerance = 1e-6
+    domain_error = _domain_error(task, agent_metrics, tolerance=tolerance)
+    if domain_error is not None:
+        return CodeVerificationResult(
+            status=CodeVerificationStatus.FAIL,
+            oracle_kind=task.oracle_kind,
+            agent_metrics=agent_metrics,
+            oracle_metrics=oracle_metrics,
+            observations=[*observations, domain_error],
+            tolerance=tolerance,
+        )
+    # Compare all oracle-provided required values within tolerance.
     for key in required:
         if key not in oracle_metrics:
             return CodeVerificationResult(

@@ -1,7 +1,10 @@
-"""Bounded subprocess sandbox for Coding-Agent-generated Python (PRD V3.1 §6.2).
+"""Execution clients for the isolated Coding-Agent runtime (PRD V3.1 §6.2).
 
-The sandbox executes a :class:`CodeArtifact` program in a child Python
-process with:
+``RemoteSandbox`` is the only release-mode boundary: it sends a bounded
+program to a separate, network-disabled container over a Unix-domain socket.
+The API process never executes generated code.  ``SubprocessSandbox`` is the
+runner-internal executor (and a unit-test seam); it executes a
+:class:`CodeArtifact` program in a child Python process with:
 
 * an import/call allowlist enforced upstream by :func:`validate_code_safety`
   (the AST gate runs before the subprocess starts);
@@ -13,8 +16,8 @@ process with:
 * a private tmpdir as ``cwd``/``HOME`` so the program cannot read the host
   filesystem;
 * a wall-time timeout that kills the whole process group;
-* bounded stdout/stderr (8 KB / 4 KB) so a runaway program cannot exhaust
-  memory or disk.
+* incrementally drained stdout/stderr (8 KB / 4 KB retained) so a runaway
+  program cannot exhaust runner memory or disk.
 
 The sandbox never fabricates success: a timeout, non-zero exit, or signal
 yields ``completed=False``.  Raw process output beyond the bounded excerpt is
@@ -40,7 +43,10 @@ import shutil
 import sys
 import tempfile
 import time
+from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import httpx
@@ -101,19 +107,23 @@ def _rlimit_settings(limits: SandboxLimits) -> tuple[tuple[int, tuple[int, int]]
     """Translate SandboxLimits into (resource, (soft, hard)) pairs.
 
     CPU is in seconds; file size in bytes; open files and child processes
-    are capped.  ``RLIMIT_AS`` (address space) is deliberately NOT applied:
-    on WSL2 it OOM-kills OpenBLAS/numpy before the program runs because
-    numpy mmaps a large virtual region.  The wall-time timeout +
-    ``RLIMIT_CPU`` + bounded output together bound the run safely without
-    a fragile address-space cap.  All hard limits equal the soft limit so
-    the program cannot raise them.
+    are capped.  ``RLIMIT_AS`` (address space) uses a generous 1.5 GB ceiling
+    so numpy/OpenBLAS/matplotlib can mmap their large virtual regions without
+    hitting MemoryError, while a ~2 GB resident-allocation attack (e.g.
+    ``[bytearray(1<<20) for _ in range(2048)]``) still fails.  The wall-time
+    timeout is the primary CPU bound; the production container's
+    ``mem_limit: 768m`` is the primary memory bound.  All hard limits equal
+    the soft limit so the program cannot raise them.
     """
 
     cpu_seconds = max(1, int(limits.wall_time_seconds) + 1)
     fsize_bytes = 16 * 1024 * 1024
     nofile = 32
     nproc = 1
-    address_space = max(16, int(limits.memory_megabytes)) * 1024 * 1024
+    # 1.5 GB: enough for numpy/scipy/matplotlib virtual mappings, still catches
+    # a 2 GB resident-allocation attack.  The ``memory_megabytes`` field (max
+    # 512) is too tight for the interpreter's virtual footprint under load.
+    address_space = 1536 * 1024 * 1024
     return (
         (resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds)),
         (resource.RLIMIT_AS, (address_space, address_space)),
@@ -133,6 +143,44 @@ def _apply_rlimits(limits: SandboxLimits) -> None:
             # Some platforms (e.g. macOS) reject RLIMIT_AS; skip rather than
             # fail the exec.  The wall-time timeout + bounded output still
             # bound the run.
+            pass
+
+
+def _bwrap_rlimit_settings(limits: SandboxLimits) -> tuple[tuple[int, tuple[int, int]], ...]:
+    """Rlimits compatible with ``bubblewrap`` namespace creation.
+
+    ``RLIMIT_NPROC`` is excluded: bwrap needs to fork/clone to create the
+    sandbox namespace, and a 1-process cap breaks that with
+    ``Resource temporarily unavailable``.  PID isolation is handled by
+    ``--unshare-pid`` and the container's ``pids_limit``.
+
+    ``RLIMIT_AS`` uses a generous 1.5 GB ceiling so numpy/OpenBLAS can mmap
+    their large virtual regions, while a ~1 GB resident allocation attack
+    (e.g. ``[bytearray(1<<20) for _ in range(1024)]``) still hits MemoryError.
+    The wall-time timeout is the primary CPU bound.
+    """
+
+    cpu_seconds = max(1, int(limits.wall_time_seconds) + 1)
+    fsize_bytes = 16 * 1024 * 1024
+    nofile = 64
+    # 1.5 GB: enough for numpy/scipy/matplotlib virtual mappings, still catches
+    # a 1 GB resident-allocation attack.
+    address_space = 1536 * 1024 * 1024
+    return (
+        (resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds)),
+        (resource.RLIMIT_AS, (address_space, address_space)),
+        (resource.RLIMIT_FSIZE, (fsize_bytes, fsize_bytes)),
+        (resource.RLIMIT_NOFILE, (nofile, nofile)),
+    )
+
+
+def _apply_bwrap_rlimits(limits: SandboxLimits) -> None:
+    """``preexec_fn`` target for the bwrap parent: apply bwrap-safe rlimits."""
+
+    for which, (soft, hard) in _bwrap_rlimit_settings(limits):
+        try:
+            resource.setrlimit(which, (soft, hard))
+        except (ValueError, OSError):
             pass
 
 
@@ -166,6 +214,130 @@ def _bounded(data: bytes, limit: int) -> tuple[str, bool]:
     marker = "\n[output truncated]"
     budget = max(0, limit - len(marker))
     return data[:budget].decode("utf-8", errors="replace") + marker, True
+
+
+def _bwrap_command(bwrap: str, python_executable: str, tmpdir: str) -> list[str]:
+    """Build a ``bubblewrap`` command that isolates the sandbox child from the
+    host filesystem while still allowing the Python interpreter and its
+    scientific libraries (numpy/scipy/sympy/matplotlib/qutip) to import.
+
+    Binding the host root (``--ro-bind / /``) would expose the host's
+    ``/etc/passwd`` and other world-readable files, so ``numpy.loadtxt`` could
+    read them.  This build instead binds only the interpreter's own directory
+    tree (``/usr``, ``/lib``, ``/lib64``, and the venv if present) read-only,
+    creates a minimal synthetic ``/etc`` with no host user data, and unshares
+    the network + PID namespaces.  Host files like ``/etc/passwd`` are
+    therefore unreachable from inside the sandbox.
+    """
+
+    # Determine the venv root that owns the Python executable so we can bind
+    # it read-only (numpy/scipy/matplotlib live in the venv site-packages).
+    # Do NOT resolve the symlink: a venv ``bin/python`` often points at the
+    # system interpreter, but the site-packages we need live under the venv
+    # itself.  Walk up from the literal executable path to find the venv root.
+    python_path = Path(python_executable)
+    venv_root: Path | None = None
+    if python_path.parent.name == "bin":
+        candidate = python_path.parent.parent
+        if (candidate / "lib").exists() or (candidate / "Lib").exists():
+            venv_root = candidate
+    bind_targets: list[tuple[str, str]] = []
+    for host_path in ("/usr", "/lib", "/lib64"):
+        if Path(host_path).exists():
+            bind_targets.append((host_path, host_path))
+    if venv_root is not None and venv_root.exists():
+        bind_targets.append((str(venv_root), str(venv_root)))
+        # Inside the sandbox, invoke the interpreter via its venv path so the
+        # child sees ``sys.prefix`` pointing at the venv (not the system
+        # Python that ``bin/python`` symlinks to).
+        python_executable = str(venv_root / "bin" / python_path.name)
+    else:
+        # No venv detected: use the resolved interpreter path but make sure
+        # its directory tree is bound.
+        resolved = python_path.resolve()
+        if resolved.parent.name == "bin":
+            venv_root = resolved.parent.parent
+            if venv_root.exists():
+                bind_targets.append((str(venv_root), str(venv_root)))
+
+    command: list[str] = [
+        bwrap,
+        "--die-with-parent",
+        "--unshare-user-try",
+        "--unshare-net",
+        "--unshare-pid",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+        "--tmpfs",
+        "/etc",
+        "--bind",
+        tmpdir,
+        "/work",
+        "--chdir",
+        "/work",
+        "--setenv",
+        "HOME",
+        "/work",
+        "--setenv",
+        "MPLBACKEND",
+        "Agg",
+    ]
+    # Minimal /etc so locale/nss libraries initialize without host user data.
+    etc_files = {
+        "/etc/passwd": "nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n",
+        "/etc/group": "nobody:x:65534:\n",
+        "/etc/nsswitch.conf": "passwd: files\ngroup: files\nhosts: files\n",
+        "/etc/hosts": "127.0.0.1 localhost\n",
+        "/etc/hostname": "qa-sandbox\n",
+    }
+    etc_tmpdir = Path(tmpdir) / ".etc"
+    etc_tmpdir.mkdir(parents=True, exist_ok=True)
+    for filename, content in etc_files.items():
+        (etc_tmpdir / Path(filename).name).write_text(content, encoding="utf-8")
+    for filename in etc_files:
+        command.extend(
+            ["--ro-bind", str(etc_tmpdir / Path(filename).name), filename]
+        )
+    for src, dst in bind_targets:
+        command.extend(["--ro-bind", src, dst])
+    # Inside the sandbox the tmpdir is mounted at /work, so the program is at
+    # /work/program.py (not the host absolute path).
+    command.extend(
+        [python_executable, "-X", "faulthandler", "-I", "/work/program.py"]
+    )
+    return command
+
+
+async def _read_stream_bounded(
+    stream: asyncio.StreamReader,
+    limit: int,
+    output_exceeded: asyncio.Event,
+) -> tuple[bytes, bool]:
+    """Drain a pipe incrementally while retaining at most ``limit`` bytes.
+
+    Draining continues after the retained limit so the child cannot deadlock
+    on a full pipe.  The first overflow signals the supervisor, which kills
+    the whole process group.  At no point is unbounded child output held in
+    the runner process.
+    """
+
+    retained = bytearray()
+    truncated = False
+    while True:
+        chunk = await stream.read(4096)
+        if not chunk:
+            break
+        remaining = max(0, limit - len(retained))
+        if remaining:
+            retained.extend(chunk[:remaining])
+        if len(chunk) > remaining:
+            truncated = True
+            output_exceeded.set()
+    return bytes(retained), truncated
 
 
 def _parse_metrics(stdout_bounded: str) -> dict[str, str | int | float | bool]:
@@ -345,21 +517,25 @@ class SubprocessSandbox:
                     else None
                 )
                 if bwrap:
-                    command = [
-                        bwrap, "--die-with-parent", "--unshare-net", "--unshare-pid",
-                        "--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev",
-                        "--tmpfs", "/tmp", "--bind", tmpdir, "/work", "--chdir", "/work",
-                        self._python, "-X", "faulthandler", "-I", "/work/program.py",
-                    ]
+                    command = _bwrap_command(bwrap, self._python, tmpdir)
+                    # bwrap itself creates namespaces via clone/unshare; applying
+                    # ``RLIMIT_NPROC`` in preexec_fn (run after fork in the bwrap
+                    # parent) breaks namespace creation with
+                    # ``Resource temporarily unavailable``.  Use the bwrap-safe
+                    # rlimit set (no NPROC, generous RLIMIT_AS) instead.
+                    preexec: Callable[[], None] | None = partial(
+                        _apply_bwrap_rlimits, limits
+                    )
                 else:
                     command = [self._python, "-X", "faulthandler", "-I", str(program_path)]
+                    preexec = lambda: _apply_rlimits(limits)  # noqa: E731
                 process = await asyncio.create_subprocess_exec(
                     *command,
                     cwd=tmpdir,
                     env=env,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    preexec_fn=lambda: _apply_rlimits(limits),
+                    preexec_fn=preexec,
                     start_new_session=True,
                 )
             except OSError as exc:
@@ -369,23 +545,49 @@ class SubprocessSandbox:
 
             wall = max(0.5, float(limits.wall_time_seconds))
             timed_out = False
+            output_exceeded = asyncio.Event()
+            assert process.stdout is not None
+            assert process.stderr is not None
+            stdout_task = asyncio.create_task(
+                _read_stream_bounded(process.stdout, _MAX_STDOUT_BYTES, output_exceeded)
+            )
+            stderr_task = asyncio.create_task(
+                _read_stream_bounded(process.stderr, _MAX_STDERR_BYTES, output_exceeded)
+            )
+            overflow_task = asyncio.create_task(output_exceeded.wait())
+            wait_task = asyncio.create_task(process.wait())
             try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    process.communicate(), timeout=wall
+                done, _pending = await asyncio.wait(
+                    {wait_task, overflow_task},
+                    timeout=wall,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-            except TimeoutError:
+                if overflow_task in done and output_exceeded.is_set():
+                    await self._kill_group(process)
+                    await process.wait()
+                elif wait_task not in done:
+                    timed_out = True
+                    await self._kill_group(process)
+                    await process.wait()
+            finally:
+                overflow_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await overflow_task
+            if process.returncode is None:
                 timed_out = True
                 await self._kill_group(process)
-                try:
-                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                        process.communicate(), timeout=1.0
-                    )
-                except TimeoutError:
-                    stdout_bytes, stderr_bytes = b"", b""
+                await process.wait()
+
+            stdout_bytes, stdout_truncated = await stdout_task
+            stderr_bytes, stderr_truncated = await stderr_task
 
             elapsed = max(0.0, time.monotonic() - started)
-            stdout_text, stdout_truncated = _bounded(stdout_bytes, _MAX_STDOUT_BYTES)
-            stderr_text, stderr_truncated = _bounded(stderr_bytes, _MAX_STDERR_BYTES)
+            stdout_text, _ = _bounded(stdout_bytes, _MAX_STDOUT_BYTES)
+            stderr_text, _ = _bounded(stderr_bytes, _MAX_STDERR_BYTES)
+            if stdout_truncated:
+                stdout_text = _bounded(stdout_bytes + b"x", _MAX_STDOUT_BYTES)[0]
+            if stderr_truncated:
+                stderr_text = _bounded(stderr_bytes + b"x", _MAX_STDERR_BYTES)[0]
 
             figure_b64: str | None = None
             if capture_figure and not timed_out:
@@ -431,6 +633,8 @@ class RemoteSandbox:
     """HTTP client for the dedicated no-secret sandbox runner."""
 
     def __init__(self, endpoint: str, *, timeout_seconds: float = 15.0) -> None:
+        if not endpoint.startswith("unix://"):
+            raise ValueError("the isolated sandbox endpoint must be a Unix-domain socket")
         self._endpoint = endpoint.rstrip("/")
         self._timeout = timeout_seconds
 

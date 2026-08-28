@@ -58,6 +58,7 @@ from quantum_agent.tutor.nodes import (
     interpret_node,
     learning_native_node,
     learning_native_pre_node,
+    prepare_commitment_gate_node,
     reject_turn_node,
     retrieve_evidence_node,
     scientific_tools_node,
@@ -80,6 +81,30 @@ def _route_after_hitl(
     ):
         return "reject_turn"
     return "assemble_result"
+
+
+def _route_after_learning_native_pre(
+    state: TutorState,
+) -> Literal["prepare_commitment_gate", "retrieve_evidence"]:
+    """PRD V3.0 Axiom 1: when the commitment gate withholds the answer, skip
+    retrieval/diagnosis/scientific-tools/generation and go straight to the
+    deterministic gate response.  Otherwise run the full evidence-grounded
+    workflow.
+    """
+    if state.get("answer_withheld_by_gate"):
+        return "prepare_commitment_gate"
+    return "retrieve_evidence"
+
+
+def _route_after_learning_native(
+    state: TutorState,
+) -> Literal["assemble_result", "hitl_gate"]:
+    """When the gate withheld the answer, skip HITL (there is no LLM output to
+    review) and assemble the result directly.  Otherwise run the HITL gate.
+    """
+    if state.get("answer_withheld_by_gate"):
+        return "assemble_result"
+    return "hitl_gate"
 
 
 class TutorGraph:
@@ -110,15 +135,22 @@ class TutorGraph:
 
         builder = StateGraph(TutorState, context_schema=TutorContext)
         builder.add_node("interpret", interpret_node)
+        # PRD V3.0 Axiom 1 ("Learner generates before AI completes"): the
+        # commitment gate runs BEFORE retrieval so the student must commit a
+        # prediction / first step before any evidence-grounded explanation is
+        # produced.  ``learning_native_pre_node`` uses the deterministic
+        # ``commitment_eligibility`` policy (mode + task kind + message +
+        # has-attempt) to decide whether the gate fires; it does not need the
+        # retrieved evidence.  When the gate fires, the graph skips
+        # retrieval/diagnosis/scientific-tools/generation and goes straight to
+        # ``prepare_commitment_gate`` which emits a deterministic elicitation
+        # response with zero claims.  When the gate does not fire, the full
+        # evidence-grounded workflow runs.
+        builder.add_node("learning_native_pre", learning_native_pre_node)
+        builder.add_node("prepare_commitment_gate", prepare_commitment_gate_node)
         builder.add_node("retrieve_evidence", retrieve_evidence_node)
         builder.add_node("diagnose", diagnose_node)
         builder.add_node("apply_policy", apply_policy_node)
-        # PRD V3.0 Axiom 1: the commitment gate runs BEFORE answer
-        # generation so the LLM never writes an explanation while the gate
-        # is still open.  ``learning_native_pre_node`` sets
-        # ``answer_withheld_by_gate``; ``generate_response_node`` then skips
-        # the LLM call entirely when the gate is enforced.
-        builder.add_node("learning_native_pre", learning_native_pre_node)
         builder.add_node("scientific_tools", scientific_tools_node)
         builder.add_node("generate_response", generate_response_node)
         builder.add_node("learning_native", learning_native_node)
@@ -127,14 +159,34 @@ class TutorGraph:
         builder.add_node("assemble_result", assemble_result_node)
 
         builder.add_edge(START, "interpret")
-        builder.add_edge("interpret", "retrieve_evidence")
+        builder.add_edge("interpret", "learning_native_pre")
+        builder.add_conditional_edges(
+            "learning_native_pre",
+            _route_after_learning_native_pre,
+            {
+                "prepare_commitment_gate": "prepare_commitment_gate",
+                "retrieve_evidence": "retrieve_evidence",
+            },
+        )
+        # Gate-fires branch: skip retrieval/diagnosis/scientific-tools/generation;
+        # the gate node emits the deterministic elicitation response and all
+        # remaining trace steps, then the post-generation Learning-Native node
+        # assembles the commitment + cognitive mirror before assembly.
+        builder.add_edge("prepare_commitment_gate", "learning_native")
+        # Non-gate branch: full evidence-grounded workflow.
         builder.add_edge("retrieve_evidence", "diagnose")
         builder.add_edge("diagnose", "apply_policy")
-        builder.add_edge("apply_policy", "learning_native_pre")
-        builder.add_edge("learning_native_pre", "scientific_tools")
+        builder.add_edge("apply_policy", "scientific_tools")
         builder.add_edge("scientific_tools", "generate_response")
         builder.add_edge("generate_response", "learning_native")
-        builder.add_edge("learning_native", "hitl_gate")
+        builder.add_conditional_edges(
+            "learning_native",
+            _route_after_learning_native,
+            {
+                "assemble_result": "assemble_result",
+                "hitl_gate": "hitl_gate",
+            },
+        )
         builder.add_conditional_edges(
             "hitl_gate",
             _route_after_hitl,

@@ -94,6 +94,10 @@ def _vault(request: Request) -> CredentialVault | None:
     return getattr(request.app.state, "credential_vault", None)
 
 
+def _credential_router_factory(request: Request) -> object | None:
+    return getattr(request.app.state, "credential_router_factory", None)
+
+
 def _check_rate_limit(client_ip: str) -> None:
     now = time.monotonic()
     window = _login_attempts[client_ip]
@@ -243,11 +247,11 @@ async def api_key_login(
             logger.warning("vault store failed for session %s", user_session.id, exc_info=True)
             await session.rollback()
             raise HTTPException(status_code=500, detail="无法安全存储 API Key") from None
-    elif settings.environment == "production":
+    else:
         await session.rollback()
         raise HTTPException(
-            status_code=500,
-            detail="会话保险库未配置，生产环境拒绝保存 API Key",
+            status_code=503,
+            detail="会话保险库未配置，拒绝创建用户凭证会话",
         )
 
     await session.commit()
@@ -284,12 +288,17 @@ async def api_key_logout(
     user_session = await session.scalar(
         select(UserSession).where(UserSession.session_token_sha256 == digest).limit(1)
     )
-    vault = _vault(request)
     if user_session is not None:
         user_session.status = SessionStatus.REVOKED
         user_session.revoked_at = datetime.now(UTC)
-        if vault is not None:
-            await vault.forget(user_session.id)
+        factory = _credential_router_factory(request)
+        forget_session = getattr(factory, "forget_session", None)
+        if callable(forget_session):
+            await forget_session(user_session.id)
+        else:
+            vault = _vault(request)
+            if vault is not None:
+                await vault.forget(user_session.id)
         await session.commit()
     return {"status": "ok"}
 

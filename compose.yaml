@@ -155,7 +155,7 @@ services:
       ATTACHMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES: ${ATTACHMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES:-262144000}
       ATTACHMENT_MAX_ARCHIVE_COMPRESSION_RATIO: ${ATTACHMENT_MAX_ARCHIVE_COMPRESSION_RATIO:-100}
       # PRD V3.1 §3.3: session vault for user-supplied API keys.
-      SESSION_VAULT_KEY: ${SESSION_VAULT_KEY:-}
+      SESSION_VAULT_KEY: ${SESSION_VAULT_KEY:?Set SESSION_VAULT_KEY to a valid Fernet key}
       LOGIN_COURSE_EMAIL: ${LOGIN_COURSE_EMAIL:-demo-student@quantum-agent.local}
       # PRD V3.1 §6.2: Coding Agent sandbox.
       CODING_SANDBOX_ENABLED: ${CODING_SANDBOX_ENABLED:-true}
@@ -200,6 +200,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      sandbox-runner:
+        condition: service_healthy
       neo4j:
         condition: service_healthy
         restart: true
@@ -210,22 +212,54 @@ services:
       - backend
       - edge
 
+  sandbox-socket-init:
+    image: quantum-agent-api:${QA_IMAGE_TAG:-local}
+    user: "0:0"
+    volumes:
+      - type: volume
+        source: sandbox_socket
+        target: /run/sandbox
+    command: ["chown", "-R", "10001:10001", "/run/sandbox"]
+    restart: "no"
+
   sandbox-runner:
     image: quantum-agent-api:${QA_IMAGE_TAG:-local}
+    init: true
+    restart: unless-stopped
     user: "10001:10001"
     read_only: true
     tmpfs:
-      - /tmp:size=128m,mode=1777
+      - /tmp:size=128m,mode=1777,noexec,nosuid,nodev
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     network_mode: none
+    pids_limit: 32
+    mem_limit: 768m
+    cpus: 1.0
+    depends_on:
+      sandbox-socket-init:
+        condition: service_completed_successfully
     volumes:
       - type: volume
         source: sandbox_socket
         target: /run/sandbox
     command: ["uvicorn", "quantum_agent.sandbox_runner:app", "--uds", "/run/sandbox/runner.sock"]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import httpx;
+          t=httpx.HTTPTransport(uds='/run/sandbox/runner.sock');
+          r=httpx.Client(transport=t,base_url='http://sandbox').get('/health');
+          r.raise_for_status()
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 5s
 
   web:
     image: quantum-agent-web:${QA_IMAGE_TAG:-local}
@@ -415,6 +449,9 @@ services:
       QA_LIVE_INFRA: "1"
       QA_LIVE_REQUIRE_CORPUS: ${QA_LIVE_REQUIRE_CORPUS:-0}
       QUANTUM_API_BASE_URL: http://api:8000
+      SESSION_VAULT_KEY: ${SESSION_VAULT_KEY:?Set SESSION_VAULT_KEY to a valid Fernet key}
+      USTC_API: ${USTC_API:?Set USTC_API to a valid model credential}
+      USTC_BASE_URL: ${USTC_BASE_URL:-https://api.llm.ustc.edu.cn/v1}
     command:
       - pytest
       - -q
@@ -443,12 +480,15 @@ services:
     cap_drop:
       - ALL
     environment:
-      <<: *database-environment
+      <<: [*database-environment, *redis-environment]
       ENVIRONMENT: test
       QA_LIVE_MODEL: "1"
       QUANTUM_API_BASE_URL: http://api:8000
       XDG_CACHE_HOME: /tmp/quantum-agent-cache
       MPLCONFIGDIR: /tmp/matplotlib
+      SESSION_VAULT_KEY: ${SESSION_VAULT_KEY:?Set SESSION_VAULT_KEY to a valid Fernet key}
+      USTC_API: ${USTC_API:?Set USTC_API to a valid model credential}
+      USTC_BASE_URL: ${USTC_BASE_URL:-https://api.llm.ustc.edu.cn/v1}
     command:
       - pytest
       - -q
