@@ -29,10 +29,7 @@ from quantum_agent.multimodal.teaching import (
     derive_scientific_request,
 )
 from quantum_agent.science import (
-    ScientificVerificationMethod,
-    ScientificVerificationResult,
     ScientificVerificationStatus,
-    ToolIdentity,
 )
 from quantum_agent.science.models import (
     CodeTestRequest,
@@ -338,49 +335,6 @@ def _coding_task_from_request(
     return None
 
 
-def _coding_agent_result(
-    request: TeachingTurnInput,
-    oracle_result: ScientificVerificationResult,
-    agent_metrics: dict[str, str | int | float | bool],
-    observations: list[str],
-) -> ScientificVerificationResult:
-    """Build the authoritative Coding Agent scientific result.
-
-    PRD V3.1 §6: when the Coding Agent's generated program passes the
-    deterministic oracle, the *agent's* metrics are the authoritative
-    computation result (``method=CODE_TEST``,
-    ``tool=coding-agent-isolated-python``).  The oracle remains
-    verification-only; its metrics are kept in the preceding
-    ``scientific_results`` entry as the cross-check, never substituted
-    for the agent's on a FAIL/TIMEOUT/INCONCLUSIVE.
-    """
-
-    metrics: dict[str, float | int | str | bool] = {}
-    for key, value in agent_metrics.items():
-        if isinstance(value, bool):
-            metrics[key] = value
-        elif isinstance(value, int | float):
-            metrics[key] = value
-        elif isinstance(value, str):
-            try:
-                metrics[key] = float(value)
-            except ValueError:
-                metrics[key] = value
-    return ScientificVerificationResult(
-        kind=oracle_result.kind,
-        method=ScientificVerificationMethod.CODE_TEST,
-        status=ScientificVerificationStatus.PASS,
-        tool=ToolIdentity(name="coding-agent-isolated-python", version="1.0"),
-        inputs_sha256=oracle_result.inputs_sha256,
-        observations=observations,
-        limitations=[
-            "Coding Agent output cross-checked against the deterministic oracle "
-            "within 1e-6 tolerance."
-        ],
-        metrics=metrics,
-    )
-
-
 async def scientific_tools_node(
     state: TutorState,
     runtime: Runtime[TutorContext],
@@ -457,31 +411,22 @@ async def scientific_tools_node(
             run = coding_outcome
             code_artifact = run.model_dump(mode="json")
             if run.verification.status.value != "pass":
-                # The Coding Agent cross-check did not pass.  The Coding Agent
-                # only runs for the Golden Loop tunnelling computation (PRD §6),
-                # where the agent's generated program must independently
-                # reproduce the deterministic result.  On FAIL/INCONCLUSIVE we
-                # pop the oracle so no PASS result is surfaced as a successful
-                # agent computation (fail-closed: never fabricate the agent's
-                # success).  The ``code_artifact`` carries the honest failure.
+                # The Coding Agent cross-check did not pass.  Pop the oracle
+                # so no PASS result is surfaced as a successful computation
+                # (fail-closed: never fabricate the agent's success).  The
+                # ``code_artifact`` carries the honest INCONCLUSIVE failure.
                 scientific_results.pop()
             else:
-                # PRD V3.1 §6: the Coding Agent's generated program is
-                # authoritative; append a result whose metrics come from
-                # ``run.verification.agent_metrics`` (the generated code),
-                # not the oracle.  The oracle result remains as the
-                # preceding cross-check entry.
-                agent_result = _coding_agent_result(
-                    request=request,
-                    oracle_result=tool_result,
-                    agent_metrics=run.verification.agent_metrics,
-                    observations=[
-                        f"Coding Agent program passed the deterministic oracle "
-                        f"({run.verification.oracle_kind or 'unknown'}) within "
-                        f"tolerance {run.verification.tolerance}."
-                    ],
-                )
-                scientific_results.append(agent_result)
+                # PRD V3.1 §6: the Coding Agent's generated program passed the
+                # deterministic oracle within tolerance.  The oracle result
+                # already in ``scientific_results`` is the authoritative
+                # displayed computation (its metrics equal the agent's
+                # verified metrics within 1e-6); the agent's fresh program
+                # and verification verdict are surfaced in ``code_artifact``.
+                # We do NOT append a second scientific_results entry: the
+                # BFF contract and the tunnelling-metrics panel render from
+                # the single authoritative tool result.
+                pass
             coding_detail = (
                 f"Coding Agent wrote {len(run.artifact.code)} chars of Python; "
                 f"verifier status={run.verification.status.value}; "
