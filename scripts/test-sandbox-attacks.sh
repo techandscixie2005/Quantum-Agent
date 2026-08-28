@@ -74,7 +74,7 @@ async def main():
  s=RemoteSandbox('unix:///run/sandbox/runner.sock')
  cpu=await s.execute_program(CodeArtifact(purpose='cpu attack',code='while True:\n    pass'),SandboxLimits(wall_time_seconds=0.5,memory_megabytes=64))
  assert not cpu.completed and (cpu.timed_out or cpu.exit_code != 0)
- memory=await s.execute_program(CodeArtifact(purpose='memory attack',code='x = [bytearray(1024 * 1024) for _ in range(1024)]'),SandboxLimits(wall_time_seconds=2,memory_megabytes=64))
+ memory=await s.execute_program(CodeArtifact(purpose='memory attack',code='x = [bytearray(1024 * 1024) for _ in range(2048)]'),SandboxLimits(wall_time_seconds=2,memory_megabytes=64))
  assert not memory.completed
  output=await s.execute_program(CodeArtifact(purpose='output attack',code=\"print('X' * 20000000)\"),SandboxLimits(wall_time_seconds=2,memory_megabytes=64))
  assert not output.completed and output.truncated and len(output.stdout_bounded) <= 8000
