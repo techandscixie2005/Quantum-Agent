@@ -443,9 +443,16 @@ class RemoteSandbox:
                 completed=False, stderr_bounded="static safety validation rejected the program"
             )
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            transport = None
+            base = self._endpoint
+            if base.startswith("unix://"):
+                transport = httpx.AsyncHTTPTransport(uds=base.removeprefix("unix://"))
+                base = "http://sandbox"
+            async with httpx.AsyncClient(
+                timeout=self._timeout, transport=transport, base_url=base
+            ) as client:
                 response = await client.post(
-                    f"{self._endpoint}/execute",
+                    "/execute",
                     json={
                         "code": artifact.code,
                         "limits": (limits or SandboxLimits()).model_dump(),
