@@ -251,7 +251,10 @@ async function sendRealTunnellingTurn(
     (response) =>
       new URL(response.url()).pathname === "/api/teaching/turns/stream" &&
       response.request().method() === "POST",
-    { timeout: 240_000 },
+    // PRD V3.1 §6: the run_experiments stage triggers the Coding Agent, which
+    // makes an extra LLM call to generate Python + sandbox execution + oracle
+    // verification.  Allow up to 6 minutes for the full turn.
+    { timeout: 360_000 },
   );
   const messageBox = page.getByLabel("给 Quantum Agent 的问题");
   await messageBox.fill(message);
@@ -411,6 +414,12 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
     expect(metricsText, "tunnelling-metrics must show a non-trivial T in (0,1)").toMatch(/透射 T = 0\.\d+/);
     expect(metricsText, "tunnelling-metrics must show a non-trivial R in (0,1)").toMatch(/反射 R = 0\.\d+/);
     expect(metricsText, "tunnelling-metrics must show the conservation error").toMatch(/守恒/);
+    // PRD V3.1 §6: the Coding Agent panel must render with a PASS verdict and
+    // the generated Python, proving the agent wrote fresh code (not a
+    // prewritten solver) and the verifier cross-checked it against the oracle.
+    await expect(page.getByTestId("coding-artifact")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("coding-verification-status")).toContainText(/PASS/, { timeout: 10_000 });
+    await expect(page.getByTestId("coding-generated-code")).toContainText(/METRICS_JSON/);
     // Switch back to learn_concepts for the remaining pedagogical stages.
     await page.getByRole("button", { name: /^概念/ }).click();
 

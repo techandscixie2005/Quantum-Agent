@@ -52,6 +52,7 @@ class ModelTask(StrEnum):
     RERANK = "rerank"
     DOCUMENT_PARSING = "document_parsing"
     DOCUMENT_REASONING = "document_reasoning"
+    CODE = "code"
 
 
 class ModelTransport(StrEnum):
@@ -127,6 +128,8 @@ class ModelCapabilityRegistry:
         "propose_cognitive_commitment": ModelTask.LIGHTWEIGHT,
         "analyze_teach_back_reconstruction": ModelTask.REASONING,
         "generate_transfer_task": ModelTask.REASONING,
+        "generate_coding_artifact": ModelTask.CODE,
+        "repair_coding_artifact": ModelTask.CODE,
     }
 
     def __init__(
@@ -161,6 +164,7 @@ class ModelCapabilityRegistry:
         second_pass_model: str = "qwen3.8-reasoner",
         vision_model: str = "qwen3.8-chat",
         long_context_model: str = "glm-5.2",
+        code_model: str = "glm-5.2",
         embedding_model: str = "qwen3-embedding",
         rerank_model: str = "qwen3-reranker",
         document_parser_model: str = "mineru",
@@ -232,6 +236,13 @@ class ModelCapabilityRegistry:
                 *_TEXT_STRUCTURED,
                 ModelCapability.REASONING,
                 ModelCapability.LONG_CONTEXT,
+            ),
+            _profile(
+                "code_primary",
+                code_model,
+                ModelTransport.CHAT_COMPLETIONS,
+                *_TEXT_STRUCTURED,
+                ModelCapability.REASONING,
             ),
             _profile(
                 "embedding_primary",
@@ -323,6 +334,12 @@ class ModelCapabilityRegistry:
                     "long_context_primary",
                     "long_context_secondary",
                 ),
+            ),
+            _TaskRoute(
+                task=ModelTask.CODE,
+                transport=ModelTransport.CHAT_COMPLETIONS,
+                required=_TEXT_STRUCTURED | {ModelCapability.REASONING},
+                profile_ids=("code_primary", "reasoning_primary", "long_context_primary"),
             ),
         ]
         return cls(profiles=profiles, routes=routes)

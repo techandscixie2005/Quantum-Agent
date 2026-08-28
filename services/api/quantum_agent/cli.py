@@ -578,22 +578,23 @@ def _seed_live_e2e(arguments: argparse.Namespace) -> int:
 
 
 async def _seed_demo_account_async(arguments: argparse.Namespace) -> int:
-    """Seed the competition demo student account (PRD V3.0 P1-4).
+    """Seed the competition login student account (PRD V3.1 §3).
 
-    Creates (or re-activates) the demo student with an active membership in
-    the first active published course, so a judge can POST
-    ``/api/v1/auth/demo-login`` with the shared ``DEMO_LOGIN_SECRET`` to
-    receive a ``qa_session`` cookie without manual SQL.  No session token is
-    issued here — the demo-login endpoint mints one on demand.
+    Creates (or re-activates) the login student with an active membership in
+    the first active published course, so a student can POST
+    ``/api/v1/auth/login`` with their 词元计划/一〇七杯 API key to receive a
+    ``qa_session`` cookie without manual SQL.  No session token is issued
+    here — the login endpoint mints one on demand and stores the encrypted
+    key in the session vault.
     """
 
     settings = Settings()
     if settings.environment == "production":
-        raise RuntimeError("Demo accounts cannot be seeded in production")
+        raise RuntimeError("Login accounts cannot be seeded in production")
     engine = create_database_engine(settings)
     session_factory = create_session_factory(engine)
     now = datetime.now(UTC)
-    email = settings.demo_login_course_email
+    email = settings.login_course_email
     try:
         async with session_factory() as session:
             row = (
@@ -666,7 +667,7 @@ async def _seed_demo_account_async(arguments: argparse.Namespace) -> int:
                 "curriculum_edition_id": str(edition.id),
                 "course_activated": bool(arguments.activate_course),
                 "next_step": (
-                    "POST /api/v1/auth/demo-login with the DEMO_LOGIN_SECRET "
+                    "POST /api/v1/auth/login with a valid USTC API key "
                     "to receive a session token."
                 ),
             }
@@ -742,11 +743,18 @@ def build_parser() -> argparse.ArgumentParser:
     live_e2e.set_defaults(handler=_seed_live_e2e)
 
     demo = commands.add_parser(
-        "seed-demo-account",
-        help="seed the competition demo student account for /api/v1/auth/demo-login",
+        "seed-login-account",
+        help="seed the competition login student account for /api/v1/auth/login",
     )
     demo.add_argument("--activate-course", action="store_true")
     demo.set_defaults(handler=_seed_demo_account)
+    # Backward-compatible alias for callers that still use the old name.
+    demo_legacy = commands.add_parser(
+        "seed-demo-account",
+        help="alias for seed-login-account (deprecated)",
+    )
+    demo_legacy.add_argument("--activate-course", action="store_true")
+    demo_legacy.set_defaults(handler=_seed_demo_account)
     return parser
 
 

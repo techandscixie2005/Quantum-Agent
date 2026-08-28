@@ -68,6 +68,10 @@ const AgentPlot = dynamic(() => import("./AgentPlot"), {
   ssr: false,
   loading: () => <div className={styles.moduleLoading}>正在载入科学绘图…</div>,
 });
+const CodingArtifactPanel = dynamic(() => import("./CodingArtifactPanel"), {
+  ssr: false,
+  loading: () => <div className={styles.moduleLoading}>正在载入 Coding Agent…</div>,
+});
 
 const MODES: ReadonlyArray<{
   id: TeachingMode;
@@ -400,30 +404,37 @@ function SessionRequiredView({
   onReload: () => void;
   error: unknown;
 }) {
-  const [secret, setSecret] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  async function submitDemoLogin(event: FormEvent) {
+  async function submitApiKeyLogin(event: FormEvent) {
     event.preventDefault();
-    if (!secret.trim() || submitting) return;
+    const trimmed = apiKey.trim();
+    if (!trimmed || submitting || trimmed.length < 16) return;
     setSubmitting(true);
     setLoginError(null);
     try {
-      const response = await fetch("/api/auth/demo-login", {
+      const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ secret: secret.trim() }),
+        body: JSON.stringify({ api_key: trimmed }),
       });
       if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
-        setLoginError(detail.error ?? "Demo 登录被拒绝。");
+        if (response.status === 401) {
+          setLoginError(detail.error ?? "API Key 被模型服务拒绝或模型服务不可用。");
+        } else if (response.status === 429) {
+          setLoginError(detail.error ?? "登录尝试过于频繁，请稍后再试。");
+        } else {
+          setLoginError(detail.error ?? "登录被拒绝。");
+        }
         return;
       }
-      setSecret("");
+      setApiKey("");
       onReload();
     } catch {
-      setLoginError("无法连接 demo 登录服务。");
+      setLoginError("无法连接教学服务。");
     } finally {
       setSubmitting(false);
     }
@@ -432,24 +443,24 @@ function SessionRequiredView({
   return (
     <main className={styles.bootError}>
       <Atom size={34} />
-      <p className={styles.kicker}>QUANTUM AGENT / SESSION REQUIRED</p>
-      <h1>无法进入课程工作台</h1>
-      <p>{error instanceof Error ? error.message : "课程会话不可用。"}</p>
-      <form onSubmit={submitDemoLogin} className={styles.demoLogin} aria-label="Demo 登录表单">
-        <p className={styles.kicker}>COMPETITION DEMO LOGIN</p>
-        <label htmlFor="demo-secret">Demo 密钥</label>
+      <p className={styles.kicker}>QUANTUM AGENT / 连接中国科大</p>
+      <h1>词元计划 · 一〇七杯</h1>
+      <p>输入你的 API Key，连接学校模型服务并进入学习空间。Key 只会经 HTTPS 发送到后端保险库，不会写入浏览器、日志或 Agent Trace。</p>
+      <form onSubmit={submitApiKeyLogin} className={styles.demoLogin} aria-label="API Key 登录表单">
+        <p className={styles.kicker}>MODEL SERVICE LOGIN</p>
+        <label htmlFor="ustc-api-key">API Key</label>
         <input
-          id="demo-secret"
+          id="ustc-api-key"
           type="password"
           autoComplete="off"
-          value={secret}
-          onChange={(event) => setSecret(event.target.value)}
+          value={apiKey}
+          onChange={(event) => setApiKey(event.target.value)}
           maxLength={256}
-          placeholder="输入竞赛组织者提供的 demo 密钥"
-          aria-label="Demo 登录密钥"
+          placeholder="粘贴词元计划 / 一〇七杯 API Key"
+          aria-label="USTC API Key"
         />
-        <button type="submit" disabled={submitting || secret.trim().length < 8}>
-          {submitting ? "正在登录…" : "使用 demo 密钥进入"}
+        <button type="submit" disabled={submitting || apiKey.trim().length < 16}>
+          {submitting ? "正在连接…" : "连接并进入学习空间"}
         </button>
         {loginError ? (
           <p className={styles.hitlError} aria-live="polite"><CircleAlert /> {loginError}</p>
@@ -839,7 +850,7 @@ export function AgentExperience() {
           <small>{activeCourse.edition_title}</small>
         </div>
         <div className={styles.topActions}>
-          <span className={styles.liveState}><i /> {interrupt ? "工作流已暂停" : "课程证据在线"}</span>
+          <span className={styles.liveState} data-testid="model-service-status"><i /> {interrupt ? "工作流已暂停" : "模型服务已连接"}</span>
           <button onClick={() => setRightOpen(true)} aria-label="打开证据面板"><PanelRight /></button>
           <span className={styles.userMark}>{contextQuery.data.display_name.slice(0, 1)}</span>
         </div>
@@ -987,6 +998,10 @@ export function AgentExperience() {
 
           {mode === "work_on_projects" ? (
             <section className={styles.codePanel}><header><div><p className={styles.kicker}>MILESTONE ARTIFACT</p><h2>当前可运行片段</h2></div><span>Python</span></header><AgentCodeEditor value={projectCode} onChange={setProjectCode} /></section>
+          ) : null}
+
+          {result?.code_artifact ? (
+            <CodingArtifactPanel run={result.code_artifact} />
           ) : null}
 
           {result?.learning_native ? (

@@ -197,6 +197,7 @@ function baseResult(overrides: Record<string, unknown> = {}) {
       status: name === "run_scientific_tools" ? "skipped" : "completed",
       detail: `${name} done`,
     })),
+    code_artifact: null,
     learning_native: null,
     ...overrides,
   };
@@ -340,6 +341,35 @@ const GOLDEN_LOOP_STAGES: Array<{
           error_code: null,
         },
       ],
+      code_artifact: {
+        artifact: {
+          language: "python",
+          purpose: "rectangular barrier tunnelling T/R",
+          code: "import math\njoule_per_eV = 1.602176634e-19\nhbar = 1.054571817e-34\nm = 9.1093837015e-31\nE=5.0; V0=10.0; a=1e-10\nkappa = math.sqrt(2*m*(V0-E)*joule_per_eV)/hbar\nT = 1.0/(1.0 + (V0**2*math.sinh(kappa*a)**2)/(4*E*(V0-E)))\nprint('### METRICS_JSON: ' + str({'T': T, 'R': 1-T}))",
+          expected_outputs: ["T", "R", "conservation_error"],
+          verification_plan: "match oracle within 1e-6",
+        },
+        execution: {
+          completed: true,
+          exit_code: 0,
+          timed_out: false,
+          truncated: false,
+          stdout_bounded: "### METRICS_JSON: {\"T\": 0.333682, \"R\": 0.666318, \"conservation_error\": 0.0}",
+          stderr_bounded: "",
+          duration_seconds: 0.8,
+        },
+        verification: {
+          status: "pass",
+          oracle_kind: "rectangular_barrier_tunnelling",
+          agent_metrics: { T: 0.333682287217, R: 0.666317712783, conservation_error: 0.0 },
+          oracle_metrics: { T: 0.333682287217, R: 0.666317712783, conservation_error: 0.0 },
+          observations: ["Agent metrics match the oracle within tolerance."],
+          tolerance: 1e-6,
+        },
+        repairs: [],
+        progress: "result",
+        figure_png_base64: null,
+      },
       learning_native: {
         commitment: null,
         learning_action: "start_simulation",
@@ -359,6 +389,10 @@ const GOLDEN_LOOP_STAGES: Array<{
       await expect(page.getByText(/0\.333682/).first()).toBeVisible();
       await expect(page.getByText(/0\.666318/).first()).toBeVisible();
       await expect(page.getByText(/tunnelling/).first()).toBeVisible();
+      // PRD V3.1 §6: the Coding Agent panel renders with a PASS verdict.
+      await expect(page.getByTestId("coding-artifact")).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByTestId("coding-verification-status")).toContainText(/PASS/);
+      await expect(page.getByTestId("coding-generated-code")).toContainText(/METRICS_JSON/);
     },
   },
   {

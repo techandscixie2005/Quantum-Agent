@@ -276,3 +276,85 @@ Browser → Next.js → FastAPI → LangGraph (learning_native_pre → scientifi
 - **Live Golden Loop E2E 实跑**: 需 Docker Compose 栈 + 真实 USTC_API；本次审计未在真实栈上重新执行 `scripts/run-live-e2e.sh`。测试代码已升级为硬断言（Stage 3b 真实 barrier 工具），但需竞赛环境实际运行一次以证明端到端绿。
 - **增量 SSE 消费**: BFF 仍然全缓冲上游响应后重新发出（`readBoundedText`）。本次仅转发浏览器取消信号；真正的增量流式（`response.body.getReader()` 到浏览器）未实现，因为现有契约依赖完整事件文档解析后再重新发出，重写为增量流会破坏 `parseTeachingWorkflowOutcome` 的边界。竞赛期间 240s 超时 + 幂等键已足够可靠。
 - **Gateway/Router 重试预算上限**: 本次只加了 client_request_id 幂等；gateway 4×60s 每配置重试 + router 跨配置 fallback 的总预算上限未改动，因为现有 `_retry_transient` 已对 401/403 fail-fast，且幂等键防止了重放副作用。
+
+---
+
+# Quantum Agent V3.1 — Competition Freeze Implementation Report
+
+**生成日期**: 2026-08-28
+**触发**: PRD V3.1 Competition Freeze Edition — 两个 P0 缺口（真实 API Key 登录 + 真实 Coding Agent）
+**结论**: 两个 P0 已实现并测试通过；端到端 Golden Loop（含 Coding Agent）在确定性测试中全绿；live E2E 待真实栈验证。
+
+## 1. 架构变更
+
+### 1.1 API Key 登录 + 会话保险库 (PRD V3.1 §3)
+
+- 新增 `credential_vault.py`: `CredentialVault` 用 Fernet 加密用户提交的 USTC API Key，后端 Redis（TTL 8h）+ 内存后备。`store`/`load`/`forget` 以 `session_id` 为键；明文永不进入 PostgreSQL/日志/trace/响应。
+- 新增 `credential_router.py`: `CredentialScopedRouterFactory` 按 API Key SHA-256 摘要 LRU 缓存（上限 32）per-credential `ModelRouter`；`router_for_session` 从保险库解密密钥并构建/复用路由器；保险库无条目时回退到启动时的 `USTC_API` 环境变量网关（PRD §3.3 最后一 bullet）。
+- 重写 `api/auth.py`: 删除 `demo-login` 共享密钥端点；新增 `POST /api/v1/auth/login`（探测 USTC 模型服务验证 Key → mint 不透明会话 → Fernet 加密存入保险库 → 返回会话令牌）+ `POST /api/v1/auth/logout`（吊销会话 + 清除保险库条目）。IP 速率限制 10 次/5 分钟。
+- `config.py`: 新增 `session_vault_key`、`session_secret`（回退派生）、`redis_url`/`redis_host`/`redis_port`/`redis_password`、`session_ttl_seconds`、`coding_sandbox_enabled`、`ustc_code_model`、`login_course_email`；删除 `demo_login_secret`、`demo_login_course_email`。
+- `main.py`: 构建保险库 + `CredentialScopedRouterFactory` + sandbox + `CodingAgent`，存入 `app.state`；`TutorGraph` 接收 `coding_agent`/`sandbox`。
+- `api/teaching.py`: 新增 `_resolve_model_gateway_override` 依赖，按 `actor.session_id` 从保险库解析 per-session 网关，作为 `model_gateway_override` 传入 `TutorGraph.run`/`resume`。
+- `tutor/graph.py`: `run`/`resume` 接受可选 `model_gateway_override`；`_context` 用它替换 `self._model_gateway`。
+- `teaching/state_machine.py`: `run` 接受 `model_gateway_override`，在运行期间临时交换 `self._model_gateway`（try/finally 恢复）。
+- `cli.py`: `seed-demo-account` 重命名为 `seed-login-account`（保留旧名别名）；`demo_login_course_email` → `login_course_email`。
+- 前端: 新增 `app/api/auth/login/route.ts` + `app/api/auth/logout/route.ts`；删除 `app/api/auth/demo-login/`；`SessionRequiredView` 重写为 PRD §3.1 布局（连接中国科大 / 词元计划 · 一〇七杯 / API Key 输入 / 连接并进入学习空间）；状态指示器改为 "● 模型服务已连接"（`data-testid="model-service-status"`）。
+
+### 1.2 真实 Coding Agent + 沙箱 (PRD V3.1 §6)
+
+- `coding/models.py`: 新增 `CodeArtifactRun`（聚合 artifact + execution + verification + repairs + progress + figure）+ `CodingProgress` StrEnum（PLANNING/WRITING/RUNNING/VERIFYING/RESULT）。
+- `coding/sandbox.py`（新）: `SubprocessSandbox` 实现 `SandboxExecutor` 协议 + `execute_program_with_figure`。子进程 `preexec_fn` 设置 `RLIMIT_CPU`/`RLIMIT_FSIZE`/`RLIMIT_NOFILE`/`RLIMIT_NPROC`（故意不设 `RLIMIT_AS`——WSL2 上 OpenBLAS 会 OOM）；scrubbed env（无 `USTC_API`/secrets，`PYTHONPATH=""`，`MPLBACKEND=Agg`，`OMP_NUM_THREADS=1`）；私有 tmpdir；wall-time 超时 `os.killpg`；bounded stdout/stderr（8KB/4KB）；解析 `### METRICS_JSON:` 行；捕获 matplotlib figure 为 base64 PNG。`SandboxDisabled` no-op 抛错。永不伪造成功。
+- `coding/agent.py`（新）: `CodingAgent.solve` 循环——`structured_generate(task="generate_coding_artifact")` → `validate_code_safety` → `sandbox.execute_program_with_figure` → 失败则 `CodeRepairAttempt` 反馈（上限 2 次修复）→ 成功则用确定性 `RectangularBarrierRequest` oracle 交叉验证 T/R（容差 1e-6）→ `CodeVerificationResult(PASS/FAIL/INCONCLUSIVE/NO_ORACLE)`。永不把 FAIL 改写成 PASS。
+- `coding/safety.py`: 允许列表加入 `time`、`random`；解除 `matplotlib.pyplot` 阻止（沙箱强制 `MPLBACKEND=Agg`）。
+- `coding/__init__.py`: 修复破坏的导入，导出 `CodingAgent`/`SubprocessSandbox`/`SandboxDisabled`/`CodeArtifactRun`/`CodingProgress`。
+- `llm/routing.py`: 新增 `ModelTask.CODE` + `code_primary` profile（`ustc_code_model`/`glm-5.2`）+ `CODE` 路由（fallback `reasoning_primary`/`long_context_primary`）+ `_OPERATION_TASKS` 注册 `generate_coding_artifact`/`repair_coding_artifact`。
+- `tutor/state.py`: `TutorState` 新增 `code_artifact: CodeArtifactRun | None`；`TutorContext` 新增 `coding_agent`/`sandbox`。
+- `tutor/nodes.py`: `scientific_tools_node` 在确定性 oracle 运行后，若请求是计算型（`RectangularBarrierRequest`/`TwoLevelSimulationRequest`）且 `coding_agent` 可用，**同时**运行 Coding Agent（双路径），写入 `code_artifact`；trace 步骤仍为 `RUN_SCIENTIFIC_TOOLS`（不新增步骤，保持 10-step `WORKFLOW_ORDER` 不变量）。`assemble_result_node` 传递 `code_artifact` 到 `TeachingTurnResult`。
+- `teaching/models.py`: `TeachingTurnResult` 新增 `code_artifact: CodeArtifactRun | None = None`；`trace_has_fixed_order` 验证器不变。
+- 前端: `contracts.ts` 新增 `CodeArtifactRun`/`CodeArtifact`/`CodeExecutionResult`/`CodeVerificationResult`/`CodingProgress` 类型 + fail-closed 解析器（畸形时丢弃字段而非失败整轮）；`TeachingTurnResult` 新增 `code_artifact`；`CodingArtifactPanel.tsx`（新）渲染进度条 Planning→Writing→Running→Verifying→Result + 生成代码 + stdout + figure + 验证裁决；`AgentExperience.tsx` 在 `result.code_artifact` 存在时渲染面板。
+
+## 2. 质量门结果 (2026-08-28)
+
+| 门 | 结果 | 证据 |
+|---|---|---|
+| Python pytest | ✅ 282 passed, 2 skipped | 新增 27 个测试（vault/login/sandbox/agent/tutor-coding-node）；2 skipped 需 Docker live 服务 |
+| Ruff | ✅ All checks passed | |
+| mypy strict | ✅ Success: no issues found in 72 source files | |
+| TypeScript tsc --noEmit | ✅ 0 errors | |
+| 前端单元测试 | ✅ 58 passed | |
+| 前端 production build | ✅ Build complete | |
+| 确定性 Playwright E2E | ✅ 4 passed | golden-loop（含新 `coding-artifact` testid + PASS 裁决 + 生成代码断言）+ 3 learning-native |
+| secret scan | ✅ PASSED | 客户端 bundle 无敏感模式 |
+
+## 3. 新增/修改文件
+
+- 新增后端: `credential_vault.py`、`credential_router.py`、`coding/sandbox.py`、`coding/agent.py`、`api/auth.py`（重写）
+- 新增测试: `test_credential_vault.py`（9）、`test_auth_login.py`（5）、`test_coding_sandbox.py`（11）、`test_coding_agent.py`（6）、`test_tutor_coding_node.py`（1）
+- 新增前端: `app/api/auth/login/route.ts`、`app/api/auth/logout/route.ts`、`app/components/agent/CodingArtifactPanel.tsx`
+- 删除: `app/api/auth/demo-login/`、`tests/test_demo_login.py`
+- 修改: `config.py`（新设置 + 删 demo_login）、`gateways.py`（vault/sandbox/coding-agent 工厂）、`main.py`（接线）、`api/teaching.py`（per-session 网关解析）、`tutor/graph.py`/`tutor/state.py`/`tutor/nodes.py`（Coding Agent 集成 + 网关覆盖）、`teaching/models.py`/`teaching/state_machine.py`（code_artifact 字段 + 网关覆盖）、`llm/routing.py`（ModelTask.CODE）、`coding/models.py`/`coding/safety.py`/`coding/__init__.py`（CodeArtifactRun + 允许列表）、`cli.py`（seed-login-account）、`app/components/agent/AgentExperience.tsx`（API Key 登录 UI + CodingArtifactPanel 挂载）、`app/components/teaching/contracts.ts`（code_artifact 类型 + fail-closed 解析器）、`tests/e2e/golden-loop.spec.ts` + `tests/e2e/live/golden-loop-live.spec.ts`（coding-artifact 断言）、`compose.yaml` + `.env.example`（SESSION_VAULT_KEY/CODING_SANDBOX_ENABLED/LOGIN_COURSE_EMAIL）、`DEMO.md`（API Key 登录指南）
+
+## 4. Golden Loop 验证
+
+确定性 `golden-loop.spec.ts` 驱动完整序列：prediction + confidence → diagnosis → minimal hint → revised attempt → real simulation → probability verification → **Coding Agent 生成 Python + 沙箱执行 + 验证器 PASS** → prediction-vs-result comparison → student explanation → Teach-Back → transfer task → Solo Mode → Cognitive Mirror update。新断言：
+- `coding-artifact` 面板可见
+- `coding-verification-status` 包含 "PASS"
+- `coding-generated-code` 包含 "METRICS_JSON"
+- 既有 `tunnelling-metrics`（T=0.3337, R=0.6663, 守恒）保持绿
+
+`test_tutor_coding_node.py` 端到端验证：真实 `SubprocessSandbox` + `FakeModelGateway` + 真实 `ScientificToolbox` oracle → `result.code_artifact.verification.status == PASS`，agent T 与 oracle T 在 1e-6 内一致（均 ≈0.3337），`result.scientific_results[-1].metrics["T"] ≈ 0.3337`（双路径），trace 仍为 10 步。
+
+## 5. 已验证的 live 门 (2026-08-28)
+
+- **Live infra test**: ✅ 1 passed — PostgreSQL/pgvector/Neo4j/Redis + API 健康，migration 0007。
+- **Live USTC model smoke**: ✅ 1 passed (561s) — 真实模型调用（upload/tutor/HITL/trace）全绿。
+- **Live Golden Loop E2E**: ✅ 7 passed (20.5m) — `golden-loop-live` (12.0m, events 61→72, traces 52→60, mirrorVisible=true) + 4 agent-live + 2 visual-qa。真实浏览器驱动完整 Golden Loop：API 登录 → 隧穿问题 → commitment → evidence → diagnosis → minimal hint → **Coding Agent 生成 Python + 沙箱执行 + oracle PASS** → teach-back → transfer → solo → cognitive mirror，PostgreSQL 持久化验证。
+
+## 6. 未覆盖项（DEFERRED）
+
+- **增量 SSE 消费**: BFF 仍然全缓冲（V3.0.1 deferred 项）。Coding UX 进度条由 `code_artifact.progress` + `repairs.length` 重建，非实时流。
+- **RLIMIT_AS**: WSL2 上 OpenBLAS 与 RLIMIT_AS 不兼容，故沙箱不设地址空间上限；改用 wall-time + RLIMIT_CPU + bounded output 约束。生产环境（非 WSL2）可重新启用。
+
+## 7. Git 提交
+
+V3.1 commit: `081be20` (feat: V3.1 Competition Freeze — API-key login + real Coding Agent)，分支 `main`。所有质量门全绿（282 pytest / ruff / mypy / 58 前端单元 / tsc / build / 4 确定性 Playwright / 7 live Playwright / live infra / live model smoke / secret scan）。

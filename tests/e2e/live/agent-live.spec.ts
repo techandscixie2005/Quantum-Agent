@@ -187,7 +187,7 @@ test.describe.serial("Quantum Agent live competition workflow", () => {
     await page.goto("/agent");
     await expect(page.getByTestId("agent-experience")).toBeVisible();
     await expect(page.getByRole("heading", { name: "推导工作台" })).toBeVisible();
-    await expect(page.getByText("课程证据在线")).toBeVisible();
+    await expect(page.getByTestId("model-service-status")).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByRole("button", { name: "打开课程导航" })).toBeVisible();

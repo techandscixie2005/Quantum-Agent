@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+from pydantic import SecretStr
+
+from quantum_agent.coding import CodingAgent, SandboxDisabled, SubprocessSandbox
 from quantum_agent.config import Settings
+from quantum_agent.credential_router import CredentialScopedRouterFactory
+from quantum_agent.credential_vault import (
+    CredentialVault,
+)
+from quantum_agent.credential_vault import (
+    build_credential_vault as _build_credential_vault,
+)
 from quantum_agent.knowledge.graph_store import GraphStore, Neo4jGraphStore
 from quantum_agent.llm.embeddings import (
     EmbeddingGateway,
@@ -17,6 +27,7 @@ from quantum_agent.llm.routing import (
     ModelTask,
 )
 from quantum_agent.llm.vision import VisionGateway
+from quantum_agent.science import ScientificToolbox
 
 
 def build_model_capability_registry(settings: Settings) -> ModelCapabilityRegistry:
@@ -28,6 +39,7 @@ def build_model_capability_registry(settings: Settings) -> ModelCapabilityRegist
         second_pass_model=settings.ustc_second_pass_model,
         vision_model=settings.ustc_vision_model,
         long_context_model=settings.ustc_long_context_model,
+        code_model=settings.ustc_code_model,
         embedding_model=settings.ustc_embedding_route_model,
         rerank_model=settings.ustc_rerank_model,
         document_parser_model=settings.ustc_document_parser_model,
@@ -100,11 +112,90 @@ def build_graph_store(settings: Settings) -> GraphStore | None:
     )
 
 
+def build_credential_vault(settings: Settings) -> CredentialVault | None:
+    """Build the encrypted session vault for user-supplied API keys.
+
+    Returns None when ``SESSION_VAULT_KEY`` (or the ``SESSION_SECRET`` fallback)
+    is unset — the caller then uses the startup ``USTC_API`` env key for all
+    sessions (PRD §3.3 dev/deploy fallback).
+    """
+
+    return _build_credential_vault(
+        fernet_key=settings.session_vault_key,
+        redis_url=settings.effective_redis_url,
+        ttl_seconds=settings.session_ttl_seconds,
+    )
+
+
+def build_per_credential_gateway(
+    *,
+    api_key: SecretStr,
+    profile: ModelProfile,
+    base_url: str,
+) -> ModelGateway:
+    """Build a ``PydanticAIModelGateway`` for one credential + profile.
+
+    Used by :class:`CredentialScopedRouterFactory` to construct per-session
+    routers whose gateways use the user-supplied API key.
+    """
+
+    return PydanticAIModelGateway(
+        api_key=api_key,
+        base_url=base_url,
+        default_model=profile.provider_model,
+        small_model=profile.provider_model,
+    )
+
+
+def build_credential_router_factory(
+    settings: Settings,
+    *,
+    registry: ModelCapabilityRegistry,
+    fallback_router: ModelRouter | None,
+    vault: CredentialVault | None,
+) -> CredentialScopedRouterFactory:
+    """Build the per-session ModelRouter cache backed by the credential vault."""
+
+    return CredentialScopedRouterFactory(
+        registry=registry,
+        gateway_factory=build_per_credential_gateway,
+        fallback_router=fallback_router,
+        vault=vault,
+        base_url=settings.ustc_base_url,
+    )
+
+
+def build_sandbox(settings: Settings) -> SubprocessSandbox | SandboxDisabled:
+    """Build the Coding Agent subprocess sandbox (PRD V3.1 §6.2)."""
+
+    if not settings.coding_sandbox_enabled:
+        return SandboxDisabled()
+    return SubprocessSandbox()
+
+
+def build_coding_agent(
+    settings: Settings,
+    *,
+    sandbox: SubprocessSandbox | SandboxDisabled,
+    toolbox: ScientificToolbox | None = None,
+) -> CodingAgent | None:
+    """Build the Coding Agent.  Returns None only when the sandbox is disabled
+    and the caller wants to skip the agent entirely (by default the agent is
+    still built and degrades to ``INCONCLUSIVE`` when the sandbox is disabled)."""
+
+    return CodingAgent(sandbox=sandbox, toolbox=toolbox)
+
+
 __all__ = [
+    "build_coding_agent",
+    "build_credential_router_factory",
+    "build_credential_vault",
     "build_embedding_gateway",
     "build_graph_store",
     "build_model_capability_registry",
     "build_model_gateway",
     "build_model_router",
+    "build_per_credential_gateway",
+    "build_sandbox",
     "build_vision_gateway",
 ]

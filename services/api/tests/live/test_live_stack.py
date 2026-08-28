@@ -59,7 +59,7 @@ async def test_compose_dependencies_are_real_healthy_and_migrated() -> None:
                 await connection.scalar(text("SELECT count(*) FROM student_visible_chunks")) or 0
             )
         assert vector_version is not None
-        assert migration == "0005"
+        assert migration == "0007"
         assert checkpoint_tables == {
             "checkpoints",
             "checkpoint_blobs",

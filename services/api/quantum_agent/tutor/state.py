@@ -9,6 +9,12 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from quantum_agent.auth import CourseActor
+from quantum_agent.coding import (
+    CodeArtifactRun,
+    CodingAgent,
+    SandboxDisabled,
+    SubprocessSandbox,
+)
 from quantum_agent.knowledge.evidence_packets import EvidencePacket
 from quantum_agent.llm.gateway import ModelGateway
 from quantum_agent.multimodal.contracts import ConfirmedEvidence
@@ -50,6 +56,8 @@ class TutorContext:
     started_turn: StartedTeachingTurn
     use_specialist_agents: bool = False
     enable_hitl: bool = False
+    coding_agent: CodingAgent | None = None
+    sandbox: SubprocessSandbox | SandboxDisabled | None = None
 
 
 class TutorState(TypedDict, total=False):
@@ -88,6 +96,14 @@ class TutorState(TypedDict, total=False):
     solo_assistance_locked: bool
     learning_native_pre_decision: dict[str, object] | None
     answer_withheld_by_gate: bool
+
+    # PRD V3.1 §6: Coding Agent artifact.  When the scientific request is a
+    # computation-bearing kind, the Coding Agent writes fresh Python, runs it
+    # in the sandbox, and cross-checks against the deterministic oracle.  The
+    # artifact is surfaced to the frontend for the Coding UX strip; the
+    # 10-step workflow trace is unchanged (the agent runs inside the existing
+    # ``scientific_tools`` node).
+    code_artifact: CodeArtifactRun | None
 
     # durable result
     result: TeachingTurnResult | None

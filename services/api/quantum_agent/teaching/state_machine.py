@@ -466,8 +466,32 @@ class TeachingStateMachine:
         actor: CourseActor,
         curriculum_edition_id: UUID,
         request: TeachingTurnInput,
+        model_gateway_override: ModelGateway | None = None,
     ) -> TeachingTurnResult:
         repository = TeachingRepository(session)
+        # PRD V3.1 §3.2: honor a per-session credential override when supplied.
+        # The state machine is the legacy/test path; the authoritative
+        # TutorGraph handles the override in its own ``_context``.  We swap
+        # the gateway for the duration of this run and restore it after so
+        # concurrent runs on the same machine are not affected.
+        original_gateway = self._model_gateway
+        if model_gateway_override is not None:
+            self._model_gateway = model_gateway_override
+        try:
+            return await self._run_with_gateway(
+                repository, session, actor, curriculum_edition_id, request
+            )
+        finally:
+            self._model_gateway = original_gateway
+
+    async def _run_with_gateway(
+        self,
+        repository: TeachingRepository,
+        session: AsyncSession,
+        actor: CourseActor,
+        curriculum_edition_id: UUID,
+        request: TeachingTurnInput,
+    ) -> TeachingTurnResult:
         started = await repository.start_turn(
             actor=actor,
             curriculum_edition_id=curriculum_edition_id,

@@ -30,6 +30,7 @@ from quantum_agent.db_models import (
     TeachingMode,
 )
 from quantum_agent.knowledge.retrieval import RetrievalError
+from quantum_agent.llm.gateway import ModelGateway
 from quantum_agent.multimodal.teaching import (
     TeachingAttachmentConflictError,
     TeachingAttachmentNotFoundError,
@@ -67,6 +68,7 @@ class TeachingWorkflow(Protocol):
         actor: CourseActor,
         curriculum_edition_id: UUID,
         request: TeachingTurnInput,
+        model_gateway_override: ModelGateway | None = None,
     ) -> TeachingTurnResult | HitlInterruptResponse: ...
 
     async def inspect_interrupt(
@@ -86,6 +88,7 @@ class TeachingWorkflow(Protocol):
         curriculum_edition_id: UUID,
         conversation_id: UUID,
         request: HitlResumeRequest,
+        model_gateway_override: ModelGateway | None = None,
     ) -> TeachingTurnResult | HitlInterruptResponse | HitlRejectedResponse: ...
 
 
@@ -121,6 +124,30 @@ async def _actor(
     )
 
 
+async def _resolve_model_gateway_override(
+    request: Request,
+    actor: CourseActor,
+) -> ModelGateway | None:
+    """Resolve the per-session ModelGateway from the credential vault.
+
+    PRD V3.1 §3.2: every agent call uses the session's API key through the
+    central ModelGateway.  When the vault has a key for this session, we
+    return a cached per-credential ``ModelRouter``; otherwise we return None
+    so the graph falls back to the startup ``USTC_API`` env gateway.
+    """
+
+    factory = getattr(request.app.state, "credential_router_factory", None)
+    if factory is None:
+        return None
+    try:
+        router: ModelGateway | None = await factory.router_for_session(actor.session_id)
+        return router
+    except Exception:
+        # Never let a vault lookup failure crash the turn; the fallback
+        # gateway will be used.
+        return None
+
+
 TeachingApiOutcome = TeachingTurnResult | HitlInterruptResponse | HitlRejectedResponse
 
 
@@ -150,12 +177,14 @@ async def run_teaching_turn(
     machine: TeachingMachine,
 ) -> TeachingTurnResult | HitlInterruptResponse:
     actor = await _actor(request, session, course_id)
+    gateway_override = await _resolve_model_gateway_override(request, actor)
     try:
         result = await machine.run(
             session=session,
             actor=actor,
             curriculum_edition_id=curriculum_edition_id,
             request=body,
+            model_gateway_override=gateway_override,
         )
         await session.commit()
         if isinstance(result, HitlInterruptResponse):
@@ -193,6 +222,7 @@ async def stream_teaching_turn(
     machine: TeachingMachine,
 ) -> StreamingResponse:
     actor = await _actor(request, session, course_id)
+    gateway_override = await _resolve_model_gateway_override(request, actor)
 
     async def events() -> AsyncIterator[str]:
         yield _sse(
@@ -205,6 +235,7 @@ async def stream_teaching_turn(
                 actor=actor,
                 curriculum_edition_id=curriculum_edition_id,
                 request=body,
+                model_gateway_override=gateway_override,
             )
             await session.commit()
             if isinstance(result, HitlInterruptResponse):
@@ -288,6 +319,7 @@ async def resume_teaching_interrupt(
     machine: TeachingMachine,
 ) -> TeachingApiOutcome:
     actor = await _actor(request, session, course_id)
+    gateway_override = await _resolve_model_gateway_override(request, actor)
     resume = getattr(machine, "resume", None)
     if not callable(resume):
         raise HTTPException(
@@ -303,6 +335,7 @@ async def resume_teaching_interrupt(
                 curriculum_edition_id=curriculum_edition_id,
                 conversation_id=conversation_id,
                 request=body,
+                model_gateway_override=gateway_override,
             ),
         )
         await session.commit()

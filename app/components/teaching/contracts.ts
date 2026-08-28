@@ -271,6 +271,58 @@ export type ScientificResult = Readonly<{
   error_code: string | null;
 }>;
 
+// PRD V3.1 §6: Coding Agent artifact types.  The agent writes fresh Python,
+// runs it in the sandbox, and cross-checks against the deterministic oracle.
+// These mirror services/api/quantum_agent/coding/models.py.
+
+export type CodeLanguage = "python";
+
+export type CodeArtifact = Readonly<{
+  language: CodeLanguage;
+  purpose: string;
+  code: string;
+  expected_outputs: readonly string[];
+  verification_plan: string;
+}>;
+
+export type CodeExecutionResult = Readonly<{
+  completed: boolean;
+  exit_code: number | null;
+  timed_out: boolean;
+  truncated: boolean;
+  stdout_bounded: string;
+  stderr_bounded: string;
+  duration_seconds: number;
+}>;
+
+export type CodeVerificationStatus = "pass" | "fail" | "inconclusive" | "no_oracle";
+
+export type CodeVerificationResult = Readonly<{
+  status: CodeVerificationStatus;
+  oracle_kind: string | null;
+  agent_metrics: Readonly<Record<string, string | number | boolean>>;
+  oracle_metrics: Readonly<Record<string, string | number | boolean>>;
+  observations: readonly string[];
+  tolerance: number;
+}>;
+
+export type CodeRepairAttempt = Readonly<{
+  attempt_number: number;
+  failure_summary: string;
+  stderr_excerpt: string;
+}>;
+
+export type CodingProgress = "planning" | "writing" | "running" | "verifying" | "result";
+
+export type CodeArtifactRun = Readonly<{
+  artifact: CodeArtifact;
+  execution: CodeExecutionResult;
+  verification: CodeVerificationResult;
+  repairs: readonly CodeRepairAttempt[];
+  progress: CodingProgress;
+  figure_png_base64: string | null;
+}>;
+
 export type SupportBasis =
   | "course_material"
   | "symbolic_verification"
@@ -501,6 +553,7 @@ export type TeachingTurnResult = Readonly<{
     warnings: readonly string[];
   }>;
   scientific_results: readonly ScientificResult[];
+  code_artifact: CodeArtifactRun | null;
   trace: readonly Readonly<{
     name: WorkflowStepName;
     status: WorkflowStepStatus;
@@ -610,6 +663,13 @@ function text(value: unknown, path: string, max = 20_000): string {
 
 function nullableText(value: unknown, path: string, max = 20_000): string | null {
   return value === null ? null : text(value, path, max);
+}
+
+function boundedTextAllowEmpty(value: unknown, path: string, max: number): string {
+  if (typeof value !== "string" || value.length > max) {
+    return fail(path, `a string of 0–${max} characters`);
+  }
+  return value;
 }
 
 function bool(value: unknown, path: string): boolean {
@@ -2255,12 +2315,78 @@ export function parseTeachingTurnResult(value: unknown): TeachingTurnResult {
     },
     validation,
     scientific_results: scientificResults,
+    code_artifact: parseCodeArtifactRun(input.code_artifact),
     trace,
     learning_native:
       input.learning_native === undefined || input.learning_native === null
         ? null
         : parseLearningNativeTurnState(input.learning_native, "turnResult.learning_native"),
   };
+}
+
+function parseCodeArtifactRun(value: unknown): CodeArtifactRun | null {
+  if (value === undefined || value === null) return null;
+  // Fail-closed: a malformed artifact is dropped rather than failing the
+  // whole turn, so a Coding Agent hiccup can never break the Golden Loop.
+  try {
+    const input = record(value, "turnResult.code_artifact");
+    const artifact = record(input.artifact, "turnResult.code_artifact.artifact");
+    const execution = record(input.execution, "turnResult.code_artifact.execution");
+    const verification = record(input.verification, "turnResult.code_artifact.verification");
+    const repairs = Array.isArray(input.repairs) ? input.repairs : [];
+    return {
+      artifact: {
+        language: oneOf(artifact.language, ["python"] as const, "turnResult.code_artifact.artifact.language"),
+        purpose: text(artifact.purpose, "turnResult.code_artifact.artifact.purpose", 600),
+        code: text(artifact.code, "turnResult.code_artifact.artifact.code", 20_000),
+        expected_outputs: strings(artifact.expected_outputs, "turnResult.code_artifact.artifact.expected_outputs", 8, 200),
+        verification_plan: text(artifact.verification_plan, "turnResult.code_artifact.artifact.verification_plan", 600),
+      },
+      execution: {
+        completed: bool(execution.completed, "turnResult.code_artifact.execution.completed"),
+        exit_code: execution.exit_code === null || execution.exit_code === undefined ? null : Number(execution.exit_code),
+        timed_out: bool(execution.timed_out, "turnResult.code_artifact.execution.timed_out"),
+        truncated: bool(execution.truncated, "turnResult.code_artifact.execution.truncated"),
+        stdout_bounded: boundedTextAllowEmpty(execution.stdout_bounded, "turnResult.code_artifact.execution.stdout_bounded", 8_000),
+        stderr_bounded: boundedTextAllowEmpty(execution.stderr_bounded, "turnResult.code_artifact.execution.stderr_bounded", 4_000),
+        duration_seconds: bounded(Number(execution.duration_seconds ?? 0), "turnResult.code_artifact.execution.duration_seconds", 0, 600),
+      },
+      verification: {
+        status: oneOf(verification.status, ["pass", "fail", "inconclusive", "no_oracle"] as const, "turnResult.code_artifact.verification.status"),
+        oracle_kind: verification.oracle_kind === null || verification.oracle_kind === undefined ? null : text(verification.oracle_kind, "turnResult.code_artifact.verification.oracle_kind", 80),
+        agent_metrics: recordMetrics(verification.agent_metrics, "turnResult.code_artifact.verification.agent_metrics"),
+        oracle_metrics: recordMetrics(verification.oracle_metrics, "turnResult.code_artifact.verification.oracle_metrics"),
+        observations: strings(verification.observations, "turnResult.code_artifact.verification.observations", 12, 1_000),
+        tolerance: bounded(Number(verification.tolerance ?? 1e-6), "turnResult.code_artifact.verification.tolerance", 0, 1),
+      },
+      repairs: repairs.map((repair, index) => {
+        const r = record(repair, `turnResult.code_artifact.repairs[${index}]`);
+        return {
+          attempt_number: integer(r.attempt_number, `turnResult.code_artifact.repairs[${index}].attempt_number`),
+          failure_summary: text(r.failure_summary, `turnResult.code_artifact.repairs[${index}].failure_summary`, 1_000),
+          stderr_excerpt: text(r.stderr_excerpt, `turnResult.code_artifact.repairs[${index}].stderr_excerpt`, 1_000),
+        };
+      }),
+      progress: oneOf(input.progress, ["planning", "writing", "running", "verifying", "result"] as const, "turnResult.code_artifact.progress"),
+      figure_png_base64:
+        input.figure_png_base64 === null || input.figure_png_base64 === undefined
+          ? null
+          : text(input.figure_png_base64, "turnResult.code_artifact.figure_png_base64", 200_000),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function recordMetrics(value: unknown, path: string): Readonly<Record<string, string | number | boolean>> {
+  const input = record(value, path);
+  const out: Record<string, string | number | boolean> = {};
+  for (const [key, val] of Object.entries(input)) {
+    if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
+      out[key] = val;
+    }
+  }
+  return out;
 }
 
 function parseLearningNativeTurnState(value: unknown, path: string): LearningNativeTurnState {

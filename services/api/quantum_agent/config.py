@@ -82,17 +82,49 @@ class Settings(BaseSettings):
         default="glm-5.2",
         validation_alias="USTC_MODEL_CODE",
     )
-    # PRD V3.0 P1-4: demo-account bootstrap.  When ``DEMO_LOGIN_SECRET`` is
-    # set, the ``/api/v1/auth/demo-login`` endpoint issues a short-lived
-    # student session for the competition demo account in exchange for the
-    # shared secret.  This lets a judge enter /agent without manual SQL or
-    # cookie injection.  When unset, the endpoint refuses all requests.
-    demo_login_secret: SecretStr | None = Field(
-        default=None, validation_alias="DEMO_LOGIN_SECRET"
+    # PRD V3.1 §6: the Coding Agent routes its code-generation calls to this
+    # model.  Defaults to the long-context/code model alias already wired in
+    # compose.yaml; override with ``USTC_MODEL_CODE`` if a dedicated coding
+    # model becomes available.
+    ustc_code_model: str = Field(
+        default="glm-5.2",
+        validation_alias="USTC_MODEL_CODE_AGENT",
     )
-    demo_login_course_email: str = Field(
+    # PRD V3.1 §3.3: server-side session vault for user-supplied API keys.
+    # The key is encrypted at rest with Fernet; ``SESSION_VAULT_KEY`` is the
+    # 32-byte urlsafe Fernet key.  When unset, the vault falls back to a
+    # derivation from ``SESSION_SECRET`` (legacy var kept for compatibility),
+    # and when neither is set the vault is disabled and the startup
+    # ``USTC_API`` env key is used for all sessions (dev/deploy fallback).
+    session_vault_key: SecretStr | None = Field(
+        default=None, validation_alias="SESSION_VAULT_KEY"
+    )
+    session_secret: SecretStr | None = Field(
+        default=None, validation_alias="SESSION_SECRET"
+    )
+    redis_url: str | None = Field(
+        default=None,
+        validation_alias="REDIS_URL",
+    )
+    session_ttl_seconds: int = Field(
+        default=28_800,
+        ge=60,
+        le=86400,
+        validation_alias="SESSION_TTL_SECONDS",
+    )
+    coding_sandbox_enabled: bool = Field(
+        default=True,
+        validation_alias="CODING_SANDBOX_ENABLED",
+    )
+    # PRD V3.1 §3: API-key login.  A student enters their 词元计划/一〇七杯
+    # API key; the backend probes the USTC model service, mints an opaque
+    # session, and stores the Fernet-encrypted key in the session vault.
+    # ``login_course_email`` identifies the find-or-create demo student the
+    # API-key login binds to (the seeded competition account).  The legacy
+    # shared-secret demo-login has been removed.
+    login_course_email: str = Field(
         default="demo-student@quantum-agent.local",
-        validation_alias="DEMO_LOGIN_COURSE_EMAIL",
+        validation_alias="LOGIN_COURSE_EMAIL",
     )
     ustc_embedding_route_model: str = Field(
         default="qwen3-embedding",
@@ -195,6 +227,7 @@ class Settings(BaseSettings):
         "ustc_quick_model",
         "ustc_second_pass_model",
         "ustc_long_context_model",
+        "ustc_code_model",
         "ustc_embedding_route_model",
         "ustc_rerank_model",
         "ustc_document_parser_model",
@@ -231,11 +264,53 @@ class Settings(BaseSettings):
             raise ValueError(
                 "ATTACHMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES must be at least ATTACHMENT_MAX_BYTES"
             )
+        # PRD V3.1 §3.3: derive the session vault key from SESSION_SECRET
+        # when SESSION_VAULT_KEY is unset, so deployments that already set
+        # SESSION_SECRET get a working vault without a new secret.  The vault
+        # is disabled (None) only when neither is set (or both are empty).
+        if (
+            self.session_vault_key is None
+            and self.session_secret is not None
+            and self.session_secret.get_secret_value().strip()
+        ):
+            self.session_vault_key = self.session_secret
+        if (
+            self.session_vault_key is not None
+            and not self.session_vault_key.get_secret_value().strip()
+        ):
+            self.session_vault_key = None
         return self
 
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite+aiosqlite://")
+
+    @property
+    def effective_redis_url(self) -> str | None:
+        """Resolve the Redis URL for the session vault.
+
+        ``REDIS_URL`` wins when set; otherwise build a ``redis://`` URL from
+        the ``REDIS_HOST`` / ``REDIS_PORT`` / ``REDIS_PASSWORD`` vars already
+        used by compose.  Returns None when no Redis configuration is present
+        (the vault then falls back to its in-memory backend).
+        """
+
+        if self.redis_url is not None:
+            return self.redis_url
+        if self.redis_host is None:
+            return None
+        auth = (
+            f":{self.redis_password.get_secret_value()}@"
+            if self.redis_password is not None
+            else ""
+        )
+        return f"redis://{auth}{self.redis_host}:{self.redis_port or 6379}/0"
+
+    redis_host: str | None = Field(default=None, validation_alias="REDIS_HOST")
+    redis_port: int | None = Field(default=None, validation_alias="REDIS_PORT")
+    redis_password: SecretStr | None = Field(
+        default=None, validation_alias="REDIS_PASSWORD"
+    )
 
 
 @lru_cache(maxsize=1)

@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from quantum_agent.coding import CodeArtifactRun
 from quantum_agent.db_models import (
     AnswerReleaseLevel,
     TeachingAction,
@@ -389,6 +390,7 @@ class TeachingTurnResult(BaseModel):
     response: TeachingResponse
     validation: ValidationReport
     scientific_results: list[ScientificVerificationResult] = Field(default_factory=list)
+    code_artifact: CodeArtifactRun | None = None
     trace: list[WorkflowStep]
     learning_native: LearningNativeTurnState | None = None
 

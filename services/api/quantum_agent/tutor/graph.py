@@ -19,6 +19,7 @@ from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from quantum_agent.auth import TEACHING_STAFF_ROLES, CourseActor
+from quantum_agent.coding import CodingAgent, SandboxDisabled, SubprocessSandbox
 from quantum_agent.db_models import CourseRole, TeachingTurnStatus
 from quantum_agent.llm.gateway import ModelGateway
 from quantum_agent.multimodal.teaching import (
@@ -93,6 +94,8 @@ class TutorGraph:
         checkpointer: BaseCheckpointSaver[str] | None = None,
         use_specialist_agents: bool = False,
         enable_hitl: bool = False,
+        coding_agent: CodingAgent | None = None,
+        sandbox: SubprocessSandbox | SandboxDisabled | None = None,
     ) -> None:
         if enable_hitl and checkpointer is None:
             raise ValueError("HITL requires a durable or in-memory LangGraph checkpointer")
@@ -102,6 +105,8 @@ class TutorGraph:
         self._use_specialist_agents = use_specialist_agents
         self._enable_hitl = enable_hitl
         self._has_checkpointer = checkpointer is not None
+        self._coding_agent = coding_agent
+        self._sandbox = sandbox
 
         builder = StateGraph(TutorState, context_schema=TutorContext)
         builder.add_node("interpret", interpret_node)
@@ -151,6 +156,7 @@ class TutorGraph:
         actor: CourseActor,
         curriculum_edition_id: UUID,
         request: TeachingTurnInput,
+        model_gateway_override: ModelGateway | None = None,
     ) -> TeachingTurnResult | HitlInterruptResponse:
         resolved = await resolve_teaching_attachments(
             session,
@@ -209,6 +215,7 @@ class TutorGraph:
             "solo_assistance_locked": False,
             "learning_native_pre_decision": None,
             "answer_withheld_by_gate": False,
+            "code_artifact": None,
             "result": None,
         }
         context = self._context(
@@ -216,6 +223,7 @@ class TutorGraph:
             actor=actor,
             curriculum_edition_id=curriculum_edition_id,
             started=started,
+            model_gateway_override=model_gateway_override,
         )
         config = self._config(started.conversation.id)
 
@@ -243,17 +251,20 @@ class TutorGraph:
         actor: CourseActor,
         curriculum_edition_id: UUID,
         started: StartedTeachingTurn,
+        model_gateway_override: ModelGateway | None = None,
     ) -> TutorContext:
         return TutorContext(
             session=session,
             actor=actor,
             curriculum_edition_id=curriculum_edition_id,
             retriever=self._evidence_retriever,
-            model_gateway=self._model_gateway,
+            model_gateway=model_gateway_override or self._model_gateway,
             scientific_toolbox=self._scientific_toolbox,
             started_turn=started,
             use_specialist_agents=self._use_specialist_agents,
             enable_hitl=self._enable_hitl,
+            coding_agent=self._coding_agent,
+            sandbox=self._sandbox,
         )
 
     @staticmethod
@@ -396,6 +407,7 @@ class TutorGraph:
         curriculum_edition_id: UUID,
         conversation_id: UUID,
         request: HitlResumeRequest,
+        model_gateway_override: ModelGateway | None = None,
     ) -> TeachingTurnResult | TeachingTurnOutcome:
         if not self._enable_hitl:
             raise HitlNotFoundError("HITL is disabled for this workflow")
@@ -441,6 +453,7 @@ class TutorGraph:
             actor=student_actor,
             curriculum_edition_id=curriculum_edition_id,
             started=started,
+            model_gateway_override=model_gateway_override,
         )
         outcome = await self._graph.ainvoke(
             Command(resume=resolution.model_dump(mode="json")),

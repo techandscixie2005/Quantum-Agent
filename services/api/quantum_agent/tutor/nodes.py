@@ -14,6 +14,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import interrupt
 from pydantic import TypeAdapter
 
+from quantum_agent.coding import CodeGenerationTask
 from quantum_agent.db_models import AnswerReleaseLevel, LearningEvidenceKind
 from quantum_agent.knowledge.retrieval import RetrievalScope
 from quantum_agent.multimodal.contracts import ConfirmedEvidence
@@ -23,6 +24,11 @@ from quantum_agent.multimodal.teaching import (
     derive_scientific_request,
 )
 from quantum_agent.science import ScientificVerificationStatus
+from quantum_agent.science.models import (
+    CodeTestRequest,
+    RectangularBarrierRequest,
+    TwoLevelSimulationRequest,
+)
 from quantum_agent.teaching.agents import DiagnosisAgent, DiagnosisInput, EvidenceAgent
 from quantum_agent.teaching.hitl import (
     HitlAction,
@@ -52,6 +58,7 @@ from quantum_agent.teaching.models import (
     SoloModeStatus,
     StudentSnapshot,
     TeachBackAnalysis,
+    TeachingTurnInput,
     TransferTask,
     TransferType,
     ValidationReport,
@@ -261,6 +268,56 @@ async def apply_policy_node(
     return {"policy": policy, "release": release, "trace": trace}
 
 
+def _coding_task_from_request(
+    request: TeachingTurnInput,
+    scientific_request: object,
+) -> CodeGenerationTask | None:
+    """Build a Coding Agent brief from the scientific request, when supported.
+
+    The Coding Agent writes fresh Python for computation-bearing requests
+    (rectangular barrier, two-level simulation, code tests).  The
+    deterministic oracle still runs independently and serves as the
+    verification cross-check.
+    """
+
+    student_question = request.message
+    if isinstance(scientific_request, RectangularBarrierRequest):
+        return CodeGenerationTask(
+            student_question=student_question,
+            learning_goal=(
+                "Compute the rectangular-barrier transmission T and reflection R "
+                "and compare to the student's prediction."
+            ),
+            known_variables={
+                "energy_eV": str(scientific_request.energy_eV),
+                "barrier_height_eV": str(scientific_request.barrier_height_eV),
+                "barrier_width_m": str(scientific_request.barrier_width_m),
+                "particle_mass_kg": str(scientific_request.particle_mass_kg),
+                "conservation_tolerance": str(scientific_request.conservation_tolerance),
+            },
+            required_outputs=["T", "R", "conservation_error"],
+            allowed_libraries=("numpy", "math", "cmath"),
+            oracle_kind="rectangular_barrier_tunnelling",
+        )
+    if isinstance(scientific_request, TwoLevelSimulationRequest):
+        return CodeGenerationTask(
+            student_question=student_question,
+            learning_goal=(
+                "Simulate the two-level system dynamics and report the final populations."
+            ),
+            known_variables={
+                "rabi_frequency": str(scientific_request.rabi_frequency),
+                "detuning": str(scientific_request.detuning),
+                "duration": str(scientific_request.duration),
+                "steps": str(scientific_request.steps),
+            },
+            required_outputs=["population_ground", "population_excited"],
+            allowed_libraries=("numpy", "scipy", "math"),
+            oracle_kind="two_level_simulation",
+        )
+    return None
+
+
 async def scientific_tools_node(
     state: TutorState,
     runtime: Runtime[TutorContext],
@@ -275,6 +332,7 @@ async def scientific_tools_node(
         AnswerReleaseLevel.FULL_EXPLANATION,
         AnswerReleaseLevel.FULL_SOLUTION,
     }
+    code_artifact: dict[str, Any] | None = None
     if request.scientific_request is None:
         has_visual_derivation = any(
             item.evidence_type == "visual" and item.admitted_to_diagnosis
@@ -303,6 +361,40 @@ async def scientific_tools_node(
             request.scientific_request,
         )
         scientific_results.append(tool_result)
+        # PRD V3.1 §6: also run the Coding Agent for computation-bearing
+        # requests so the student sees a fresh, agent-written program
+        # alongside the deterministic oracle cross-check.  Both paths run;
+        # the oracle result remains authoritative.
+        coding_agent = runtime.context.coding_agent
+        gateway = runtime.context.model_gateway
+        coding_task = _coding_task_from_request(request, request.scientific_request)
+        if (
+            coding_agent is not None
+            and gateway is not None
+            and coding_task is not None
+            and not isinstance(request.scientific_request, CodeTestRequest)
+        ):
+            try:
+                run = await coding_agent.solve(coding_task, gateway=gateway)
+                code_artifact = run.model_dump(mode="json")
+                coding_detail = (
+                    f"Coding Agent wrote {len(run.artifact.code)} chars of Python; "
+                    f"verifier status={run.verification.status.value}; "
+                    f"repairs={len(run.repairs)}."
+                )
+            except Exception as exc:  # never let the coding agent crash the turn
+                coding_detail = (
+                    f"Coding Agent failed: {type(exc).__name__}; "
+                    "deterministic oracle result still stands."
+                )
+        else:
+            coding_detail = ""
+        detail = (
+            f"{tool_result.method.value} verification completed with "
+            f"status={tool_result.status.value}."
+        )
+        if coding_detail:
+            detail = f"{detail} {coding_detail}"
         tool_step = WorkflowStep(
             name=WorkflowStepName.RUN_SCIENTIFIC_TOOLS,
             status=(
@@ -310,14 +402,14 @@ async def scientific_tools_node(
                 if tool_result.status is ScientificVerificationStatus.INCONCLUSIVE
                 else WorkflowStepStatus.COMPLETED
             ),
-            detail=(
-                f"{tool_result.method.value} verification completed with "
-                f"status={tool_result.status.value}."
-            ),
+            detail=detail,
         )
     trace = list(state.get("trace", []))
     trace.append(tool_step)
-    return {"scientific_results": scientific_results, "trace": trace}
+    update: dict[str, Any] = {"scientific_results": scientific_results, "trace": trace}
+    if code_artifact is not None:
+        update["code_artifact"] = code_artifact
+    return update
 
 
 async def learning_native_pre_node(
@@ -814,6 +906,7 @@ async def assemble_result_node(
         response=state["response"],
         validation=state["validation"],
         scientific_results=state["scientific_results"],
+        code_artifact=state.get("code_artifact"),
         trace=state["trace"],
         learning_native=state.get("learning_native"),
     )

@@ -17,8 +17,11 @@ docker compose -f compose.yaml exec -T api \
   quantum-agent seed-live-e2e \
   --output "${LIVE_E2E_CONTAINER_AUTH}" \
   --activate-course >/dev/null
-docker compose -f compose.yaml cp \
-  "api:${LIVE_E2E_CONTAINER_AUTH}" "${LIVE_E2E_HOST_AUTH}" >/dev/null
+# Copy the credential to the host.  ``docker compose cp`` cannot read from
+# the container's tmpfs ``/tmp`` on some setups (WSL2), so stream the file
+# via ``exec cat`` instead.
+docker compose -f compose.yaml exec -T api cat "${LIVE_E2E_CONTAINER_AUTH}" \
+  > "${LIVE_E2E_HOST_AUTH}"
 chmod 0600 "${LIVE_E2E_HOST_AUTH}"
 
 QA_E2E_AUTH_FILE="${LIVE_E2E_HOST_AUTH}" npm run test:e2e:live

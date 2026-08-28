@@ -30,9 +30,14 @@ from quantum_agent.database import (
     session_dependency,
 )
 from quantum_agent.gateways import (
+    build_coding_agent,
+    build_credential_router_factory,
+    build_credential_vault,
     build_embedding_gateway,
     build_graph_store,
+    build_model_capability_registry,
     build_model_gateway,
+    build_sandbox,
     build_vision_gateway,
 )
 from quantum_agent.knowledge.explorer import GraphExplorerService
@@ -40,6 +45,7 @@ from quantum_agent.knowledge.retrieval import (
     HybridEvidenceRetriever,
     StudentVisibleEvidenceRepository,
 )
+from quantum_agent.llm.routing import ModelRouter
 from quantum_agent.multimodal.runtime import build_attachment_runtime
 from quantum_agent.tutor.graph import TutorGraph
 
@@ -73,6 +79,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         graph_store=graph_store,
         evidence_repository=evidence_repository,
     )
+    # PRD V3.1 §3. encrypted session vault for user-supplied API keys, and the
+    # per-credential ModelRouter cache that reads from it.  When the vault is
+    # disabled (no SESSION_VAULT_KEY), the startup USTC_API gateway is used.
+    credential_vault = build_credential_vault(resolved_settings)
+    capability_registry = build_model_capability_registry(resolved_settings)
+    credential_router_factory = build_credential_router_factory(
+        resolved_settings,
+        registry=capability_registry,
+        fallback_router=model_gateway if isinstance(model_gateway, ModelRouter) else None,
+        vault=credential_vault,
+    )
+    # PRD V3.1 §6: Coding Agent + subprocess sandbox.
+    sandbox = build_sandbox(resolved_settings)
+    scientific_toolbox_for_coding = None  # CodingAgent builds its own ScientificToolbox
+    coding_agent = build_coding_agent(
+        resolved_settings,
+        sandbox=sandbox,
+        toolbox=scientific_toolbox_for_coding,
+    )
 
     async def app_session_dependency() -> AsyncIterator[Any]:
         async with session_factory() as session:
@@ -95,11 +120,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         checkpointer=saver,
                         use_specialist_agents=True,
                         enable_hitl=True,
+                        coding_agent=coding_agent,
+                        sandbox=sandbox,
                     )
                     yield
         finally:
             if graph_store is not None:
                 await graph_store.close()
+            if credential_vault is not None:
+                await credential_vault.close()
             await engine.dispose()
 
     production = resolved_settings.environment == "production"
@@ -119,6 +148,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.graph_explorer = graph_explorer
     app.state.model_gateway = model_gateway
     app.state.attachment_runtime = attachment_runtime
+    app.state.credential_vault = credential_vault
+    app.state.credential_router_factory = credential_router_factory
+    app.state.coding_agent = coding_agent
+    app.state.sandbox = sandbox
     app.state.source_file_repository = SourceFileRepository(
         repository_root=Path(__file__).resolve().parents[3]
     )
@@ -129,6 +162,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             checkpointer=InMemorySaver(),
             use_specialist_agents=True,
             enable_hitl=False,
+            coding_agent=coding_agent,
+            sandbox=sandbox,
         )
     app.dependency_overrides[session_dependency] = app_session_dependency
     app.include_router(review_router)
