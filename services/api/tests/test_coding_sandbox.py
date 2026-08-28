@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from quantum_agent.coding.models import CodeArtifact, CodeLanguage
@@ -126,3 +128,68 @@ async def test_sandbox_captures_matplotlib_figure() -> None:
     assert run.result.completed is True
     assert run.figure_png_base64 is not None
     assert len(run.figure_png_base64) > 100
+
+
+async def test_sandbox_blocks_indirect_builtin_host_file_access() -> None:
+    """An allowlisted import must not recover ``open`` and read host files."""
+
+    sandbox = SubprocessSandbox()
+    code = (
+        "from numpy import __builtins__ as builtins_map\n"
+        'data = builtins_map["open"]("/etc/hostname").read()\n'
+        'print("HOST_FILE_READ=" + str(bool(data)))\n'
+        'print(\'### METRICS_JSON: {"value": 1}\')\n'
+    )
+    report = validate_code_safety(code)
+    run = await sandbox.execute_program_with_figure(
+        _artifact(code), SandboxLimits(wall_time_seconds=3.0)
+    )
+
+    assert report.ok is False
+    assert run.result.completed is False
+    assert "HOST_FILE_READ=True" not in run.result.stdout_bounded
+
+
+async def test_sandbox_blocks_indirect_builtin_network_access() -> None:
+    """Generated code must not reach even a controlled local TCP listener."""
+
+    reached = asyncio.Event()
+
+    async def handle_connection(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        await reader.read(4)
+        reached.set()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(handle_connection, "127.0.0.1", 0)
+    try:
+        socket_info = server.sockets[0].getsockname()
+        port = int(socket_info[1])
+        code = (
+            "from numpy import __builtins__ as builtins_map\n"
+            'socket_module = builtins_map["__import__"]("socket")\n'
+            "client = socket_module.socket()\n"
+            "client.settimeout(2)\n"
+            f'client.connect(("127.0.0.1", {port}))\n'
+            'client.sendall(b"PING")\n'
+            "client.close()\n"
+            'print(\'### METRICS_JSON: {"value": 1}\')\n'
+        )
+        report = validate_code_safety(code)
+        run = await SubprocessSandbox().execute_program_with_figure(
+            _artifact(code), SandboxLimits(wall_time_seconds=3.0)
+        )
+        try:
+            await asyncio.wait_for(reached.wait(), timeout=0.5)
+        except TimeoutError:
+            pass
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert report.ok is False
+    assert reached.is_set() is False
+    assert run.result.completed is False

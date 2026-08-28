@@ -22,6 +22,7 @@ from quantum_agent.coding.models import (
 )
 from quantum_agent.coding.safety import CodeSafetyError, validate_code_safety
 from quantum_agent.coding.sandbox import (
+    RemoteSandbox,
     SandboxDisabled,
     SandboxError,
     SubprocessSandbox,
@@ -39,6 +40,7 @@ __all__ = [
     "CodingAgent",
     "CodingAgentError",
     "CodingProgress",
+    "RemoteSandbox",
     "SandboxDisabled",
     "SandboxError",
     "SubprocessSandbox",

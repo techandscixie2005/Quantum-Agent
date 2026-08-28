@@ -159,6 +159,8 @@ services:
       LOGIN_COURSE_EMAIL: ${LOGIN_COURSE_EMAIL:-demo-student@quantum-agent.local}
       # PRD V3.1 §6.2: Coding Agent sandbox.
       CODING_SANDBOX_ENABLED: ${CODING_SANDBOX_ENABLED:-true}
+      CODING_SANDBOX_REQUIRE_ISOLATION: ${CODING_SANDBOX_REQUIRE_ISOLATION:-true}
+      CODING_SANDBOX_URL: ${CODING_SANDBOX_URL:-http://sandbox-runner:8080}
       XDG_CACHE_HOME: /tmp/quantum-agent-cache
       MPLCONFIGDIR: /tmp/matplotlib
     command:
@@ -204,6 +206,21 @@ services:
     networks:
       - backend
       - edge
+
+  sandbox-runner:
+    build:
+      context: .
+      dockerfile: services/sandbox-runner/Dockerfile
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - backend
 
   web:
     image: quantum-agent-web:${QA_IMAGE_TAG:-local}

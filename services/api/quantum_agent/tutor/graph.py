@@ -19,7 +19,7 @@ from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from quantum_agent.auth import TEACHING_STAFF_ROLES, CourseActor
-from quantum_agent.coding import CodingAgent, SandboxDisabled, SubprocessSandbox
+from quantum_agent.coding import CodingAgent, RemoteSandbox, SandboxDisabled, SubprocessSandbox
 from quantum_agent.db_models import CourseRole, TeachingTurnStatus
 from quantum_agent.llm.gateway import ModelGateway
 from quantum_agent.multimodal.teaching import (
@@ -95,7 +95,7 @@ class TutorGraph:
         use_specialist_agents: bool = False,
         enable_hitl: bool = False,
         coding_agent: CodingAgent | None = None,
-        sandbox: SubprocessSandbox | SandboxDisabled | None = None,
+        sandbox: SubprocessSandbox | RemoteSandbox | SandboxDisabled | None = None,
     ) -> None:
         if enable_hitl and checkpointer is None:
             raise ValueError("HITL requires a durable or in-memory LangGraph checkpointer")

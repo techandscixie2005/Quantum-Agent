@@ -352,6 +352,12 @@ Browser → Next.js → FastAPI → LangGraph (learning_native_pre → scientifi
 
 ## 6. 未覆盖项（DEFERRED）
 
+### 2026-08-28 remediation audit
+
+- Dedicated `sandbox-runner` service and fail-closed remote client added; provider-backed execution has not yet been reproduced in this environment.
+- Live Golden Loop helpers now hard-fail when Commitment, Teach-Back, or Transfer/Solo cards are absent.
+- No new live Golden Loop duration or PostgreSQL phase evidence is claimed until a real provider run completes.
+
 - **增量 SSE 消费**: BFF 仍然全缓冲（V3.0.1 deferred 项）。Coding UX 进度条由 `code_artifact.progress` + `repairs.length` 重建，非实时流。
 - **RLIMIT_AS**: WSL2 上 OpenBLAS 与 RLIMIT_AS 不兼容，故沙箱不设地址空间上限；改用 wall-time + RLIMIT_CPU + bounded output 约束。生产环境（非 WSL2）可重新启用。
 

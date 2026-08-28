@@ -39,8 +39,11 @@ import resource
 import shutil
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
+
+import httpx
 
 from quantum_agent.coding.models import CodeArtifact, CodeExecutionResult
 from quantum_agent.coding.safety import validate_code_safety
@@ -110,8 +113,10 @@ def _rlimit_settings(limits: SandboxLimits) -> tuple[tuple[int, tuple[int, int]]
     fsize_bytes = 16 * 1024 * 1024
     nofile = 32
     nproc = 1
+    address_space = max(16, int(limits.memory_megabytes)) * 1024 * 1024
     return (
         (resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds)),
+        (resource.RLIMIT_AS, (address_space, address_space)),
         (resource.RLIMIT_FSIZE, (fsize_bytes, fsize_bytes)),
         (resource.RLIMIT_NOFILE, (nofile, nofile)),
         (resource.RLIMIT_NPROC, (nproc, nproc)),
@@ -242,6 +247,7 @@ class SubprocessSandbox:
         bound = limits or self._default_limits
         return await self._run(artifact.code, bound)
 
+
     def execute(
         self,
         request: CodeTestRequest,
@@ -331,13 +337,24 @@ class SubprocessSandbox:
         try:
             program_path.write_text(code, encoding="utf-8")
             env = _scrubbed_env(tmpdir)
+            started = time.monotonic()
             try:
+                bwrap = (
+                    shutil.which("bwrap")
+                    if os.getenv("CODING_SANDBOX_REQUIRE_ISOLATION") == "true"
+                    else None
+                )
+                if bwrap:
+                    command = [
+                        bwrap, "--die-with-parent", "--unshare-net", "--unshare-pid",
+                        "--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev",
+                        "--tmpfs", "/tmp", "--bind", tmpdir, "/work", "--chdir", "/work",
+                        self._python, "-X", "faulthandler", "-I", "/work/program.py",
+                    ]
+                else:
+                    command = [self._python, "-X", "faulthandler", "-I", str(program_path)]
                 process = await asyncio.create_subprocess_exec(
-                    self._python,
-                    "-X",
-                    "faulthandler",
-                    "-I",
-                    str(program_path),
+                    *command,
                     cwd=tmpdir,
                     env=env,
                     stdout=asyncio.subprocess.PIPE,
@@ -366,6 +383,7 @@ class SubprocessSandbox:
                 except TimeoutError:
                     stdout_bytes, stderr_bytes = b"", b""
 
+            elapsed = max(0.0, time.monotonic() - started)
             stdout_text, stdout_truncated = _bounded(stdout_bytes, _MAX_STDOUT_BYTES)
             stderr_text, stderr_truncated = _bounded(stderr_bytes, _MAX_STDERR_BYTES)
 
@@ -386,7 +404,7 @@ class SubprocessSandbox:
                 truncated=stdout_truncated or stderr_truncated,
                 stdout_bounded=stdout_text,
                 stderr_bounded=stderr_text,
-                duration_seconds=0.0,
+                duration_seconds=elapsed,
             )
             metrics = _parse_metrics(stdout_text) if completed else {}
             return _SandboxRun(
@@ -409,8 +427,49 @@ class SubprocessSandbox:
             except ProcessLookupError:
                 pass
 
+class RemoteSandbox:
+    """HTTP client for the dedicated no-secret sandbox runner."""
+
+    def __init__(self, endpoint: str, *, timeout_seconds: float = 15.0) -> None:
+        self._endpoint = endpoint.rstrip("/")
+        self._timeout = timeout_seconds
+
+    async def execute_program(
+        self, artifact: CodeArtifact, limits: SandboxLimits | None = None
+    ) -> CodeExecutionResult:
+        report = validate_code_safety(artifact.code)
+        if not report.ok:
+            return CodeExecutionResult(
+                completed=False, stderr_bounded="static safety validation rejected the program"
+            )
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(
+                    f"{self._endpoint}/execute",
+                    json={
+                        "code": artifact.code,
+                        "limits": (limits or SandboxLimits()).model_dump(),
+                    },
+                )
+                response.raise_for_status()
+                return CodeExecutionResult.model_validate(response.json())
+        except Exception as exc:
+            return CodeExecutionResult(
+                completed=False,
+                stderr_bounded=f"isolated runner unavailable: {type(exc).__name__}",
+            )
+
+    async def execute_program_with_figure(
+        self, artifact: CodeArtifact, limits: SandboxLimits | None = None
+    ) -> _SandboxRun:
+        result = await self.execute_program(artifact, limits)
+        return _SandboxRun(
+            result=result, figure_png_base64=None, metrics=_parse_metrics(result.stdout_bounded)
+        )
+
 
 __all__ = [
+    "RemoteSandbox",
     "SandboxDisabled",
     "SandboxError",
     "SubprocessSandbox",

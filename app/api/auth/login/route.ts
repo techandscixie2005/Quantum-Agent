@@ -96,7 +96,7 @@ export async function POST(request: Request) {
           ? "登录尝试过于频繁，请稍后再试。"
           : "登录被拒绝。";
     return Response.json(
-      { error: message, detail: detail.slice(0, 200) },
+      { error: message },
       { status: upstream.status },
     );
   }

@@ -116,6 +116,7 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="CODING_SANDBOX_ENABLED",
     )
+    coding_sandbox_url: str | None = Field(default=None, validation_alias="CODING_SANDBOX_URL")
     # PRD V3.1 §3: API-key login.  A student enters their 词元计划/一〇七杯
     # API key; the backend probes the USTC model service, mints an opaque
     # session, and stores the Fernet-encrypted key in the session vault.
@@ -273,7 +274,11 @@ class Settings(BaseSettings):
             and self.session_secret is not None
             and self.session_secret.get_secret_value().strip()
         ):
-            self.session_vault_key = self.session_secret
+            import base64
+            import hashlib
+            digest = hashlib.sha256(self.session_secret.get_secret_value().encode()).digest()
+            encoded = base64.urlsafe_b64encode(digest).decode()
+            self.session_vault_key = SecretStr(encoded)
         if (
             self.session_vault_key is not None
             and not self.session_vault_key.get_secret_value().strip()

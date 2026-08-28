@@ -123,3 +123,77 @@ async def test_tutor_graph_runs_coding_agent_and_keeps_ten_step_trace(
     # The trace stays at the fixed 10-step workflow.
     assert [step.name for step in result.trace] == list(WorkflowStepName)
     assert len(result.trace) == 10
+
+
+async def test_failed_coding_agent_cannot_surface_oracle_computation_as_success(
+    teaching_database: async_sessionmaker[AsyncSession],  # noqa: F811
+) -> None:
+    async with teaching_database() as session:
+        seeded = await _seed(session)
+        packet = _packet(seeded.actor.course_id, seeded.edition_id)
+        broken_artifact = CodeArtifact(
+            purpose="does not compute the requested result",
+            code="raise RuntimeError('agent computation failed')",
+            expected_outputs=["T", "R", "conservation_error"],
+            verification_plan="must fail transparently",
+        )
+        gateway = FakeModelGateway(
+            {
+                "interpret_teaching_turn": {
+                    "task_kind": "exercise_help",
+                    "relevant_concepts": ["tunnelling"],
+                    "needs_scientific_verification": True,
+                    "confidence": 0.8,
+                },
+                "diagnose_student_progress_structured": {
+                    "status": "observed",
+                    "summary": "student supplied a prediction",
+                    "likely_misconception": None,
+                    "observation_basis": ["student_attempt"],
+                    "target_concepts": ["tunnelling"],
+                    "first_error": None,
+                    "misconception_candidates": [],
+                    "missing_prerequisites": [],
+                    "progress_state": "started",
+                    "confidence": 0.5,
+                    "verification_needed": True,
+                    "reason": "the prediction needs computation",
+                },
+                "compose_grounded_teaching_response": {
+                    "orientation": "The computation must complete before using its result.",
+                    "claims": [],
+                    "next_question": "What failed?",
+                    "status": "grounded",
+                    "limitations": [],
+                },
+                "generate_coding_artifact": broken_artifact.model_dump(mode="json"),
+            }
+        )
+        sandbox = SubprocessSandbox()
+        graph = TutorGraph(
+            evidence_retriever=StaticRetriever(packet),
+            model_gateway=gateway,
+            coding_agent=CodingAgent(sandbox=sandbox, max_repairs=0),
+            sandbox=sandbox,
+        )
+        result = await graph.run(
+            session=session,
+            actor=seeded.actor,
+            curriculum_edition_id=seeded.edition_id,
+            request=TeachingTurnInput(
+                mode=TeachingMode.RUN_EXPERIMENTS,
+                message="Compute rectangular-barrier transmission.",
+                student_attempt="I predict a non-zero transmission.",
+                scientific_request=RectangularBarrierRequest(
+                    energy_eV=5.0,
+                    barrier_height_eV=10.0,
+                    barrier_width_m=1e-10,
+                    particle_mass_kg=9.1093837015e-31,
+                ),
+            ),
+        )
+
+    assert isinstance(result, TeachingTurnResult)
+    assert result.code_artifact is not None
+    assert result.code_artifact.verification.status is CodeVerificationStatus.INCONCLUSIVE
+    assert not any(item.status.value == "pass" for item in result.scientific_results)

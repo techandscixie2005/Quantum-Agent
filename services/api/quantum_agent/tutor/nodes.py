@@ -377,15 +377,20 @@ async def scientific_tools_node(
             try:
                 run = await coding_agent.solve(coding_task, gateway=gateway)
                 code_artifact = run.model_dump(mode="json")
+                if run.verification.status.value != "pass":
+                    # The oracle is verification-only.  Never present its
+                    # result as a successful computation when agent code did
+                    # not independently produce a verified result.
+                    scientific_results.pop()
                 coding_detail = (
                     f"Coding Agent wrote {len(run.artifact.code)} chars of Python; "
                     f"verifier status={run.verification.status.value}; "
                     f"repairs={len(run.repairs)}."
                 )
             except Exception as exc:  # never let the coding agent crash the turn
+                scientific_results.pop()
                 coding_detail = (
-                    f"Coding Agent failed: {type(exc).__name__}; "
-                    "deterministic oracle result still stands."
+                    f"Coding Agent failed: {type(exc).__name__}; computation is inconclusive."
                 )
         else:
             coding_detail = ""
@@ -433,6 +438,8 @@ async def learning_native_pre_node(
     escape the lock because the phase is persisted on the conversation.
     """
 
+    if state.get("learning_native_pre_decision") is not None:
+        return {}
     request = state["request"]
     release = state["release"]
     model_gateway = runtime.context.model_gateway

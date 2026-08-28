@@ -100,7 +100,9 @@ class CredentialScopedRouterFactory:
             return self._fallback_router
         api_key = await self._vault.load(session_id)
         if api_key is None or not api_key.get_secret_value():
-            return self._fallback_router
+            # An authenticated session must never silently bill the deployment
+            # credential.  Fallback is reserved for unauthenticated/dev use.
+            return None
         digest = digest_api_key(api_key)
         async with self._lock:
             router = self._routers.pop(digest, None)
@@ -111,13 +113,11 @@ class CredentialScopedRouterFactory:
         return router
 
     async def forget_session(self, session_id: UUID) -> None:
+        api_key = await self._vault.load(session_id) if self._vault is not None else None
+        if api_key is not None:
+            await self.forget_digest(digest_api_key(api_key))
         if self._vault is not None:
             await self._vault.forget(session_id)
-        # The digest is not retained on the session, so we cannot targetedly
-        # evict the router without re-loading the key.  The LRU bound plus
-        # vault-forget together guarantee a logged-out session's key is no
-        # longer decryptable, so a cached router becomes unreachable on the
-        # next request (the vault returns None and the fallback is used).
 
     async def forget_digest(self, digest: str) -> None:
         async with self._lock:

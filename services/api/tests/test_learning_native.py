@@ -1311,6 +1311,62 @@ class TestCognitiveMirrorEvidenceSemantics:
         assert redacted_item.locator.physical_page == 42
         assert "withheld" in redacted_item.evidence_snippet.lower()
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason="P0: evidence retrieval still precedes the authoritative commitment gate",
+    )
+    async def test_commitment_precedes_evidence_and_diagnosis(
+        self,
+        learning_native_database: async_sessionmaker[AsyncSession],
+    ) -> None:
+        class _OrderRetriever(TunnelingRetriever):
+            def __init__(self) -> None:
+                self.retrieved = False
+
+            async def retrieve(self, scope: RetrievalScope, query: str) -> EvidencePacket:
+                self.retrieved = True
+                return await super().retrieve(scope, query)
+
+        class _OrderGateway(FakeModelGateway):
+            def __init__(self, retriever: _OrderRetriever) -> None:
+                super().__init__(
+                    {
+                        "propose_cognitive_commitment": {
+                            "attempt_type": "prediction",
+                            "candidate_prompt": "先预测透射率是否为零。",
+                            "reason_summary": "先承诺，再检索证据。",
+                        }
+                    }
+                )
+                self.retriever = retriever
+
+            async def structured_generate(self, *args: object, **kwargs: object) -> object:
+                task = kwargs.get("task") or (args[0] if args else "")
+                if task == "propose_cognitive_commitment":
+                    assert not self.retriever.retrieved
+                return await super().structured_generate(*args, **kwargs)
+
+        async with learning_native_database() as session:
+            seed = await _seed_actor(session)
+        retriever = _OrderRetriever()
+        graph = TutorGraph(
+            evidence_retriever=retriever,
+            model_gateway=_OrderGateway(retriever),
+            checkpointer=InMemorySaver(),
+            use_specialist_agents=False,
+            enable_hitl=False,
+        )
+        async with learning_native_database() as session:
+            await graph.run(
+                session=session,
+                actor=seed.actor,
+                curriculum_edition_id=seed.edition_id,
+                request=TeachingTurnInput(
+                    mode=TeachingMode.RUN_EXPERIMENTS,
+                    message="为什么 E<V0 时仍可能透射？",
+                ),
+            )
+
 
 # ---------------------------------------------------------------------------
 # P0-2 adversarial tests: durable Learning Phase, Solo lock, UI transitions

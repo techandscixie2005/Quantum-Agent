@@ -332,7 +332,7 @@ class SandboxLimits(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     wall_time_seconds: float = Field(default=3.0, ge=0.1, le=10.0)
-    memory_megabytes: int = Field(default=128, ge=32, le=512)
+    memory_megabytes: int = Field(default=512, ge=32, le=512)
     process_count: int = Field(default=1, ge=1, le=4)
     network_enabled: Literal[False] = False
     read_only_root: Literal[True] = True

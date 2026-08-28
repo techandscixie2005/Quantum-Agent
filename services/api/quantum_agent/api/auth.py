@@ -64,7 +64,7 @@ _login_attempts: dict[str, list[float]] = defaultdict(list)
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    api_key: str = Field(min_length=16, max_length=256)
+    api_key: SecretStr
     course_id: str | None = Field(default=None, max_length=64)
 
 
@@ -148,9 +148,11 @@ async def api_key_login(
     client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or "local"
     _check_rate_limit(client_ip)
 
-    api_key = body.api_key.strip()
+    api_key = body.api_key.get_secret_value().strip()
     if not api_key:
         raise HTTPException(status_code=400, detail="API key must not be blank")
+    if len(api_key) < 16 or len(api_key) > 256:
+        raise HTTPException(status_code=422, detail="invalid request")
 
     # Validate the key against the USTC model service before minting a session.
     probe_ok = await _probe_ustc_key(

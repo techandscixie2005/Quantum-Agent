@@ -157,6 +157,9 @@ class _SafetyVisitor(ast.NodeVisitor):
             )
         if not module or not _is_allowed_import(module):
             self._violations.append(f"from-import of non-allowlisted module '{module}'")
+        for alias in node.names:
+            if alias.name.startswith("__") or alias.name.endswith("__"):
+                self._violations.append(f"from-import of forbidden dunder '{alias.name}'")
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:

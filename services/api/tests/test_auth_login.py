@@ -230,3 +230,19 @@ async def test_login_stores_key_in_vault(
         loaded = await vault.load(user_session.id)
     assert loaded is not None
     assert loaded.get_secret_value() == "sk-test-key-1234567890abcdef"
+
+
+async def test_login_validation_error_never_echoes_api_key(
+    login_database: async_sessionmaker[AsyncSession],
+) -> None:
+    app = _build_app(session_factory=login_database, fernet_key=_fernet_key())
+    rejected_key = "sk-" + ("sensitive" * 40)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"api_key": rejected_key},
+        )
+
+    assert response.status_code == 422
+    assert rejected_key not in response.text

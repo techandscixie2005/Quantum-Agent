@@ -165,3 +165,24 @@ async def test_coding_agent_never_relabels_fail_as_pass() -> None:
     run = await agent.solve(_tunnelling_task(), gateway=gateway)
     # INCONCLUSIVE or FAIL, never PASS.
     assert run.verification.status is not CodeVerificationStatus.PASS
+
+
+async def test_coding_agent_does_not_pass_when_required_metrics_are_missing() -> None:
+    artifact = CodeArtifact(
+        language=CodeLanguage.PYTHON,
+        purpose="exits without performing the requested computation",
+        code="print('program exited without metrics')",
+        expected_outputs=["T", "R", "conservation_error"],
+        verification_plan="must not pass without metrics",
+    )
+    gateway = FakeModelGateway(
+        {"generate_coding_artifact": artifact.model_dump(mode="json")}
+    )
+
+    run = await CodingAgent(sandbox=SubprocessSandbox()).solve(
+        _tunnelling_task(), gateway=gateway
+    )
+
+    assert run.execution.completed is True
+    assert run.verification.agent_metrics == {}
+    assert run.verification.status is not CodeVerificationStatus.PASS

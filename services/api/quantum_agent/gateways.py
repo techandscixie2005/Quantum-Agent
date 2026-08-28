@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import SecretStr
 
-from quantum_agent.coding import CodingAgent, SandboxDisabled, SubprocessSandbox
+from quantum_agent.coding import CodingAgent, RemoteSandbox, SandboxDisabled, SubprocessSandbox
 from quantum_agent.config import Settings
 from quantum_agent.credential_router import CredentialScopedRouterFactory
 from quantum_agent.credential_vault import (
@@ -165,18 +165,20 @@ def build_credential_router_factory(
     )
 
 
-def build_sandbox(settings: Settings) -> SubprocessSandbox | SandboxDisabled:
+def build_sandbox(settings: Settings) -> SubprocessSandbox | RemoteSandbox | SandboxDisabled:
     """Build the Coding Agent subprocess sandbox (PRD V3.1 §6.2)."""
 
     if not settings.coding_sandbox_enabled:
         return SandboxDisabled()
+    if settings.coding_sandbox_url:
+        return RemoteSandbox(settings.coding_sandbox_url)
     return SubprocessSandbox()
 
 
 def build_coding_agent(
     settings: Settings,
     *,
-    sandbox: SubprocessSandbox | SandboxDisabled,
+    sandbox: SubprocessSandbox | RemoteSandbox | SandboxDisabled,
     toolbox: ScientificToolbox | None = None,
 ) -> CodingAgent | None:
     """Build the Coding Agent.  Returns None only when the sandbox is disabled

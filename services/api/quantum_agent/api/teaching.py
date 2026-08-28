@@ -142,10 +142,10 @@ async def _resolve_model_gateway_override(
     try:
         router: ModelGateway | None = await factory.router_for_session(actor.session_id)
         return router
-    except Exception:
-        # Never let a vault lookup failure crash the turn; the fallback
-        # gateway will be used.
-        return None
+    except Exception as exc:
+        # An authenticated request must fail closed; never route it through
+        # the deployment credential after a vault/Redis failure.
+        raise HTTPException(status_code=503, detail="session credential unavailable") from exc
 
 
 TeachingApiOutcome = TeachingTurnResult | HitlInterruptResponse | HitlRejectedResponse

@@ -7,7 +7,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from pydantic import BaseModel, ConfigDict
@@ -140,6 +142,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url=None if production else "/api/openapi.json",
         lifespan=lifespan,
     )
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(_request: Request, _exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": "invalid request"})
     app.state.settings = resolved_settings
     app.state.session_factory = session_factory
     app.state.graph_store = graph_store

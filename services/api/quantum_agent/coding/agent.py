@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from typing import Any
 
 from pydantic import ValidationError
@@ -33,7 +34,12 @@ from quantum_agent.coding.models import (
     CodingProgress,
 )
 from quantum_agent.coding.safety import CodeSafetyError, validate_code_safety
-from quantum_agent.coding.sandbox import SandboxDisabled, SandboxError, SubprocessSandbox
+from quantum_agent.coding.sandbox import (
+    RemoteSandbox,
+    SandboxDisabled,
+    SandboxError,
+    SubprocessSandbox,
+)
 from quantum_agent.llm.gateway import GatewayError, Message, ModelGateway
 from quantum_agent.science.models import (
     RectangularBarrierRequest,
@@ -161,11 +167,35 @@ def _verify_against_oracle(
             oracle_metrics=oracle_metrics,
             observations=[*observations, "Oracle itself did not pass; refusing to verify."],
         )
-    # Compare T and R within tolerance.
+    # Every task-declared output is mandatory.  Missing, non-numeric, boolean,
+    # non-finite, or out-of-domain values are never a passing computation.
+    required = tuple(task.required_outputs)
+    for key in required:
+        if key not in agent_metrics or isinstance(agent_metrics[key], bool):
+            return CodeVerificationResult(
+                status=CodeVerificationStatus.INCONCLUSIVE, oracle_kind=task.oracle_kind,
+                agent_metrics=agent_metrics, oracle_metrics=oracle_metrics,
+                observations=[*observations, f"Required metric {key!r} is missing."],
+            )
+        try:
+            value = float(agent_metrics[key])
+        except (TypeError, ValueError):
+            value = float("nan")
+        if not math.isfinite(value):
+            return CodeVerificationResult(
+                status=CodeVerificationStatus.FAIL, oracle_kind=task.oracle_kind,
+                agent_metrics=agent_metrics, oracle_metrics=oracle_metrics,
+                observations=[*observations, f"Required metric {key!r} is not finite."],
+            )
+    # Compare all oracle-provided required values within tolerance.
     tolerance = 1e-6
-    for key in ("T", "R"):
-        if key not in agent_metrics or key not in oracle_metrics:
-            continue
+    for key in required:
+        if key not in oracle_metrics:
+            return CodeVerificationResult(
+                status=CodeVerificationStatus.INCONCLUSIVE, oracle_kind=task.oracle_kind,
+                agent_metrics=agent_metrics, oracle_metrics=oracle_metrics,
+                observations=[*observations, f"Oracle did not provide required metric {key!r}."],
+            )
         try:
             agent_val = float(agent_metrics[key])
             oracle_val = float(oracle_metrics[key])
@@ -200,7 +230,7 @@ class CodingAgent:
     def __init__(
         self,
         *,
-        sandbox: SubprocessSandbox | SandboxDisabled,
+        sandbox: SubprocessSandbox | RemoteSandbox | SandboxDisabled,
         toolbox: ScientificToolbox | None = None,
         max_repairs: int = _MAX_REPAIRS,
         default_limits: SandboxLimits | None = None,

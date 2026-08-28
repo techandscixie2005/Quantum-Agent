@@ -366,10 +366,10 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
     expect(terminal).toBe("completed");
 
     // If the CommitmentCard rendered, submit a formal commitment too.
-    await maybeSubmitCommitment(
+    expect(await maybeSubmitCommitment(
       page,
       "我预测：E<V0 时透射概率为零，粒子不可能穿越势垒。",
-    );
+    ), "Commitment phase must be present and submitted").toBe(true);
 
     // ── Stage 2: Diagnosis + minimal hint after revised attempt ──
     await sendStudentMessage(
@@ -440,10 +440,10 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
     );
     terminal = await waitForWorkflowTerminal(page);
     expect(terminal).toBe("completed");
-    await maybeSubmitTeachBack(
+    expect(await maybeSubmitTeachBack(
       page,
       "波函数在势垒内不是突变为零，而是指数衰减；衰减后的振幅在右侧仍然非零，因此透射概率是一个很小的正数。",
-    );
+    ), "Teach-Back phase must be present and submitted").toBe(true);
 
     // ── Stage 6: transfer task + Solo Mode ──
     await sendStudentMessage(
@@ -453,10 +453,10 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
     );
     terminal = await waitForWorkflowTerminal(page);
     expect(terminal).toBe("completed");
-    await maybeSubmitSoloAttempt(
+    expect(await maybeSubmitSoloAttempt(
       page,
       "透射率随势垒宽度增加而指数下降，因为衰减常数不变但积分路径变长，振幅衰减更多。",
-    );
+    ), "Transfer/Solo phase must be present and submitted").toBe(true);
 
     // ── Stage 7: Cognitive Mirror update from persisted evidence ──
     await sendStudentMessage(

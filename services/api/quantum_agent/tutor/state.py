@@ -12,6 +12,7 @@ from quantum_agent.auth import CourseActor
 from quantum_agent.coding import (
     CodeArtifactRun,
     CodingAgent,
+    RemoteSandbox,
     SandboxDisabled,
     SubprocessSandbox,
 )
@@ -57,7 +58,7 @@ class TutorContext:
     use_specialist_agents: bool = False
     enable_hitl: bool = False
     coding_agent: CodingAgent | None = None
-    sandbox: SubprocessSandbox | SandboxDisabled | None = None
+    sandbox: SubprocessSandbox | RemoteSandbox | SandboxDisabled | None = None
 
 
 class TutorState(TypedDict, total=False):

@@ -43,7 +43,7 @@ ENV PATH=/opt/venv/bin:$PATH \
     MPLCONFIGDIR=/tmp/matplotlib
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates libgomp1 \
+    && apt-get install --yes --no-install-recommends ca-certificates libgomp1 bubblewrap \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 quantum-agent \
     && useradd \
