@@ -463,3 +463,24 @@ V3.2 hardening commits（8 个）：
 - `3731770` Coding Agent 结果仅入 code_artifact（V3.1 scientific_results 形状）
 
 工作树干净。release-auditor 独立审查进行中；最终 FROZEN/NOT FROZEN 裁决待其返回。
+
+## 8. release-auditor 独立裁决
+
+**Verdict: FROZEN**
+
+release-auditor 独立审查（不依赖 MAIN AGENT 摘要）确认：
+- **P0 findings: 无**
+- **沙箱逃逸向量: 全部 CLOSED** — 26/26 对抗测试通过；Docker 线束 PASS；`_BLOCKED_SUBMODULES` 阻断 ctypes 路径
+- **凭证 fail-closed: VERIFIED** — 认证会话 vault 缺失 → 503，无 USTC_API 回退
+- **Coding Agent fail-closed: INTACT** — `_verify_against_oracle` 无 FAIL→PASS 路径；`scientific_results.pop()` on FAIL
+- **live Golden Loop 无第一方 mock** — 零 `page.route`/`page.fulfill`/HAR；真实 `loginThroughProduct`
+- **无范围蔓延/测试弱化** — 所有测试变更均为正确收紧或有据可查
+- **P1**: live Golden Loop stage 5 teach-back 按钮可见性为模型依赖 UI 状态（测试应自适应，非产品缺陷）
+
+**残余风险**: live Golden Loop E2E 为 PARTIAL（stage 1-3b 通过；stage 5 模型依赖）。不阻塞冻结：(a) 竞赛关键 demo 路径（login→commitment→evidence→diagnosis→Coding Agent 隧穿+真实 Python 生成+oracle 验证+tunnelling-metrics 渲染）端到端无 mock 通过；(b) stage 5 失败为测试脆弱性，非产品缺陷。
+
+## 9. 最终提交
+
+V3.2 最终 commit: `1f973a2` (docs: V3.2 final hardening release report)，分支 `main`。9 个 V3.2 加固 commit 叠加在 V3.1 之上。工作树干净。
+
+**最终裁决: FROZEN**
