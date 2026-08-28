@@ -339,11 +339,13 @@ export async function proxyTeachingTurn(request: Request): Promise<Response> {
     // PRD V3.0 P1-2 + V3.1 P1-2: forward browser cancellation to the
     // backend so a user who navigates away or cancels the request does
     // not keep a long model call running.  We combine the incoming
-    // request signal (browser cancellation) with a 240s timeout using
-    // AbortSignal.any.  The 240s ceiling matches the proxy limit; the
-    // backend's heartbeat + bounded retry budget keeps the perceived
+    // request signal (browser cancellation) with a 300s timeout using
+    // AbortSignal.any.  The 300s ceiling gives the real model room for
+    // deep-reasoning fallback (the Coding Agent may fall back from
+    // code_primary to reasoning_primary on a profile-specific 400);
+    // the backend's heartbeat + bounded retry budget keeps the perceived
     // latency well under this for normal turns.
-    const timeoutSignal = AbortSignal.timeout(240_000);
+    const timeoutSignal = AbortSignal.timeout(300_000);
     const combinedSignal = request.signal
       ? AbortSignal.any([request.signal, timeoutSignal])
       : timeoutSignal;

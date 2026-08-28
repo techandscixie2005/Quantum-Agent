@@ -111,7 +111,7 @@ async function waitForWorkflowTerminal(page: Page): Promise<"completed" | "inter
         if (await page.getByTestId("hitl-interrupt").isVisible()) return "interrupted";
         return "pending";
       },
-      { timeout: 240_000, intervals: [2_000, 5_000, 10_000] },
+      { timeout: 300_000, intervals: [2_000, 5_000, 10_000] },
     )
     .toMatch(/^(completed|interrupted)$/);
   return (await page.getByTestId("agent-tutor-result").isVisible()) ? "completed" : "interrupted";
@@ -131,7 +131,7 @@ async function sendStudentMessage(
     (response) =>
       new URL(response.url()).pathname === "/api/teaching/turns/stream" &&
       response.request().method() === "POST",
-    { timeout: 240_000 },
+    { timeout: 300_000 },
   );
   const messageBox = page.getByLabel("给 Quantum Agent 的问题");
   await messageBox.fill(message);
@@ -166,7 +166,7 @@ async function maybeSubmitCommitment(
     (resp) =>
       new URL(resp.url()).pathname === "/api/teaching/turns/stream" &&
       resp.request().method() === "POST",
-    { timeout: 240_000 },
+    { timeout: 300_000 },
   );
   await submitButton.click();
   const res = await streamResponse;
@@ -185,7 +185,7 @@ async function maybeSubmitTeachBack(page: Page, reconstruction: string): Promise
     (resp) =>
       new URL(resp.url()).pathname === "/api/teaching/turns/stream" &&
       resp.request().method() === "POST",
-    { timeout: 240_000 },
+    { timeout: 300_000 },
   );
   await submitButton.click();
   const res = await streamResponse;
@@ -209,7 +209,7 @@ async function maybeSubmitSoloAttempt(page: Page, response: string): Promise<boo
     (resp) =>
       new URL(resp.url()).pathname === "/api/teaching/turns/stream" &&
       resp.request().method() === "POST",
-    { timeout: 240_000 },
+    { timeout: 300_000 },
   );
   await submitButton.click();
   const res = await streamResponse;
@@ -433,7 +433,7 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
     // ── Stage 5: explicit Teach-Back transition + reconstruction ──
     const teachBackResponse = page.waitForResponse(
       (response) => new URL(response.url()).pathname === "/api/teaching/turns/stream",
-      { timeout: 240_000 },
+      { timeout: 300_000 },
     );
     await page.getByTestId("request-teach-back-button").click();
     expect((await teachBackResponse).ok()).toBe(true);
@@ -446,7 +446,7 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
     // ── Stage 6: explicit transfer task + Solo Mode transition ──
     const transferResponse = page.waitForResponse(
       (response) => new URL(response.url()).pathname === "/api/teaching/turns/stream",
-      { timeout: 240_000 },
+      { timeout: 300_000 },
     );
     await page.getByTestId("request-transfer-button").click();
     expect((await transferResponse).ok()).toBe(true);
