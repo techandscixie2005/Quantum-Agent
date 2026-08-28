@@ -118,87 +118,29 @@ function isHitlOutcome(value: TeachingWorkflowOutcome): value is HitlInterruptRe
   return "status" in value && value.status === "interrupted";
 }
 
-// PRD V3.1 P1-2: incremental SSE parser.  Reads the response body chunk
-// by chunk, splits on ``\n\n`` boundaries, and invokes ``onProgress`` for
-// each ``progress`` event.  Returns the terminal event payload (or throws
-// on ``workflow.failed``).  ``progress`` and ``: keepalive`` comment
-// lines are consumed without buffering the entire body, so the user sees
-// activity during long model calls.
-async function consumeIncrementalSse(
-  response: Response,
-  onProgress: (step: string, detail: string | null) => void,
-): Promise<unknown> {
-  if (!response.body) throw new Error("教学工作流未返回事件流主体。");
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+function terminalEvent(document: string): unknown {
   let terminal: unknown;
   let terminalCount = 0;
   let failure: string | null = null;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let boundary: number;
-      while ((boundary = buffer.indexOf("\n\n")) !== -1) {
-        const block = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        if (!block.trim()) continue;
-        // Comment-only blocks (``: keepalive``) keep the connection
-        // alive; no progress event to emit.
-        let isComment = true;
-        for (const line of block.split("\n")) {
-          if (line && !line.startsWith(":")) {
-            isComment = false;
-            break;
-          }
-        }
-        if (isComment) continue;
-        let event = "message";
-        const dataLines: string[] = [];
-        for (const line of block.split("\n")) {
-          if (line.startsWith("event:")) event = line.slice(6).trim();
-          else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
-        }
-        let payload: unknown;
-        try {
-          payload = JSON.parse(dataLines.join("\n"));
-        } catch {
-          // Skip malformed blocks; the BFF already validates the terminal
-          // contract before forwarding, so a malformed block here is a
-          // transient network artifact, not a contract violation.
-          continue;
-        }
-        if (event === "progress") {
-          const step =
-            typeof payload === "object" && payload !== null
-              ? (payload as Record<string, unknown>).step
-              : null;
-          const detail =
-            typeof payload === "object" && payload !== null
-              ? (payload as Record<string, unknown>).detail
-              : null;
-          if (typeof step === "string") {
-            onProgress(step, typeof detail === "string" ? detail : null);
-          }
-        } else if (event === "workflow.completed" || event === "workflow.interrupted") {
-          terminal = payload;
-          terminalCount += 1;
-        } else if (event === "workflow.failed") {
-          const code =
-            typeof payload === "object" && payload !== null
-              ? (payload as Record<string, unknown>).code
-              : null;
-          failure = typeof code === "string" ? code : "WORKFLOW_FAILED";
-        }
-      }
+  for (const block of document.replace(/\r\n/g, "\n").split("\n\n")) {
+    if (!block.trim()) continue;
+    let event = "message";
+    const data: string[] = [];
+    for (const line of block.split("\n")) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
     }
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // Already released; ignore.
+    const payload: unknown = JSON.parse(data.join("\n"));
+    if (event === "workflow.completed" || event === "workflow.interrupted") {
+      terminal = payload;
+      terminalCount += 1;
+    }
+    if (event === "workflow.failed") {
+      const code =
+        typeof payload === "object" && payload !== null
+          ? (payload as Record<string, unknown>).code
+          : null;
+      failure = typeof code === "string" ? code : "WORKFLOW_FAILED";
     }
   }
   if (failure) throw new Error(`教学工作流中止（${failure}）。`);
@@ -546,11 +488,6 @@ export function AgentExperience() {
   const [result, setResult] = useState<TeachingTurnResult | null>(null);
   const [interrupt, setInterrupt] = useState<HitlInterruptResponse | null>(null);
   const [confirmedTranscription, setConfirmedTranscription] = useState("");
-  // PRD V3.1 P1-2: incremental progress state.  Updated as ``progress``
-  // SSE events arrive from the BFF so the user sees activity during long
-  // model calls instead of a static spinner.  Cleared on turn completion.
-  const [progressStep, setProgressStep] = useState<string | null>(null);
-  const [progressDetail, setProgressDetail] = useState<string | null>(null);
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
   const [selectedSource, setSelectedSource] = useState<TeachingEvidence | null>(null);
   const [leftOpen, setLeftOpen] = useState(false);
@@ -634,22 +571,12 @@ export function AgentExperience() {
         body: JSON.stringify(body),
       });
       if (!response.ok) throw new Error(await responseMessage(response, "教学工作流不可用。"));
-      // PRD V3.1 P1-2: consume the SSE stream incrementally so the user
-      // sees ``progress`` events as they arrive instead of a static
-      // spinner.  The terminal event is still validated against the
-      // teaching contract before it is applied to the UI.
-      const terminal = await consumeIncrementalSse(response, (step, detail) => {
-        setProgressStep(step);
-        setProgressDetail(detail);
-      });
-      const parsed = parseTeachingWorkflowOutcome(terminal);
+      const parsed = parseTeachingWorkflowOutcome(terminalEvent(await response.text()));
       if (isHitlOutcome(parsed)) assertHitlScope(parsed, input.scope, input.mode);
       else assertTeachingScope(parsed, input.scope, input.mode);
       return parsed;
     },
     onSuccess: (next, variables) => {
-      setProgressStep(null);
-      setProgressDetail(null);
       setConversationId(next.conversation_id);
       if (isHitlOutcome(next)) {
         setInterrupt(next);
@@ -661,10 +588,6 @@ export function AgentExperience() {
         setConfirmedTranscription("");
       }
       setRightOpen(true);
-    },
-    onError: () => {
-      setProgressStep(null);
-      setProgressDetail(null);
     },
   });
 
@@ -927,7 +850,7 @@ export function AgentExperience() {
           <small>{activeCourse.edition_title}</small>
         </div>
         <div className={styles.topActions}>
-          <span className={styles.liveState} data-testid="model-service-status"><i /> {interrupt ? "工作流已暂停" : turnMutation.isPending && progressStep ? `工作流进行中：${progressStep}` : turnMutation.isPending ? "工作流执行中" : "模型服务已连接"}</span>
+          <span className={styles.liveState} data-testid="model-service-status"><i /> {interrupt ? "工作流已暂停" : "模型服务已连接"}</span>
           <button onClick={() => setRightOpen(true)} aria-label="打开证据面板"><PanelRight /></button>
           <span className={styles.userMark}>{contextQuery.data.display_name.slice(0, 1)}</span>
         </div>
@@ -1011,17 +934,6 @@ export function AgentExperience() {
             interrupt={interrupt}
             pending={turnMutation.isPending || resumeMutation.isPending}
           />
-
-          {turnMutation.isPending && progressStep ? (
-            <p
-              className={styles.composerError}
-              role="status"
-              aria-live="polite"
-              data-testid="teaching-progress"
-            >
-              <LoaderCircle className={styles.spin} /> {progressDetail ?? progressStep}
-            </p>
-          ) : null}
 
           {interrupt ? (
             <HitlReviewCard
