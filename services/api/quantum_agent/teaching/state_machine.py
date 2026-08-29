@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Final, Protocol
 from uuid import UUID
 
@@ -467,6 +467,7 @@ class TeachingStateMachine:
         curriculum_edition_id: UUID,
         request: TeachingTurnInput,
         model_gateway_override: ModelGateway | None = None,
+        on_stage: Callable[[str, float], Awaitable[None]] | None = None,
     ) -> TeachingTurnResult:
         repository = TeachingRepository(session)
         # PRD V3.1 §3.2: honor a per-session credential override when supplied.
@@ -479,7 +480,12 @@ class TeachingStateMachine:
             self._model_gateway = model_gateway_override
         try:
             return await self._run_with_gateway(
-                repository, session, actor, curriculum_edition_id, request
+                repository,
+                session,
+                actor,
+                curriculum_edition_id,
+                request,
+                on_stage=on_stage,
             )
         finally:
             self._model_gateway = original_gateway
@@ -491,14 +497,30 @@ class TeachingStateMachine:
         actor: CourseActor,
         curriculum_edition_id: UUID,
         request: TeachingTurnInput,
+        *,
+        on_stage: Callable[[str, float], Awaitable[None]] | None = None,
     ) -> TeachingTurnResult:
+        import time as _time
+
         started = await repository.start_turn(
             actor=actor,
             curriculum_edition_id=curriculum_edition_id,
             request=request,
         )
+        started_at = _time.monotonic()
+
+        async def notify(stage: str) -> None:
+            if on_stage is None:
+                return
+            try:
+                await on_stage(stage, _time.monotonic() - started_at)
+            except Exception:
+                # Progress emission must never break the workflow.
+                pass
+
         trace: list[WorkflowStep] = []
 
+        await notify("interpret")
         interpretation, interpretation_degraded = await self._interpret(request)
         trace.append(
             WorkflowStep(
@@ -525,6 +547,7 @@ class TeachingStateMachine:
         retrieval_query = " ".join(
             [request.message, *interpretation.relevant_concepts]
         )[:5000]
+        await notify("retrieve")
         packet = await self._evidence_retriever.retrieve(
             RetrievalScope(
                 course_id=actor.course_id,
@@ -547,6 +570,7 @@ class TeachingStateMachine:
             )
         )
 
+        await notify("diagnose")
         diagnosis, diagnosis_degraded = await self._diagnose(request, packet)
         trace.append(
             WorkflowStep(
@@ -560,6 +584,7 @@ class TeachingStateMachine:
             )
         )
 
+        await notify("policy")
         policy = await AnswerPolicyRepository(session).get_active(
             course_id=actor.course_id,
             curriculum_edition_id=curriculum_edition_id,
@@ -611,6 +636,7 @@ class TeachingStateMachine:
                 detail="Backend answer policy withheld the requested tool result.",
             )
         else:
+            await notify("scientific_tools")
             tool_result = await asyncio.to_thread(
                 self._scientific_toolbox.verify,
                 request.scientific_request,
@@ -630,6 +656,7 @@ class TeachingStateMachine:
             )
         trace.append(tool_step)
 
+        await notify("generate")
         response, validation, generation_degraded = await self._draft_response(
             request=request,
             packet=packet,
@@ -672,6 +699,7 @@ class TeachingStateMachine:
             )
         )
 
+        await notify("assemble")
         result = TeachingTurnResult(
             conversation_id=started.conversation.id,
             turn_id=started.turn.id,
