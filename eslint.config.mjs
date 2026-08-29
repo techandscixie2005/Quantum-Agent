@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Ephemeral workflow worktrees (Demo Closure Sprint etc.) contain full
+    // repo copies including dist/ builds that blow the eslint heap.
+    ".claude/worktrees/**",
   ]),
 ]);
 

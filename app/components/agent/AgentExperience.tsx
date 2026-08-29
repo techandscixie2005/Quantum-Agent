@@ -1144,7 +1144,7 @@ export function AgentExperience() {
             />
           ) : null}
 
-          {result && !answerWithheldByGate && !result.learning_native?.solo?.assistance_locked ? (
+          {result && !answerWithheldByGate && (result.learning_native?.solo?.status ?? "inactive") !== "active" ? (
             <section className={styles.learningNativeActions} aria-label="Learning-Native 阶段切换">
               <button
                 type="button"
