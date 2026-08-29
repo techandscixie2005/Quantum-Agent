@@ -1787,3 +1787,67 @@ class TestTeachBackAndTransferUIInitiation:
             phase = conv.learning_phase_json
             assert phase is not None
             assert phase["phase"] == "solo_active"
+
+    async def test_request_transfer_task_arms_solo_with_model_unavailable(
+        self,
+        learning_native_database: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """Golden Loop closure: when the student explicitly requests a transfer
+        task (``request_transfer_task=True``) but the model gateway is
+        unavailable (``None``), the policy must STILL arm Solo Mode using a
+        deterministic near-transfer fallback.  Model failure must never block
+        the Golden Loop from progressing to Solo Mode.
+        """
+
+        async with learning_native_database() as session:
+            seed = await _seed_actor(session)
+
+        # model_gateway=None simulates model unavailability; the fallback path
+        # must still arm Solo Mode.
+        graph = TutorGraph(
+            evidence_retriever=TunnelingRetriever(),
+            model_gateway=None,
+            checkpointer=InMemorySaver(),
+            use_specialist_agents=False,
+            enable_hitl=False,
+        )
+        request = TeachingTurnInput(
+            mode=TeachingMode.LEARN_CONCEPTS,
+            message="给我一个迁移任务。",
+            learning_native=LearningNativeSubmission(request_transfer_task=True),
+        )
+        async with learning_native_database() as session:
+            result = await graph.run(
+                session=session,
+                actor=seed.actor,
+                curriculum_edition_id=seed.edition_id,
+                request=request,
+            )
+            await session.commit()
+        # Solo Mode is armed deterministically even without a model proposal.
+        assert result.learning_native is not None
+        assert result.learning_native.transfer is not None
+        assert result.learning_native.solo is not None
+        assert result.learning_native.solo.status is SoloModeStatus.ACTIVE
+        assert result.learning_native.solo.active_transfer is not None
+        # The fallback transfer task uses the deterministic near-transfer prompt.
+        assert (
+            result.learning_native.transfer.prompt
+            == LearningNativePolicy.FALLBACK_TRANSFER_PROMPT
+        )
+        # The durable phase is persisted as SOLO_ACTIVE.
+        async with learning_native_database() as session:
+            from sqlalchemy import select as _select
+
+            conv = await session.scalar(
+                _select(TeachingConversation).where(
+                    TeachingConversation.id == result.conversation_id
+                )
+            )
+            assert conv is not None
+            phase = conv.learning_phase_json
+            assert phase is not None
+            assert phase["phase"] == "solo_active"
+            assert phase["active_transfer_task_prompt"] == (
+                LearningNativePolicy.FALLBACK_TRANSFER_PROMPT
+            )

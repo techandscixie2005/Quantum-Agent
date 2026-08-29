@@ -467,25 +467,47 @@ class LearningNativePolicy:
         ]
         return analysis, evidence
 
+    # Deterministic fallback transfer task prompt used when the model is
+    # unavailable or returns garbage AND the student explicitly requested a
+    # transfer task via ``request_transfer_task=True``.  This is the PRD V3.0
+    # Axiom 1 analogue for the transfer phase: model failure must never block
+    # the student from entering Solo Mode once they have explicitly requested
+    # it.  The fallback is a near-transfer on the focus concept so the student
+    # can always attempt an unaided reconstruction.
+    FALLBACK_TRANSFER_PROMPT: str = (
+        "请独立完成一个近迁移任务：把当前聚焦的概念用到一个相近但不同的情境中，"
+        "写出你的推理过程和结论（不要依赖 AI 辅助）。"
+    )
+    FALLBACK_TRANSFER_REASON: str = (
+        "迁移任务提案失败闭合：模型未生成迁移任务，使用确定性回退近迁移任务。"
+    )
+
     def prepare_transfer(
         self,
         *,
         proposal: TransferProposal | None,
         source_concept_ids: Sequence[UUID],
         active_solo: SoloMode | None,
+        force_arm: bool = False,
     ) -> tuple[TransferTask | None, SoloMode, list[LearningNativeEvidence]]:
         """Build a transfer task and arm Solo Mode deterministically.
 
         The model proposes the prompt and parameters; the policy decides
         whether Solo Mode is armed, whether the task is verifiable, and what
         evidence is recorded.
+
+        When ``force_arm`` is True (the student explicitly requested a transfer
+        task via ``request_transfer_task=True``), a missing model proposal does
+        NOT prevent Solo Mode from arming — a deterministic near-transfer
+        fallback task is used instead.  This guarantees the Golden Loop can
+        always progress to Solo Mode regardless of model availability.
         """
 
         if active_solo is not None and active_solo.status is SoloModeStatus.ACTIVE:
             # A transfer task is already in flight; do not replace it.
             return active_solo.active_transfer, active_solo, []
 
-        if proposal is None:
+        if proposal is None and not force_arm:
             solo = SoloMode(
                 status=SoloModeStatus.INACTIVE,
                 active_transfer=None,
@@ -493,6 +515,58 @@ class LearningNativePolicy:
                 unlock_reason="没有可用的迁移任务提案。",
             )
             return None, solo, []
+
+        if proposal is None and force_arm:
+            # Deterministic fallback: arm a near-transfer on the focus concept
+            # so the student can enter Solo Mode even when the model fails to
+            # propose a task.  The fallback is not verifiable (no expected
+            # observable), so a solo attempt will be recorded as
+            # TRANSFER_ATTEMPTED, not TRANSFER_VERIFIED — but Solo Mode is
+            # enterable and the Golden Loop progresses.
+            task = TransferTask(
+                transfer_type=TransferType.NEAR,
+                prompt=self.FALLBACK_TRANSFER_PROMPT,
+                source_concept_ids=list(source_concept_ids)[:6],
+                key_parameters=[],
+                expected_observable="",
+                verifiable=False,
+            )
+            armed_solo = SoloMode(
+                status=SoloModeStatus.ACTIVE,
+                active_transfer=task,
+                started_at=datetime.now(UTC).isoformat(),
+                assistance_locked=True,
+                unlock_reason="",
+            )
+            task_id = str(task.source_concept_ids[0]) if task.source_concept_ids else ""
+            fallback_evidence = [
+                LearningNativeEvidence(
+                    kind=LearningEvidenceKind.TRANSFER_ASSIGNED,
+                    observation=(
+                        f"系统构造 {task.transfer_type.value} 迁移任务（确定性回退，仅指派，不计为已验证迁移）。"
+                    ),
+                    evidence_json={
+                        "transfer_type": task.transfer_type.value,
+                        "verifiable": False,
+                        "source_concept_ids": [str(cid) for cid in task.source_concept_ids],
+                        "active_transfer_task_id": task_id,
+                        "outcome": "TRANSFER_ASSIGNED",
+                        "verified": False,
+                        "fallback": True,
+                    },
+                ),
+                LearningNativeEvidence(
+                    kind=LearningEvidenceKind.SOLO_ASSIGNED,
+                    observation="系统进入 Solo Mode（确定性回退迁移任务），等待学生独立完成。",
+                    evidence_json={
+                        "active_transfer_task_id": task_id,
+                        "outcome": "SOLO_ASSIGNED",
+                        "verified": False,
+                        "fallback": True,
+                    },
+                ),
+            ]
+            return task, armed_solo, fallback_evidence
 
         task = TransferTask(
             transfer_type=proposal.transfer_type,

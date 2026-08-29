@@ -1368,18 +1368,23 @@ async def learning_native_node(
     # truth for whether Solo is active and which transfer task is in flight.
     active_solo: SoloMode | None = None
     if durable_phase.phase is LearningPhase.SOLO_ACTIVE:
+        # PRD V3.0 Golden Loop closure: always surface a non-null transfer task
+        # when Solo is active so the frontend TransferCard renders.  If the
+        # persisted prompt is empty (e.g. corrupted phase JSON), fall back to
+        # the deterministic near-transfer prompt.
+        solo_prompt = durable_phase.active_transfer_task_prompt or (
+            LearningNativePolicy.FALLBACK_TRANSFER_PROMPT
+        )
         active_solo = SoloMode(
             status=SoloModeStatus.ACTIVE,
             active_transfer=TransferTask(
                 transfer_type=TransferType.NEAR,
-                prompt=durable_phase.active_transfer_task_prompt,
+                prompt=solo_prompt,
                 source_concept_ids=[],
                 key_parameters=[],
                 expected_observable="",
                 verifiable=False,
-            )
-            if durable_phase.active_transfer_task_prompt
-            else None,
+            ),
             started_at=durable_phase.solo_started_at,
             assistance_locked=durable_phase.solo_assistance_locked,
             unlock_reason="",
@@ -1392,6 +1397,13 @@ async def learning_native_node(
         assistance_locked=True,
         unlock_reason="",
     )
+    # PRD V3.0 Golden Loop closure: when the durable phase is SOLO_ACTIVE,
+    # surface the active transfer task on both ``transfer`` and ``solo`` so the
+    # frontend can render the TransferCard from either field.  This keeps the
+    # ``LearningNativeTurnState`` self-consistent regardless of which field the
+    # UI reads.
+    if active_solo is not None and active_solo.active_transfer is not None:
+        transfer = active_solo.active_transfer
     transfer_evidence: list[LearningNativeEvidence] = []
 
     # Handle explicit Solo exit (marks ABORTED, not SUCCESS).
@@ -1535,10 +1547,15 @@ async def learning_native_node(
             transfer_type=None,
             model_gateway=model_gateway,
         )
+        # PRD V3.0 Golden Loop closure: when the student explicitly requests a
+        # transfer task, force-arm Solo Mode even if the model fails to propose
+        # a task.  A deterministic near-transfer fallback is used so the Golden
+        # Loop can always progress to Solo Mode regardless of model availability.
         transfer, solo, transfer_evidence = policy.prepare_transfer(
             proposal=transfer_proposal,
             source_concept_ids=source_concept_ids,
             active_solo=active_solo,
+            force_arm=True,
         )
         if solo.status is SoloModeStatus.ACTIVE and transfer is not None:
             durable_phase = DurableLearningPhase(
