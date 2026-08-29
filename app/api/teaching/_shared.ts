@@ -11,6 +11,7 @@ import {
   redactHitlProposedResponse,
   type EvidencePacket,
   type HitlInterruptResponse,
+  type TeachingMode,
   type TeachingScope,
   type TeachingTurnResult,
 } from "@/app/components/teaching/contracts";
@@ -79,84 +80,88 @@ type ParsedSse =
   | Readonly<{ event: "workflow.interrupted"; data: unknown }>
   | Readonly<{ event: "workflow.failed"; data: Readonly<{ code: string }> }>;
 
+/**
+ * Parse a fully-buffered SSE document into the typed lifecycle events.
+ *
+ * Kept for unit tests and as the reference parser.  The streaming proxy
+ * (``proxyTeachingTurn``) uses ``parseSseBlock`` incrementally so the browser
+ * sees ``workflow.started``, ``progress``, and heartbeat comments without
+ * waiting for the terminal event.
+ */
 export function parseSseDocument(value: string): readonly ParsedSse[] {
   const events: ParsedSse[] = [];
   for (const block of value.replace(/\r\n/g, "\n").split("\n\n")) {
     if (!block.trim()) continue;
-    let event = "message";
-    const dataLines: string[] = [];
-    let isCommentOnly = true;
-    for (const line of block.split("\n")) {
-      if (line.startsWith("event:")) {
-        event = line.slice(6).trim();
-        isCommentOnly = false;
-      } else if (line.startsWith("data:")) {
-        dataLines.push(line.slice(5).trimStart());
-        isCommentOnly = false;
-      } else if (line && !line.startsWith(":")) {
-        throw new TeachingContractError("SSE response contains an unsupported field");
-      }
-    }
-    // PRD V3.1 P1-2: comment-only blocks (``: keepalive``) and ``progress``
-    // events are emitted by the backend between ``workflow.started`` and the
-    // terminal event to keep the connection alive and report step progress.
-    // They carry no terminal contract; skip them so the buffered parser only
-    // considers the workflow lifecycle events.
-    if (isCommentOnly || event === "progress") continue;
-    let data: unknown;
-    try {
-      data = JSON.parse(dataLines.join("\n"));
-    } catch {
-      throw new TeachingContractError("SSE response contains invalid JSON");
-    }
-    if (event === "workflow.started") {
-      if (typeof data !== "object" || data === null || Array.isArray(data)) {
-        throw new TeachingContractError("workflow.started payload is invalid");
-      }
-      const workflowVersion = (data as Record<string, unknown>).workflow_version;
-      if (typeof workflowVersion !== "string" || workflowVersion.length < 1 || workflowVersion.length > 160) {
-        throw new TeachingContractError("workflow.started version is invalid");
-      }
-      events.push({ event, data: { workflow_version: workflowVersion } });
-    } else if (event === "workflow.completed" || event === "workflow.interrupted") {
-      events.push({ event, data });
-    } else if (event === "workflow.failed") {
-      if (typeof data !== "object" || data === null || Array.isArray(data)) {
-        throw new TeachingContractError("workflow.failed payload is invalid");
-      }
-      const code = (data as Record<string, unknown>).code;
-      if (typeof code !== "string" || !SAFE_WORKFLOW_FAILURES.has(code)) {
-        throw new TeachingContractError("workflow.failed code is invalid");
-      }
-      events.push({ event, data: { code } });
-    } else {
-      throw new TeachingContractError("SSE response contains an unknown event");
-    }
+    const parsed = parseSseBlock(block);
+    if (parsed === null) continue; // comment-only / progress: skip
+    events.push(parsed);
   }
   return events;
 }
 
-function encodeSse(event: string, payload: unknown): string {
-  return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+/**
+ * Parse a single SSE block (already split on ``\n\n`` boundaries) into a
+ * typed lifecycle event, or return ``null`` for comment-only blocks and
+ * ``progress`` events (which carry no terminal contract).
+ *
+ * Throws ``TeachingContractError`` for malformed blocks so the caller can
+ * fail the stream with a 502-equivalent error rather than silently
+ * swallowing the violation.
+ */
+function parseSseBlock(block: string): ParsedSse | null {
+  let event = "message";
+  const dataLines: string[] = [];
+  let isCommentOnly = true;
+  for (const line of block.split("\n")) {
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim();
+      isCommentOnly = false;
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+      isCommentOnly = false;
+    } else if (line && !line.startsWith(":")) {
+      throw new TeachingContractError("SSE response contains an unsupported field");
+    }
+  }
+  // PRD V3.1 P1-2: comment-only blocks (``: keepalive``) and ``progress``
+  // events are emitted by the backend between ``workflow.started`` and the
+  // terminal event to keep the connection alive and report step progress.
+  // They carry no terminal contract; skip them.
+  if (isCommentOnly || event === "progress") return null;
+  let data: unknown;
+  try {
+    data = JSON.parse(dataLines.join("\n"));
+  } catch {
+    throw new TeachingContractError("SSE response contains invalid JSON");
+  }
+  if (event === "workflow.started") {
+    if (typeof data !== "object" || data === null || Array.isArray(data)) {
+      throw new TeachingContractError("workflow.started payload is invalid");
+    }
+    const workflowVersion = (data as Record<string, unknown>).workflow_version;
+    if (typeof workflowVersion !== "string" || workflowVersion.length < 1 || workflowVersion.length > 160) {
+      throw new TeachingContractError("workflow.started version is invalid");
+    }
+    return { event, data: { workflow_version: workflowVersion } };
+  }
+  if (event === "workflow.completed" || event === "workflow.interrupted") {
+    return { event, data };
+  }
+  if (event === "workflow.failed") {
+    if (typeof data !== "object" || data === null || Array.isArray(data)) {
+      throw new TeachingContractError("workflow.failed payload is invalid");
+    }
+    const code = (data as Record<string, unknown>).code;
+    if (typeof code !== "string" || !SAFE_WORKFLOW_FAILURES.has(code)) {
+      throw new TeachingContractError("workflow.failed code is invalid");
+    }
+    return { event, data: { code } };
+  }
+  throw new TeachingContractError("SSE response contains an unknown event");
 }
 
-async function readBoundedText(response: Response, maxBytes = 2_000_000): Promise<string> {
-  if (!response.body) throw new TeachingContractError("SSE response body is missing");
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let total = 0;
-  let output = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel("teaching response exceeded the bounded payload size");
-      throw new TeachingContractError("SSE response exceeds the bounded payload size");
-    }
-    output += decoder.decode(value, { stream: true });
-  }
-  return output + decoder.decode();
+function encodeSse(event: string, payload: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -181,6 +186,135 @@ export async function assertEvidenceDigests(packet: EvidencePacket): Promise<voi
       }
     }),
   );
+}
+
+/**
+ * Streaming SSE validator state machine.
+ *
+ * The BFF reads the upstream SSE body incrementally, splits it on ``\n\n``
+ * block boundaries, and forwards each block to the browser as it arrives.
+ * This class enforces the terminal contract while streaming:
+ *
+ * - ``workflow.started`` must arrive first and exactly once; it is forwarded
+ *   immediately.
+ * - ``progress`` events and ``: keepalive`` comments are forwarded
+ *   immediately (the browser shows a progress indicator).
+ * - The terminal event (``workflow.completed`` / ``workflow.interrupted`` /
+ *   ``workflow.failed``) is validated before forwarding: evidence digests,
+ *   scope, conversation-id stability, and HITL scope are checked.  Exactly
+ *   one terminal event is allowed; after it the stream closes.
+ * - Any contract violation (unknown event, bad JSON, second terminal,
+ *   missing ``workflow.started``, validation failure) terminates the stream
+ *   with a ``workflow.failed`` SSE event carrying ``INVALID_UPSTREAM_CONTRACT``
+ *   so the browser never displays an unverified result.
+ */
+interface StreamingValidator {
+  /** Forward a raw SSE block verbatim, or return an error event to emit. */
+  handleBlock(
+    block: string,
+    context: ValidationContext,
+  ): Promise<{ kind: "forward"; chunk: string } | { kind: "terminal"; chunk: string } | { kind: "error"; chunk: string }>;
+  /** True once the unique terminal event has been forwarded. */
+  readonly finished: boolean;
+}
+
+interface ValidationContext {
+  scope: TeachingScope;
+  mode: TeachingMode;
+  conversationId: string | null;
+}
+
+/**
+ * Construct a streaming SSE validator.  Exported for unit tests so the
+ * incremental forwarding logic (``workflow.started`` forwarded immediately,
+ * ``progress`` and keepalive comments forwarded verbatim, terminal event
+ * validated before forwarding, contract violations produce a
+ * ``workflow.failed`` event) can be exercised without a live upstream.
+ */
+export function makeStreamingValidator(): StreamingValidator {
+  let startedSeen = false;
+  let terminalSeen = false;
+  let finished = false;
+
+  return {
+    get finished() {
+      return finished;
+    },
+    async handleBlock(block, context) {
+      if (finished) return { kind: "forward", chunk: "" };
+      const trimmed = block.trim();
+      if (!trimmed) return { kind: "forward", chunk: "" };
+      // Comment-only keepalive blocks: forward verbatim (browsers silently
+      // consume ``:`` lines per the SSE spec; we still forward so any
+      // non-browser client and the dev-tools network panel see activity).
+      if (trimmed.startsWith(":")) {
+        return { kind: "forward", chunk: `${block}\n\n` };
+      }
+      let parsed: ParsedSse | null;
+      try {
+        parsed = parseSseBlock(block);
+      } catch {
+        finished = true;
+        return { kind: "error", chunk: encodeSse("workflow.failed", { code: "INVALID_UPSTREAM_CONTRACT" }) };
+      }
+      if (parsed === null) {
+        // progress event: forward verbatim so the browser can render stage
+        // progress without waiting for the terminal event.
+        return { kind: "forward", chunk: `${block}\n\n` };
+      }
+      if (parsed.event === "workflow.started") {
+        if (startedSeen) {
+          finished = true;
+          return { kind: "error", chunk: encodeSse("workflow.failed", { code: "INVALID_UPSTREAM_CONTRACT" }) };
+        }
+        startedSeen = true;
+        return { kind: "forward", chunk: encodeSse("workflow.started", parsed.data) };
+      }
+      // Terminal event.
+      if (!startedSeen) {
+        finished = true;
+        return { kind: "error", chunk: encodeSse("workflow.failed", { code: "INVALID_UPSTREAM_CONTRACT" }) };
+      }
+      if (terminalSeen) {
+        finished = true;
+        return { kind: "error", chunk: encodeSse("workflow.failed", { code: "INVALID_UPSTREAM_CONTRACT" }) };
+      }
+      terminalSeen = true;
+      if (parsed.event === "workflow.completed") {
+        let result: TeachingTurnResult;
+        try {
+          result = parseTeachingTurnResult(parsed.data);
+          assertTeachingScope(result, context.scope, context.mode);
+          await assertEvidenceDigests(result.evidence_packet);
+          if (context.conversationId && result.conversation_id !== context.conversationId) {
+            throw new TeachingContractError("conversation id changed across the turn");
+          }
+        } catch {
+          return { kind: "error", chunk: encodeSse("workflow.failed", { code: "INVALID_UPSTREAM_CONTRACT" }) };
+        }
+        finished = true;
+        return { kind: "terminal", chunk: encodeSse("workflow.completed", result) };
+      }
+      if (parsed.event === "workflow.interrupted") {
+        let pause: HitlInterruptResponse;
+        try {
+          pause = redactHitlProposedResponse(parseHitlInterruptResponse(parsed.data));
+          assertHitlScope(pause, context.scope, context.mode);
+          await assertEvidenceDigests(pause.artifacts.evidence_packet);
+          if (context.conversationId && pause.conversation_id !== context.conversationId) {
+            throw new TeachingContractError("conversation id changed at the HITL boundary");
+          }
+        } catch {
+          return { kind: "error", chunk: encodeSse("workflow.failed", { code: "INVALID_UPSTREAM_CONTRACT" }) };
+        }
+        finished = true;
+        return { kind: "terminal", chunk: encodeSse("workflow.interrupted", pause) };
+      }
+      // workflow.failed: already validated by parseSseBlock (safe code).
+      finished = true;
+      return { kind: "terminal", chunk: encodeSse("workflow.failed", parsed.data) };
+    },
+  };
 }
 
 export async function proxyTeachingTurn(request: Request): Promise<Response> {
@@ -226,12 +360,12 @@ export async function proxyTeachingTurn(request: Request): Promise<Response> {
     "/teaching/turns/stream";
   let upstream: Response;
   try {
-    // PRD V3.0 P1-2: forward browser cancellation to the backend so a user
-    // who navigates away or cancels the request does not keep a long model
-    // call running.  We combine the incoming request signal (browser
-    // cancellation) with a 300s timeout using AbortSignal.any.  The 300s
-    // ceiling gives the real model room for deep-reasoning fallback (the
-    // Coding Agent may fall back from code_primary to reasoning_primary).
+    // PRD V3.0 P1-2 + V3.2 streaming: forward browser cancellation to the
+    // backend so a user who navigates away or cancels the request does not
+    // keep a long model call running.  We combine the incoming request
+    // signal (browser cancellation) with a 300s timeout using AbortSignal.any.
+    // The 300s ceiling gives the real model room for deep-reasoning fallback
+    // (the Coding Agent may fall back from code_primary to reasoning_primary).
     const timeoutSignal = AbortSignal.timeout(300_000);
     const combinedSignal = request.signal
       ? AbortSignal.any([request.signal, timeoutSignal])
@@ -272,86 +406,145 @@ export async function proxyTeachingTurn(request: Request): Promise<Response> {
       traceId,
     );
   }
-
-  let events: readonly ParsedSse[];
-  try {
-    events = parseSseDocument(await readBoundedText(upstream));
-  } catch {
+  if (!upstream.body) {
     return teachingError(
       502,
       "INVALID_UPSTREAM_CONTRACT",
-      "教学事件流不符合固定工作流契约；本页已拒绝显示未经验证的数据。",
+      "教学事件流缺少响应体；本页已拒绝显示。",
       traceId,
     );
   }
 
-  const started = events.filter((event) => event.event === "workflow.started");
-  const completed = events.filter((event) => event.event === "workflow.completed");
-  const interrupted = events.filter((event) => event.event === "workflow.interrupted");
-  const failed = events.filter((event) => event.event === "workflow.failed");
-  if (
-    started.length !== 1 ||
-    completed.length + interrupted.length + failed.length !== 1 ||
-    events.length !== 2
-  ) {
-    return teachingError(
-      502,
-      "INVALID_UPSTREAM_CONTRACT",
-      "教学事件流缺少唯一的开始或结束事件；本页已拒绝显示。",
-      traceId,
-    );
-  }
+  // PRD V3.2 streaming: stream the upstream SSE to the browser incrementally.
+  // We read the body in chunks, split on ``\n\n`` block boundaries, and feed
+  // each complete block through the streaming validator.  The validator
+  // forwards ``workflow.started``, ``progress``, and keepalive comments
+  // immediately; it validates the terminal event (evidence digests, scope,
+  // conversation-id, HITL scope) before forwarding it, and emits a
+  // ``workflow.failed`` SSE event on any contract violation.  The browser
+  // therefore sees useful progress within ~1s and never sees a long blank
+  // loading period, while the terminal contract is still enforced.
+  const MAX_TOTAL_BYTES = 2_000_000;
+  const validator = makeStreamingValidator();
+  const validationContext: ValidationContext = {
+    scope: scope as TeachingScope,
+    mode: body.mode,
+    conversationId: body.conversation_id ?? null,
+  };
 
-  let responseBody: string;
-  if (completed.length === 1) {
-    let result: TeachingTurnResult;
-    try {
-      result = parseTeachingTurnResult(completed[0]?.data);
-      assertTeachingScope(result, scope as TeachingScope, body.mode);
-      await assertEvidenceDigests(result.evidence_packet);
-      if (body.conversation_id && result.conversation_id !== body.conversation_id) {
-        throw new TeachingContractError("conversation id changed across the turn");
-      }
-    } catch {
-      return teachingError(
-        502,
-        "INVALID_UPSTREAM_CONTRACT",
-        "教学结果未通过范围、证据或科学结果校验；本页已拒绝显示。",
-        traceId,
-      );
-    }
-    responseBody =
-      encodeSse("workflow.started", started[0]?.data) +
-      encodeSse("workflow.completed", result);
-  } else if (interrupted.length === 1) {
-    let pause: HitlInterruptResponse;
-    try {
-      pause = redactHitlProposedResponse(
-        parseHitlInterruptResponse(interrupted[0]?.data),
-      );
-      assertHitlScope(pause, scope as TeachingScope, body.mode);
-      await assertEvidenceDigests(pause.artifacts.evidence_packet);
-      if (body.conversation_id && pause.conversation_id !== body.conversation_id) {
-        throw new TeachingContractError("conversation id changed at the HITL boundary");
-      }
-    } catch {
-      return teachingError(
-        502,
-        "INVALID_UPSTREAM_CONTRACT",
-        "人工复核状态未通过范围、证据或权限契约；本页已拒绝显示。",
-        traceId,
-      );
-    }
-    responseBody =
-      encodeSse("workflow.started", started[0]?.data) +
-      encodeSse("workflow.interrupted", pause);
-  } else {
-    responseBody =
-      encodeSse("workflow.started", started[0]?.data) +
-      encodeSse("workflow.failed", failed[0]?.data);
-  }
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = upstream.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let totalBytes = 0;
+      let closed = false;
 
-  return new Response(responseBody, {
+      const enqueue = (text: string) => {
+        if (closed) return;
+        if (!text) return;
+        controller.enqueue(new TextEncoder().encode(text));
+      };
+
+      const emitErrorAndClose = (chunk: string) => {
+        enqueue(chunk);
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
+      };
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          totalBytes += value.byteLength;
+          if (totalBytes > MAX_TOTAL_BYTES) {
+            await reader.cancel("teaching response exceeded the bounded payload size");
+            emitErrorAndClose(
+              encodeSse("workflow.failed", { code: "INVALID_UPSTREAM_CONTRACT" }),
+            );
+            return;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          // Split on ``\n\n`` block boundaries.  Keep the trailing partial
+          // block in the buffer for the next iteration.
+          let separatorIndex: number;
+          while ((separatorIndex = buffer.indexOf("\n\n")) !== -1) {
+            const block = buffer.slice(0, separatorIndex);
+            buffer = buffer.slice(separatorIndex + 2);
+            const outcome = await validator.handleBlock(block, validationContext);
+            if (outcome.kind === "error") {
+              emitErrorAndClose(outcome.chunk);
+              return;
+            }
+            if (outcome.kind === "terminal") {
+              enqueue(outcome.chunk);
+              // Drain any remaining buffered input but do not forward it;
+              // the terminal event has been emitted and the contract is
+              // satisfied.  Close once the upstream is done.
+              closed = true;
+              try {
+                controller.close();
+              } catch {
+                // already closed
+              }
+              await reader.cancel("terminal event forwarded");
+              return;
+            }
+            enqueue(outcome.chunk);
+          }
+        }
+        // Flush any trailing partial block (treat a final block without a
+        // trailing ``\n\n`` as a complete block).
+        const tail = buffer;
+        buffer = "";
+        if (tail.trim()) {
+          const outcome = await validator.handleBlock(tail, validationContext);
+          if (outcome.kind === "error") {
+            emitErrorAndClose(outcome.chunk);
+            return;
+          }
+          enqueue(outcome.chunk);
+        }
+        if (!validator.finished) {
+          // The upstream ended without a terminal event.  Fail closed so
+          // the browser never displays an incomplete result.
+          enqueue(encodeSse("workflow.failed", { code: "INVALID_UPSTREAM_CONTRACT" }));
+        }
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
+      } catch {
+        if (closed) return;
+        // The browser cancelled (AbortError) or the upstream errored.  If
+        // we have not yet emitted a terminal event, fail closed.
+        if (!validator.finished) {
+          enqueue(encodeSse("workflow.failed", { code: "INVALID_UPSTREAM_CONTRACT" }));
+        }
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
+      }
+    },
+    cancel(reason) {
+      // Browser cancelled the stream.  The upstream fetch's AbortSignal
+      // (combined with request.signal) will cancel the upstream read too.
+      // Nothing else to do here; the ReadableStream signals the upstream
+      // reader via the shared abort signal.
+      void reason;
+    },
+  });
+
+  return new Response(stream, {
     status: 200,
     headers: {
       "Cache-Control": "private, no-store",

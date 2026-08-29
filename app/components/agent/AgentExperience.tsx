@@ -118,22 +118,98 @@ function isHitlOutcome(value: TeachingWorkflowOutcome): value is HitlInterruptRe
   return "status" in value && value.status === "interrupted";
 }
 
-function terminalEvent(document: string): unknown {
+// PRD V3.2 streaming: the latest per-stage progress event surfaced by the
+// BFF stream.  ``step`` is the stage label (interpret, retrieve, diagnose,
+// policy, scientific_tools, generate, learning_native, assemble, ...) or a
+// lifecycle marker (workflow_started, workflow_running, workflow_completed,
+// workflow_paused).  ``elapsed_seconds`` is the backend-reported wall clock
+// since the workflow started.
+type StageProgress = Readonly<{
+  step: string;
+  status: string;
+  detail: string;
+  elapsed_seconds: number;
+}>;
+
+// Human-readable labels for the canonical Golden Loop stages emitted by the
+// backend ``progress`` events.  Unknown steps fall back to the raw label.
+const STAGE_LABELS: Readonly<Record<string, string>> = {
+  workflow_started: "教学流程已启动",
+  workflow_running: "教学流程执行中",
+  interpret: "理解你的问题",
+  commitment_gate: "承诺门控（先思考再解释）",
+  retrieve: "检索课程证据",
+  diagnose: "诊断学习状态",
+  policy: "应用答案政策",
+  scientific_tools: "运行科学工具 / Coding Agent",
+  generate: "生成教学回应",
+  learning_native: "学习原生策略（教学回返 / 迁移）",
+  hitl_gate: "等待人工复核",
+  assemble: "汇总本轮结果",
+  workflow_completed: "教学流程完成",
+  workflow_paused: "教学流程暂停等待复核",
+};
+
+/**
+ * PRD V3.2 streaming: consume the BFF SSE stream incrementally.
+ *
+ * The BFF now forwards ``workflow.started``, ``progress``, and keepalive
+ * comments as they arrive, then the validated terminal event.  This helper
+ * reads the response body with a ``ReadableStream`` reader, splits on
+ * ``\n\n`` block boundaries, and invokes ``onProgress`` for each
+ * ``progress`` event so the UI can render a live stage indicator.  It
+ * returns the validated terminal payload (the same shape ``terminalEvent``
+ * returns) and throws on ``workflow.failed`` or a missing terminal.
+ *
+ * The terminal contract is unchanged: exactly one terminal event is
+ * expected, and it is validated by the BFF before forwarding.  This helper
+ * only parses what the BFF already validated.
+ */
+async function consumeTeachingStream(
+  response: Response,
+  onProgress: (progress: StageProgress) => void,
+): Promise<unknown> {
+  if (!response.body) throw new Error("教学事件流缺少响应体。");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
   let terminal: unknown;
   let terminalCount = 0;
   let failure: string | null = null;
-  for (const block of document.replace(/\r\n/g, "\n").split("\n\n")) {
-    if (!block.trim()) continue;
+
+  const flushBlock = (block: string): "continue" | "done" => {
+    if (!block.trim()) return "continue";
     let event = "message";
     const data: string[] = [];
     for (const line of block.split("\n")) {
       if (line.startsWith("event:")) event = line.slice(6).trim();
       if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
     }
-    const payload: unknown = JSON.parse(data.join("\n"));
+    if (event === "progress") {
+      try {
+        const payload = JSON.parse(data.join("\n")) as Record<string, unknown>;
+        const step = typeof payload.step === "string" ? payload.step : "workflow";
+        const status = typeof payload.status === "string" ? payload.status : "in_flight";
+        const detail = typeof payload.detail === "string" ? payload.detail : "";
+        const elapsed =
+          typeof payload.elapsed_seconds === "number" ? payload.elapsed_seconds : 0;
+        onProgress({ step, status, detail, elapsed_seconds: elapsed });
+      } catch {
+        // Ignore malformed progress events; the terminal contract is unaffected.
+      }
+      return "continue";
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(data.join("\n"));
+    } catch {
+      failure = "INVALID_UPSTREAM_CONTRACT";
+      return "done";
+    }
     if (event === "workflow.completed" || event === "workflow.interrupted") {
       terminal = payload;
       terminalCount += 1;
+      return "done";
     }
     if (event === "workflow.failed") {
       const code =
@@ -141,8 +217,38 @@ function terminalEvent(document: string): unknown {
           ? (payload as Record<string, unknown>).code
           : null;
       failure = typeof code === "string" ? code : "WORKFLOW_FAILED";
+      return "done";
+    }
+    // workflow.started and keepalive comments: no terminal action.
+    return "continue";
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let separatorIndex: number;
+    while ((separatorIndex = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, separatorIndex);
+      buffer = buffer.slice(separatorIndex + 2);
+      if (flushBlock(block) === "done") {
+        // Drain remaining buffered input without forwarding; the terminal
+        // (or failure) has been observed.
+        try {
+          await reader.cancel("terminal event received");
+        } catch {
+          // already cancelled
+        }
+        if (failure) throw new Error(`教学工作流中止（${failure}）。`);
+        if (terminal === undefined || terminalCount !== 1) {
+          throw new Error("教学工作流没有返回唯一的完成或暂停记录。");
+        }
+        return terminal;
+      }
     }
   }
+  // Flush any trailing partial block.
+  if (buffer.trim()) flushBlock(buffer);
   if (failure) throw new Error(`教学工作流中止（${failure}）。`);
   if (terminal === undefined || terminalCount !== 1) {
     throw new Error("教学工作流没有返回唯一的完成或暂停记录。");
@@ -501,6 +607,12 @@ export function AgentExperience() {
   const [barrierEnergy, setBarrierEnergy] = useState(5);
   const [barrierHeight, setBarrierHeight] = useState(10);
   const [barrierWidth, setBarrierWidth] = useState(1e-10);
+  // PRD V3.2 streaming: per-stage progress surfaced to the user while the
+  // teaching workflow runs.  The BFF now streams ``progress`` SSE events as
+  // each graph node begins; we render the latest stage + elapsed_seconds so
+  // the user sees useful activity within ~1s instead of a blank loading
+  // period.  Cleared on the next turn submit and on terminal.
+  const [stageProgress, setStageProgress] = useState<StageProgress | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewUrlsRef = useRef(new Set<string>());
 
@@ -565,16 +677,32 @@ export function AgentExperience() {
         course_id: input.scope.courseId,
         curriculum_edition_id: input.scope.curriculumEditionId,
       });
+      setStageProgress({
+        step: "workflow_started",
+        status: "started",
+        detail: "教学流程已启动",
+        elapsed_seconds: 0,
+      });
       const response = await fetch(`/api/teaching/turns/stream?${query.toString()}`, {
         method: "POST",
         headers: { Accept: "text/event-stream", "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       if (!response.ok) throw new Error(await responseMessage(response, "教学工作流不可用。"));
-      const parsed = parseTeachingWorkflowOutcome(terminalEvent(await response.text()));
+      // PRD V3.2 streaming: consume the SSE stream incrementally so the UI
+      // renders per-stage progress as each ``progress`` event arrives.  The
+      // terminal event is still validated by the BFF before forwarding, and
+      // ``consumeTeachingStream`` enforces the exactly-one-terminal contract
+      // on the client side too.
+      const parsed = parseTeachingWorkflowOutcome(
+        await consumeTeachingStream(response, (progress) => setStageProgress(progress)),
+      );
       if (isHitlOutcome(parsed)) assertHitlScope(parsed, input.scope, input.mode);
       else assertTeachingScope(parsed, input.scope, input.mode);
       return parsed;
+    },
+    onMutate: () => {
+      setStageProgress(null);
     },
     onSuccess: (next, variables) => {
       setConversationId(next.conversation_id);
@@ -588,6 +716,10 @@ export function AgentExperience() {
         setConfirmedTranscription("");
       }
       setRightOpen(true);
+    },
+    onSettled: () => {
+      // Keep the final stage visible briefly so the user sees "完成"; it is
+      // cleared on the next submit via ``onMutate``.
     },
   });
 
@@ -1045,10 +1177,29 @@ export function AgentExperience() {
               <p className={styles.kicker}>START WITH EVIDENCE</p>
               <h2>{mode === "review_derivations" ? "上传手写推导，先确认转录，再定位首错。" : mode === "run_experiments" ? "上传结果图，并用数值不变量约束解释。" : mode === "work_on_projects" ? "提交当前里程碑，而不是索取完整项目。" : "从课程概念、截图或一段困惑开始。"}</h2>
               <p>系统只在需要时调用感知、证据、诊断与专业导师节点；答案范围始终由后端政策决定。</p>
-              <button type="button" className={styles.goldenLoopToggle} onClick={startGoldenTunnelingLoop}>
-                <FlaskConical size={13} />
-                启动黄金学习循环 · 量子隧穿
-              </button>
+              {turnMutation.isPending && stageProgress ? (
+                <div
+                  className={styles.stageProgress}
+                  data-testid="teaching-stage-progress"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <LoaderCircle className={styles.spin} size={14} />
+                  <div>
+                    <strong>{STAGE_LABELS[stageProgress.step] ?? stageProgress.step}</strong>
+                    <small>
+                      {stageProgress.elapsed_seconds > 0
+                        ? `已运行 ${stageProgress.elapsed_seconds.toFixed(1)}s`
+                        : "教学流程已启动"}
+                    </small>
+                  </div>
+                </div>
+              ) : (
+                <button type="button" className={styles.goldenLoopToggle} onClick={startGoldenTunnelingLoop}>
+                  <FlaskConical size={13} />
+                  启动黄金学习循环 · 量子隧穿
+                </button>
+              )}
             </section>
           ) : result ? (
             <article className={styles.tutorRecord} tabIndex={-1} data-testid="agent-tutor-result">

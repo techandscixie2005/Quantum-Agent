@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated, Any, NoReturn, Protocol, cast
 from uuid import UUID
 
@@ -62,6 +62,15 @@ router = APIRouter(
 DatabaseSession = Annotated[AsyncSession, Depends(session_dependency)]
 
 
+# PRD V3.2 streaming: per-stage progress callback.  The streaming endpoint
+# passes this into ``machine.run`` so the workflow can emit a ``progress`` SSE
+# event as each stage (interpret, retrieve, diagnose, ...) begins.  The
+# callback receives the stage name and elapsed seconds since the workflow
+# started.  It is optional; when ``None`` the workflow runs without per-stage
+# notifications (the heartbeat loop still emits keepalives).
+StageProgressCallback = Callable[[str, float], Awaitable[None]]
+
+
 class TeachingWorkflow(Protocol):
     async def run(
         self,
@@ -71,6 +80,7 @@ class TeachingWorkflow(Protocol):
         curriculum_edition_id: UUID,
         request: TeachingTurnInput,
         model_gateway_override: ModelGateway | None = None,
+        on_stage: StageProgressCallback | None = None,
     ) -> TeachingTurnResult | HitlInterruptResponse: ...
 
     async def inspect_interrupt(
@@ -232,10 +242,15 @@ def _sse_heartbeat() -> str:
 
 
 # Heartbeat cadence (seconds).  Emitted between ``workflow.started`` and the
-# terminal event while ``machine.run`` is in flight.  12s stays well below
-# typical proxy idle timeouts (60s) and the 240s BFF deadline, and gives the
-# user visible progress activity during multi-step model calls.
-_HEARTBEAT_INTERVAL_SECONDS = 12.0
+# terminal event while ``machine.run`` is in flight.  PRD V3.2 streaming: 4s
+# keeps the connection alive well below typical proxy idle timeouts (60s) and
+# the 240s BFF deadline, and gives the browser visible progress activity
+# during multi-step model calls without flooding the SSE channel.  The first
+# progress event is emitted immediately after ``workflow.started`` (see
+# ``events`` below) so the browser sees activity within ~1s; subsequent
+# heartbeats fire on this cadence, and per-stage ``progress`` events fire as
+# each graph node begins (see ``_run_with_heartbeats``).
+_HEARTBEAT_INTERVAL_SECONDS = 4.0
 
 
 async def _run_with_heartbeats(
@@ -258,7 +273,27 @@ async def _run_with_heartbeats(
     heartbeat and return the result.  This keeps the SSE connection alive
     and gives the browser visible activity during long model calls without
     buffering or weakening any teaching gate.
+
+    PRD V3.2 streaming: we also pass an ``on_stage`` callback into
+    ``machine.run`` so the workflow emits a typed ``progress`` event as each
+    stage (interpret, retrieve, diagnose, ...) begins.  The per-stage events
+    are informational and never weaken the terminal contract; they do not add
+    a new ``WorkflowStepName`` (the 10-step ``WORKFLOW_ORDER`` trace is
+    unchanged).
     """
+
+    async def on_stage(stage: str, elapsed: float) -> None:
+        await emit(
+            _sse(
+                "progress",
+                {
+                    "step": stage,
+                    "status": "stage_started",
+                    "detail": f"workflow stage '{stage}' started",
+                    "elapsed_seconds": round(elapsed, 1),
+                },
+            )
+        )
 
     workflow_task = asyncio.create_task(
         machine.run(
@@ -267,6 +302,7 @@ async def _run_with_heartbeats(
             curriculum_edition_id=curriculum_edition_id,
             request=request,
             model_gateway_override=model_gateway_override,
+            on_stage=on_stage,
         )
     )
     heartbeat_task = asyncio.create_task(asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS))

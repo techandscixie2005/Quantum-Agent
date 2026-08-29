@@ -9,7 +9,9 @@ later milestones.
 
 from __future__ import annotations
 
-from typing import Literal, cast
+from collections.abc import Awaitable, Callable
+from time import monotonic
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from langchain_core.runnables import RunnableConfig
@@ -66,6 +68,35 @@ from quantum_agent.tutor.nodes import (
 from quantum_agent.tutor.state import TutorContext, TutorState
 
 __all__ = ["TutorGraph"]
+
+
+def start_time_monotonic() -> float:
+    """Return a monotonic timestamp for stage-progress elapsed_seconds."""
+
+    return monotonic()
+
+
+# PRD V3.2 streaming: map LangGraph node names to the stable stage labels
+# emitted in ``progress`` SSE events.  These labels are informational and do
+# NOT add a new ``WorkflowStepName``; the 10-step ``WORKFLOW_ORDER`` trace is
+# unchanged.  Nodes not listed here (e.g. ``prepare_commitment_gate``,
+# ``hitl_gate``, ``reject_turn``) surface under their own node name so the
+# browser still sees activity, but the canonical Golden Loop stages are the
+# keys below.
+_STAGE_LABELS: dict[str, str] = {
+    "interpret": "interpret",
+    "learning_native_pre": "commitment_gate",
+    "retrieve_evidence": "retrieve",
+    "diagnose": "diagnose",
+    "apply_policy": "policy",
+    "scientific_tools": "scientific_tools",
+    "generate_response": "generate",
+    "learning_native": "learning_native",
+    "hitl_gate": "hitl_gate",
+    "assemble_result": "assemble",
+    "prepare_commitment_gate": "commitment_gate",
+    "reject_turn": "reject",
+}
 
 
 def _route_after_hitl(
@@ -209,6 +240,7 @@ class TutorGraph:
         curriculum_edition_id: UUID,
         request: TeachingTurnInput,
         model_gateway_override: ModelGateway | None = None,
+        on_stage: Callable[[str, float], Awaitable[None]] | None = None,
     ) -> TeachingTurnResult | HitlInterruptResponse:
         resolved = await resolve_teaching_attachments(
             session,
@@ -279,14 +311,13 @@ class TutorGraph:
         )
         config = self._config(started.conversation.id)
 
-        # The graph returns the final state keyed by node; extract the result.
-        outcome = await self._graph.ainvoke(
+        final_state = await self._execute_graph(
             initial_state,
             config,
-            context=context,
-            durability="sync" if self._has_checkpointer else None,
+            context,
+            on_stage=on_stage,
+            started_at=start_time_monotonic(),
         )
-        final_state = cast(TutorState, outcome)
         if final_state.get("result") is not None:
             return TeachingTurnResult.model_validate(final_state["result"])
         return await self._inspect_interrupt(
@@ -295,6 +326,66 @@ class TutorGraph:
             curriculum_edition_id=curriculum_edition_id,
             conversation_id=started.conversation.id,
         )
+
+    async def _execute_graph(
+        self,
+        initial_state: TutorState,
+        config: RunnableConfig,
+        context: TutorContext,
+        *,
+        on_stage: Callable[[str, float], Awaitable[None]] | None,
+        started_at: float,
+    ) -> TutorState:
+        """Run the compiled graph, optionally streaming per-stage progress.
+
+        When ``on_stage`` is provided we use ``astream(stream_mode="updates")``
+        so the callback fires as each node begins producing output.  The
+        callback receives the node name (mapped to a stable stage label) and
+        the elapsed seconds since ``started_at``.  The final accumulated
+        state is returned exactly as ``ainvoke`` would produce.
+
+        When ``on_stage`` is ``None`` we fall back to a plain ``ainvoke`` so
+        the non-streaming path (and the test suite that calls ``run`` without
+        a callback) is unchanged.
+        """
+
+        durability: Literal["sync"] | None = "sync" if self._has_checkpointer else None
+        if on_stage is None:
+            outcome = await self._graph.ainvoke(
+                initial_state,
+                config,
+                context=context,
+                durability=durability,
+            )
+            return cast(TutorState, outcome)
+
+        final_state: dict[str, Any] = dict(initial_state)
+        async for update in self._graph.astream(
+            initial_state,
+            config,
+            context=context,
+            stream_mode="updates",
+            durability=durability,
+        ):
+            # ``update`` is a dict mapping node name -> state-delta.  A node
+            # may emit multiple updates (LangGraph splits some nodes); we
+            # notify on each node name we observe.  Skip the ``__start__``
+            # pseudo-node which carries no stage semantics.
+            for node_name in update:
+                if node_name == "__start__":
+                    continue
+                stage = _STAGE_LABELS.get(node_name, node_name)
+                try:
+                    await on_stage(stage, monotonic() - started_at)
+                except Exception:
+                    # The progress callback must never break the workflow.
+                    # Swallow emitter errors so the teaching gates still run.
+                    pass
+                # Merge the node's state delta into the running final state.
+                delta = update[node_name]
+                if isinstance(delta, dict):
+                    final_state.update(delta)
+        return cast(TutorState, final_state)
 
     def _context(
         self,
