@@ -831,6 +831,22 @@
   text-transform: uppercase;
 }
 
+.stageProgress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--mint) 16%, transparent);
+  max-width: 460px;
+}
+.stageProgress svg { color: var(--green); flex-shrink: 0; }
+.stageProgress div { display: flex; flex-direction: column; text-align: left; }
+.stageProgress strong { font-size: 13px; color: var(--green-dark); }
+.stageProgress small { font-size: 11px; color: var(--muted); }
+
 .goldenLoopToggle {
   display: flex;
   align-items: center;
@@ -840,8 +856,7 @@
   border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--mint) 22%, transparent);
-  color: var(--green-dark);
-  font: 600 9px var(--font-geist-mono), monospace;
+  color: var(--green-dark);  font: 600 9px var(--font-geist-mono), monospace;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
