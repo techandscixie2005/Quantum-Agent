@@ -165,7 +165,7 @@ async function submitTeachBack(page: Page, reconstruction: string): Promise<void
   // The teach-back card must render after the transition.
   const card = page.getByTestId("teach-back-card");
   await expect(card, "Stage 10: teach-back-card must render after request").toBeVisible({ timeout: 30_000 });
-  await page.getByLabel("teach-back 重构").fill(reconstruction);
+  await page.getByRole("textbox", { name: "teach-back 重构" }).fill(reconstruction);
   const submitButton = page.getByRole("button", { name: /提交重构/ });
   await expect(submitButton).toBeEnabled();
   const streamResponse2 = page.waitForResponse(
