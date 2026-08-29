@@ -543,7 +543,8 @@ class LearningNativePolicy:
                 LearningNativeEvidence(
                     kind=LearningEvidenceKind.TRANSFER_ASSIGNED,
                     observation=(
-                        f"系统构造 {task.transfer_type.value} 迁移任务（确定性回退，仅指派，不计为已验证迁移）。"
+                        f"系统构造 {task.transfer_type.value} 迁移任务"
+                        "（确定性回退，仅指派，不计为已验证迁移）。"
                     ),
                     evidence_json={
                         "transfer_type": task.transfer_type.value,
@@ -567,6 +568,11 @@ class LearningNativePolicy:
                 ),
             ]
             return task, armed_solo, fallback_evidence
+
+        # Above, the `proposal is None and not force_arm` and
+        # `proposal is None and force_arm` branches both return.  Narrow for
+        # mypy: at this point proposal is guaranteed non-None.
+        assert proposal is not None
 
         task = TransferTask(
             transfer_type=proposal.transfer_type,
