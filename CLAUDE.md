@@ -17,8 +17,9 @@ Do not assume both stacks implement the same behavior — they are separate code
 
 ### Python backend (authoritative)
 
+The locked environment is Python 3.12+ (`requires-python = ">=3.12,<3.14"`, managed by `uv` against `services/api/uv.lock`). All commands run from `services/api`:
+
 ```bash
-# Locked host-side environment; everything under services/api
 cd services/api
 uv sync --frozen --extra dev          # install/test env
 uv run pytest -q                      # run all API tests (asyncio_mode=auto)
@@ -35,13 +36,14 @@ quantum-agent ingest --manifest content/quantum_course/manifest.toml
 quantum-agent sync-graph --limit 100  # drain approved Neo4j outbox (or --watch)
 quantum-agent probe-model             # test USTC chat reachability
 quantum-agent probe-embedding         # test embedding provider
+quantum-agent probe-live-model        # spend one real USTC round-trip via the API stack
 quantum-agent publish-documents ...   # teacher approve+publish governance
 quantum-agent ocr-textbook ...        # OCR scanned sources via vision model
 quantum-agent evaluate ...            # offline evaluation metrics/runner
+quantum-agent seed-demo-account ...   # create/refresh the competition demo student (see DEMO.md)
 ```
 
-live infra for real-model / real-E2E checks lives behind `make test-live-infra` /
-`make test-live-model` / `make test-live-e2e` (the E2E path runs `scripts/run-live-e2e.sh`).
+Live tests are gated behind registered pytest markers (`live_infra`, `live_model`, declared in `services/api/pyproject.toml`). Run a single marked test with `uv run pytest -m live_infra tests/...::test_name`; the markers are *opt-in* — unmarked runs skip them. The full live paths are `make test-live-infra` / `make test-live-model` / `make test-live-e2e` (E2E runs `scripts/run-live-e2e.sh`).
 
 ### Docker Compose stack (databases + both services)
 
@@ -100,18 +102,21 @@ Ingestion creates `REVIEW_REQUIRED` candidates and does not approve/publish anyt
 |---|---|
 | `main.py` | FastAPI app factory with dependency injection; health `/health/live` + `/health/ready` |
 | `config.py` | Pydantic-settings `Settings` (env-driven, secrets as `SecretStr`; SQLite allowed for tests, PostgreSQL required in production) |
-| `cli.py` | `quantum-agent` operational CLI (migrate/ingest/sync-graph/probe/publish/ocr) |
+| `cli.py` | `quantum-agent` operational CLI (migrate/ingest/sync-graph/probe/publish/ocr/seed-demo-account) |
 | `db_models.py` | ~2000-line SQLAlchemy async models (users, courses, memberships, document versions, source chunks, evidence, review candidates, outbox, teaching sessions) |
 | `alembic/` | 4 migrations (knowledge graph foundation, teaching policy/learning evidence, parser-scoped versions, multimodal attachments/doc runs) |
 | `knowledge/` | ingestion, extraction, ontology, retrieval (hybrid FTS+pgvector+Neo4j fusion), evidence packets, graph sync outbox, review, structural import |
-| `teaching/` | fixed-order `TeachingStateMachine` (interpret → diagnose → retrieve evidence → generate → scientific validation → assemble), policy/release engine, hitl, specialist agents, repository |
+| `teaching/` | fixed-order `TeachingStateMachine` (interpret → diagnose → retrieve evidence → generate → scientific validation → assemble), policy/release engine, hitl, specialist agents, repository, `learning_native.py` (native learning-evidence path) |
+| `coding/` | V3.1 Coding Agent: `agent.py` (subprocess-driven coding specialist), `sandbox.py` + top-level `sandbox_runner.py` (isolated subprocess execution), `safety.py` (boundary checks), `models.py` |
+| `credential_vault.py` | Fernet-encrypted per-session credential vault (API-key login → encrypted-at-rest USTC_API per session) |
+| `credential_router.py` | `CredentialScopedRouterFactory` — builds a model/embedding router scoped to the session's unlocked credential, so per-credential routing keys never touch the global `Settings` |
 | `multimodal/` | attachments + document-runs contracts, OCR-derived perception, capabilities, storage, runtime, security, teaching |
 | `evaluation/` | offline evaluation metrics + runner (models, fixtures, `__main__` entry) |
 | `tutor/` | LangGraph `StateGraph` re-expression of the state machine (nodes/state/graph), behavior-preserving (B1) |
 | `science/` | deterministic scientific toolbox + models (Hermiticity, normalization, commutators, etc.) |
 | `llm/` | USTC model gateway, vision gateway, embeddings |
 | `api/` | FastAPI routers: `attachments`, `course_context`, `graph`, `retrieval`, `review`, `source_files`, `teacher_insights`, `teaching` |
-| `gateways.py`, `database.py`, `auth.py` | model/embedding/graph-store builders; async engine/session factory; `CourseActor` auth |
+| `gateways.py`, `database.py`, `auth.py` | model/embedding/graph-store builders (gateways wires the credential vault + scoped router into the USTC gateway); async engine/session factory; `CourseActor` auth |
 
 The teaching data flow: fixed-order state machine (see `teaching/state_machine.py`) mirrors the legacy LangGraph.js 18-node graph, but reimplemented server-side in Python. `TutorGraph` reads/writes the same `TutorState` fields and produces identical `TeachingTurnResult`.
 
@@ -131,6 +136,8 @@ The teaching data flow: fixed-order state machine (see `teaching/state_machine.p
 The browser sends only a capability ID. Server resolves it to a USTC model. The client bundle must never contain `deepseek`, `qwen`, `glm`, `api.llm.ustc.edu.cn`, or `sk-` patterns — verified by `npm run check:secrets`.
 
 Single chat credential `USTC_API`. Embeddings are configured **independently** (`EMBEDDING_*`) because the USTC chat endpoint does not serve embeddings.
+
+**V3.1 per-session credentials (Python backend).** When the credential vault is enabled, the server-side `USTC_API` is *not* used directly for student sessions. Instead, the browser logs in with an API key (`/api/v1/auth/...`), the key is encrypted at rest in the Fernet vault (`credential_vault.py`), and each teaching session builds a `CredentialScopedRouterFactory` (`credential_router.py`) that routes model/embedding calls through *that session's* unlocked credential. `Settings.ustc_api` remains the fallback for teacher/admin paths and for sessions that predate the vault. Never log decrypted credential material; route through the scoped factory rather than reading `Settings.ustc_api` inside per-turn code.
 
 ## Secrets & environment
 
