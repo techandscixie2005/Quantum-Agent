@@ -340,7 +340,16 @@ class ModelCapabilityRegistry:
                 task=ModelTask.CODE,
                 transport=ModelTransport.CHAT_COMPLETIONS,
                 required=_TEXT_STRUCTURED | {ModelCapability.REASONING},
-                profile_ids=("code_primary", "reasoning_primary", "long_context_primary"),
+                # PRD V3.2 Demo Closure: deepseek-v4-pro returns a permanent 400
+                # for the Coding Agent's structured-output (CodeArtifact) request.
+                # When glm-5.2 (code_primary) fails transiently, fall to
+                # qwen3.8-reasoner (reasoning_second_pass) which supports the
+                # CodeArtifact schema, before deepseek-v4-pro as a last resort.
+                profile_ids=(
+                    "code_primary",
+                    "reasoning_second_pass",
+                    "reasoning_primary",
+                ),
             ),
         ]
         return cls(profiles=profiles, routes=routes)
