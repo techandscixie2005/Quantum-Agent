@@ -379,6 +379,7 @@ export type TransferType =
   | "delayed_retrieval";
 
 export type TransferTask = Readonly<{
+  task_id: string;
   transfer_type: TransferType;
   prompt: string;
   source_concept_ids: readonly string[];
@@ -387,7 +388,7 @@ export type TransferTask = Readonly<{
   verifiable: boolean;
 }>;
 
-export type SoloModeStatus = "inactive" | "active" | "exited";
+export type SoloModeStatus = "inactive" | "active" | "exited" | "aborted";
 
 export type SoloMode = Readonly<{
   status: SoloModeStatus;
@@ -439,6 +440,31 @@ export type LearningPolicyAction =
   | "enter_solo"
   | "show_worked_example";
 
+export type LearningPhase =
+  | "open"
+  | "commitment_required"
+  | "attempt_received"
+  | "intervention"
+  | "awaiting_revision"
+  | "verifying"
+  | "reconstruction_required"
+  | "transfer_required"
+  | "solo_active"
+  | "complete"
+  | "aborted";
+
+export type LearningStage =
+  | "predict"
+  | "diagnose"
+  | "explore"
+  | "verify"
+  | "explain"
+  | "teach_back"
+  | "transfer"
+  | "solo";
+
+export type RequiredLearningAction = "none" | "commitment" | "revision" | "teach_back" | "solo_attempt";
+
 export type LearningNativeTurnState = Readonly<{
   commitment: CognitiveCommitment | null;
   learning_action: LearningPolicyAction | null;
@@ -447,6 +473,11 @@ export type LearningNativeTurnState = Readonly<{
   solo: SoloMode | null;
   cognitive_mirror: CognitiveMirror | null;
   evidence_persisted: readonly string[];
+  phase: LearningPhase;
+  current_stage: LearningStage | null;
+  completed_stages: readonly LearningStage[];
+  required_action: RequiredLearningAction;
+  loop_required: boolean;
 }>;
 
 export type LearningNativeSubmission = Readonly<{
@@ -560,6 +591,8 @@ export type TeachingTurnResult = Readonly<{
     detail: string;
   }>[];
   learning_native: LearningNativeTurnState | null;
+  turn_completed: boolean;
+  learning_loop_completed: boolean;
 }>;
 
 export const HITL_REASONS = [
@@ -2321,6 +2354,8 @@ export function parseTeachingTurnResult(value: unknown): TeachingTurnResult {
       input.learning_native === undefined || input.learning_native === null
         ? null
         : parseLearningNativeTurnState(input.learning_native, "turnResult.learning_native"),
+    turn_completed: bool(input.turn_completed, "turnResult.turn_completed"),
+    learning_loop_completed: bool(input.learning_loop_completed, "turnResult.learning_loop_completed"),
   };
 }
 
@@ -2401,6 +2436,11 @@ function parseLearningNativeTurnState(value: unknown, path: string): LearningNat
       "solo",
       "cognitive_mirror",
       "evidence_persisted",
+      "phase",
+      "current_stage",
+      "completed_stages",
+      "required_action",
+      "loop_required",
     ],
     path,
   );
@@ -2446,6 +2486,44 @@ function parseLearningNativeTurnState(value: unknown, path: string): LearningNat
         ? null
         : parseCognitiveMirror(input.cognitive_mirror, `${path}.cognitive_mirror`),
     evidence_persisted: strings(input.evidence_persisted, `${path}.evidence_persisted`, 24, 64),
+    phase: oneOf(
+      input.phase,
+      [
+        "open",
+        "commitment_required",
+        "attempt_received",
+        "intervention",
+        "awaiting_revision",
+        "verifying",
+        "reconstruction_required",
+        "transfer_required",
+        "solo_active",
+        "complete",
+        "aborted",
+      ] as const,
+      `${path}.phase`,
+    ),
+    current_stage:
+      input.current_stage === undefined || input.current_stage === null
+        ? null
+        : oneOf(
+            input.current_stage,
+            ["predict", "diagnose", "explore", "verify", "explain", "teach_back", "transfer", "solo"] as const,
+            `${path}.current_stage`,
+          ),
+    completed_stages: array(input.completed_stages, `${path}.completed_stages`).map((item, index) =>
+      oneOf(
+        item,
+        ["predict", "diagnose", "explore", "verify", "explain", "teach_back", "transfer", "solo"] as const,
+        `${path}.completed_stages[${index}]`,
+      ),
+    ),
+    required_action: oneOf(
+      input.required_action,
+      ["none", "commitment", "revision", "teach_back", "solo_attempt"] as const,
+      `${path}.required_action`,
+    ),
+    loop_required: bool(input.loop_required, `${path}.loop_required`),
   };
 }
 
@@ -2504,10 +2582,11 @@ function parseTransferTask(value: unknown, path: string): TransferTask {
   const input = record(value, path);
   exactKeys(
     input,
-    ["transfer_type", "prompt", "source_concept_ids", "key_parameters", "expected_observable", "verifiable"],
+    ["task_id", "transfer_type", "prompt", "source_concept_ids", "key_parameters", "expected_observable", "verifiable"],
     path,
   );
   return {
+    task_id: uuid(input.task_id, `${path}.task_id`),
     transfer_type: oneOf(
       input.transfer_type,
       ["near", "parameter", "representation", "conceptual", "far", "delayed_retrieval"] as const,
@@ -2531,7 +2610,7 @@ function parseSoloMode(value: unknown, path: string): SoloMode {
     path,
   );
   return {
-    status: oneOf(input.status, ["inactive", "active", "exited"] as const, `${path}.status`),
+    status: oneOf(input.status, ["inactive", "active", "exited", "aborted"] as const, `${path}.status`),
     active_transfer:
       input.active_transfer === undefined || input.active_transfer === null
         ? null
@@ -2749,6 +2828,9 @@ export function parseHitlInterruptResponse(value: unknown): HitlInterruptRespons
     validation: artifactsInput.validation,
     scientific_results: artifactsInput.scientific_results,
     trace: artifactsInput.trace,
+    learning_native: null,
+    turn_completed: true,
+    learning_loop_completed: false,
   });
   const evidenceBundle =
     artifactsInput.evidence_bundle === null

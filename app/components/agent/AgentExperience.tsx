@@ -36,9 +36,11 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEve
 import {
   assertHitlScope,
   assertTeachingScope,
+  parseHitlInterruptResponse,
   parseTeachingApiError,
   parseTeachingTurnRequest,
   parseTeachingWorkflowOutcome,
+  redactHitlProposedResponse,
   type HitlInterruptResponse,
   type LearningNativeSubmission,
   type TeachingEvidence,
@@ -58,6 +60,7 @@ import {
   CognitiveMirrorPanel,
   LearningNativeSurface,
 } from "./LearningNative";
+import { LearningJourney } from "./LearningJourney";
 import styles from "./agent.module.css";
 
 const AgentCodeEditor = dynamic(() => import("./AgentCodeEditor"), {
@@ -179,6 +182,9 @@ async function consumeTeachingStream(
 
   const flushBlock = (block: string): "continue" | "done" => {
     if (!block.trim()) return "continue";
+    // SSE comment blocks (": keepalive" heartbeats emitted on slow turns) carry
+    // no event/data lines; per the SSE spec they must be ignored, not parsed.
+    if (block.trimStart().startsWith(":")) return "continue";
     let event = "message";
     const data: string[] = [];
     for (const line of block.split("\n")) {
@@ -335,16 +341,33 @@ function ModeMark({ mode }: { mode: TeachingMode }) {
   return <Icon aria-hidden="true" />;
 }
 
+// Canonical order of the tutor-graph stages emitted by backend ``progress``
+// events.  The spine maps each of its steps onto one or more of these stages
+// so step states derive from REAL streaming events, never from a pending flag.
+const PROGRESS_ORDER: readonly string[] = [
+  "workflow_started",
+  "interpret",
+  "commitment_gate",
+  "retrieve",
+  "diagnose",
+  "policy",
+  "scientific_tools",
+  "generate",
+  "learning_native",
+  "hitl_gate",
+  "assemble",
+];
+
 function EvidenceSpine({
   uploads,
   result,
   interrupt,
-  pending,
+  progressStep,
 }: {
   uploads: readonly UploadRecord[];
   result: TeachingTurnResult | null;
   interrupt: HitlInterruptResponse | null;
-  pending: boolean;
+  progressStep: string | null;
 }) {
   const perceptionReady =
     uploads.length === 0 ||
@@ -355,22 +378,51 @@ function EvidenceSpine({
     );
   const reviewed = result ?? interrupt?.artifacts ?? null;
   const stages = [
-    { label: "输入", done: uploads.length > 0 || Boolean(reviewed), detail: uploads.length ? `${uploads.length} 个附件` : "文本" },
-    { label: "感知", done: perceptionReady, detail: uploads.length ? "结构化提取" : "无需调用" },
-    { label: "证据", done: Boolean(reviewed), detail: reviewed ? reviewed.evidence_packet.coverage : "课程检索" },
-    { label: "诊断", done: Boolean(reviewed), detail: reviewed ? reviewed.diagnosis.status : "首错定位" },
-    { label: "验证", done: Boolean(reviewed), detail: reviewed?.scientific_results.length ? "工具证据" : "按需运行" },
-    { label: "提示", done: Boolean(result), detail: interrupt ? "等待人工确认" : result?.release.release_level ?? "政策门控" },
+    { label: "输入", graphStages: [] as readonly string[], done: uploads.length > 0 || Boolean(reviewed), detail: uploads.length ? `${uploads.length} 个附件` : "文本" },
+    { label: "感知", graphStages: ["interpret"] as readonly string[], done: perceptionReady, detail: uploads.length ? "结构化提取" : "无需调用" },
+    { label: "证据", graphStages: ["retrieve"] as readonly string[], done: Boolean(reviewed), detail: reviewed ? reviewed.evidence_packet.coverage : "课程检索" },
+    { label: "诊断", graphStages: ["commitment_gate", "diagnose"] as readonly string[], done: Boolean(reviewed), detail: reviewed ? reviewed.diagnosis.status : "首错定位" },
+    { label: "验证", graphStages: ["scientific_tools"] as readonly string[], done: Boolean(reviewed), detail: reviewed?.scientific_results.length ? "工具证据" : "按需运行" },
+    { label: "提示", graphStages: ["policy", "generate", "learning_native", "assemble"] as readonly string[], done: Boolean(result), detail: interrupt ? "等待人工确认" : result?.release.release_level ?? "政策门控" },
   ];
+  // While a turn is running, each step's state comes from the latest real
+  // ``progress`` event: stages before the current one are done, the current
+  // one is active.  No event yet → all pending steps stay idle (no fake
+  // progress).
+  const currentIndex = progressStep ? PROGRESS_ORDER.indexOf(progressStep) : -1;
+  const stateFor = (stage: (typeof stages)[number], index: number): string => {
+    if (stage.done) return "done";
+    if (currentIndex < 0) return "idle";
+    const stageIndexes = stage.graphStages.map((step) => PROGRESS_ORDER.indexOf(step));
+    if (stageIndexes.some((stepIndex) => stepIndex === currentIndex)) return "active";
+    if (stageIndexes.some((stepIndex) => stepIndex >= 0 && stepIndex < currentIndex)) return "done";
+    return index === 0 && progressStep ? "done" : "idle";
+  };
   return (
-    <ol className={styles.evidenceSpine} aria-label="本轮证据链">
+    <ol className={styles.evidenceSpine} aria-label="本轮证据链" data-testid="evidence-spine">
       {stages.map((stage, index) => (
-        <li key={stage.label} data-state={stage.done ? "done" : pending && index < 5 ? "active" : "idle"}>
+        <li key={stage.label} data-state={stateFor(stage, index)}>
           <span>{stage.done ? <Check size={12} /> : String(index + 1).padStart(2, "0")}</span>
           <div><strong>{stage.label}</strong><small>{stage.detail}</small></div>
         </li>
       ))}
     </ol>
+  );
+}
+
+/** Renders tutor prose with inline ``$...$`` math as first-class KaTeX. */
+function MathText({ text }: { text: string }) {
+  const parts = text.split(/(\$[^$\n]+\$)/g).filter((part) => part.length > 0);
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.startsWith("$") && part.endsWith("$") && part.length > 2 ? (
+          <AgentEquation key={`${index}-${part}`} latex={part.slice(1, -1)} display={false} />
+        ) : (
+          <span key={`${index}-t`}>{part}</span>
+        ),
+      )}
+    </>
   );
 }
 
@@ -505,10 +557,8 @@ function SourcePreview({
 
 function SessionRequiredView({
   onReload,
-  error,
 }: {
   onReload: () => void;
-  error: unknown;
 }) {
   const [apiKey, setApiKey] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -625,21 +675,13 @@ export function AgentExperience() {
   // PRD V3.0 P0-2: persist the conversation ID across refresh / new tab so
   // Solo Mode and the durable Learning Phase survive a page reload.  The
   // backend is the source of truth; this only restores the thread identity.
-  useEffect(() => {
-    if (conversationId) {
-      try {
-        window.localStorage.setItem("qa_conversation_id", conversationId);
-      } catch {
-        // localStorage may be unavailable (private mode); fail silently.
-      }
-    } else {
-      try {
-        window.localStorage.removeItem("qa_conversation_id");
-      } catch {
-        // ignore
-      }
-    }
-  }, [conversationId]);
+  //
+  // On mount ``conversationId`` is null, so a naive persist effect would call
+  // ``removeItem`` before restore reads the stored id and the thread would
+  // never survive reload.  ``hasConversationRef`` gates the remove branch so
+  // the key is only cleared when the user explicitly starts a new thread
+  // AFTER having one, never on a bare initial mount.
+  const hasConversationRef = useRef(false);
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem("qa_conversation_id");
@@ -651,11 +693,60 @@ export function AgentExperience() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (conversationId) {
+      hasConversationRef.current = true;
+      try {
+        window.localStorage.setItem("qa_conversation_id", conversationId);
+      } catch {
+        // localStorage may be unavailable (private mode); fail silently.
+      }
+    } else if (hasConversationRef.current) {
+      // Explicit "new thread": clear the stored id only after we had one.
+      try {
+        window.localStorage.removeItem("qa_conversation_id");
+      } catch {
+        // ignore
+      }
+      hasConversationRef.current = false;
+    }
+  }, [conversationId]);
   const activeCourse =
     courses.find(
       (course) => `${course.course_id}:${course.curriculum_edition_id}` === courseKey,
     ) ?? courses[0] ?? null;
   const scope = activeCourse ? scopeFromCourse(activeCourse) : null;
+
+  // Release-review P1 fix: recover a pending HITL pause after a refresh.
+  // The interrupt is persisted server-side; re-fetch it once per restored
+  // conversation so the transcription-confirmation card is not lost.
+  const interruptRecoveryRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!scope || !conversationId || interrupt) return;
+    if (interruptRecoveryRef.current === conversationId) return;
+    interruptRecoveryRef.current = conversationId;
+    const controller = new AbortController();
+    const query = new URLSearchParams({
+      course_id: scope.courseId,
+      curriculum_edition_id: scope.curriculumEditionId,
+    });
+    fetch(`/api/teaching/threads/${conversationId}/interrupt?${query.toString()}`, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const pause = redactHitlProposedResponse(
+          parseHitlInterruptResponse(await response.json()),
+        );
+        assertHitlScope(pause, scope, pause.artifacts.policy.mode);
+        if (pause.conversation_id !== conversationId) return;
+        setInterrupt(pause);
+        setConfirmedTranscription(interruptTranscription(pause));
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [scope, conversationId, interrupt]);
 
   useEffect(() => () => {
     for (const previewUrl of previewUrlsRef.current) URL.revokeObjectURL(previewUrl);
@@ -715,7 +806,13 @@ export function AgentExperience() {
         setInterrupt(null);
         setConfirmedTranscription("");
       }
-      setRightOpen(true);
+      // Do NOT auto-open the right Evidence panel on every turn.  The spec
+      // says evidence may be *suggested* when new evidence arrives, but the
+      // panel must never steal focus or intercept the composer / commitment
+      // controls.  Auto-opening here caused the expanded right rail to
+      // overlay the "提交承诺" button (pointer-events intercepted), blocking
+      // the student from submitting.  The student opens Evidence via the
+      // topbar "打开证据面板" button on demand.
     },
     onSettled: () => {
       // Keep the final stage visible briefly so the user sees "完成"; it is
@@ -770,7 +867,9 @@ export function AgentExperience() {
         setInterrupt(null);
         setConfirmedTranscription("");
       }
-      setRightOpen(true);
+      // Do NOT auto-open the right Evidence panel after HITL resume either;
+      // the expanded rail overlays the composer / commitment controls and
+      // blocks pointer events (see turnMutation.onSuccess note above).
     },
   });
 
@@ -955,16 +1054,23 @@ export function AgentExperience() {
   const interpretation = reviewed?.interpretation ?? null;
   const reviewedVisualSpec = scientificResults.find((item) => item.visualization)?.visualization;
   const activeMode = MODES.find((item) => item.id === mode) ?? MODES[0]!;
-  const answerWithheldByGate = Boolean(
-    result?.learning_native?.commitment?.gate_decision === "attempt_required"
-    && !result.learning_native.commitment.accepted,
-  );
+  // PRD V3.3: the answer is withheld whenever the authoritative durable
+  // LearningPhase requires a student action the turn has not satisfied.  This
+  // is driven by the backend's ``required_action`` (a pure function of the
+  // persisted phase), not by a heuristic on the commitment card.  The loop is
+  // complete only when the backend says so via ``learning_loop_completed`` —
+  // never inferred from the SSE ``workflow.completed`` lifecycle event.
+  const nativeState = result?.learning_native ?? null;
+  const requiredAction = nativeState?.required_action ?? "none";
+  const answerWithheldByGate =
+    requiredAction !== "none" && nativeState?.phase !== "complete";
+  const loopDone = result?.learning_loop_completed === true;
 
   if (contextQuery.isPending) {
     return <main className={styles.boot}><Atom /><p>正在建立课程边界与证据索引…</p></main>;
   }
   if (contextQuery.isError || !contextQuery.data) {
-    return <SessionRequiredView onReload={() => void contextQuery.refetch()} error={contextQuery.error} />;
+    return <SessionRequiredView onReload={() => void contextQuery.refetch()} />;
   }
   if (!activeCourse || !scope) {
     return <main className={styles.bootError}><h1>尚无已发布课程</h1><p>请联系任课教师开通课程版本。</p></main>;
@@ -1036,7 +1142,7 @@ export function AgentExperience() {
           })}
         </nav>
 
-        <div className={styles.navLabelRow}><p className={styles.navLabel}>课程章节</p><button aria-label="知识图谱"><Network /></button></div>
+        <div className={styles.navLabelRow}><p className={styles.navLabel}>课程章节</p><button aria-label="知识图谱" onClick={() => setRightOpen(true)}><Network /></button></div>
         <nav className={styles.chapterList} aria-label="课程章节">
           {activeCourse.chapters.length ? activeCourse.chapters.map((chapter) => (
             <button key={chapter.id} onClick={() => setMessage(`我想复习“${chapter.title}”中的核心概念。`)}>
@@ -1060,11 +1166,31 @@ export function AgentExperience() {
             <span><i /> {conversationId ? "线程已持续" : "新线程"}</span>
           </section>
 
+          <LearningJourney state={nativeState} />
+
+          {nativeState ? (
+            <span
+              className={styles.kicker}
+              data-testid="learning-phase"
+              data-phase={nativeState.phase}
+              data-required-action={nativeState.required_action}
+              data-loop-completed={loopDone ? "true" : "false"}
+              aria-hidden="true"
+              style={{ position: "absolute", left: "-9999px" }}
+            >
+              phase={nativeState.phase}
+            </span>
+          ) : null}
+
           <EvidenceSpine
             uploads={uploads}
             result={result}
             interrupt={interrupt}
-            pending={turnMutation.isPending || resumeMutation.isPending}
+            progressStep={
+              turnMutation.isPending || resumeMutation.isPending
+                ? stageProgress?.step ?? null
+                : null
+            }
           />
 
           {interrupt ? (
@@ -1144,30 +1270,44 @@ export function AgentExperience() {
             />
           ) : null}
 
-          {result && !answerWithheldByGate && (result.learning_native?.solo?.status ?? "inactive") !== "active" ? (
+          {loopDone ? (
+            <section className={styles.learningNativeActions} aria-label="Learning-Native 完成">
+              <div className={styles.phaseButton} data-testid="learning-loop-complete">
+                <Check size={13} />
+                学习闭环完成：承诺 → 解释 → 重构 → 迁移 → Solo 均已通过确定性验证。
+              </div>
+              {result?.learning_native?.cognitive_mirror ? (
+                <CognitiveMirrorPanel mirror={result.learning_native.cognitive_mirror} />
+              ) : null}
+            </section>
+          ) : result && (result.learning_native?.solo?.status ?? "inactive") !== "active" ? (
             <section className={styles.learningNativeActions} aria-label="Learning-Native 阶段切换">
-              <button
-                type="button"
-                className={styles.phaseButton}
-                onClick={() => submitLearningNative({ commitment: null, confidence: null, teach_back: null, transfer_attempt: null, solo_attempt: null, request_transfer: false, request_solo_exit: false, request_teach_back: true, request_transfer_task: false })}
-                disabled={turnMutation.isPending || resumeMutation.isPending}
-                aria-label="请求 Teach-Back 重构"
-                data-testid="request-teach-back-button"
-              >
-                <PenLine size={13} />
-                进入 Teach-Back
-              </button>
-              <button
-                type="button"
-                className={styles.phaseButton}
-                onClick={() => submitLearningNative({ commitment: null, confidence: null, teach_back: null, transfer_attempt: null, solo_attempt: null, request_transfer: false, request_solo_exit: false, request_teach_back: false, request_transfer_task: true })}
-                disabled={turnMutation.isPending || resumeMutation.isPending}
-                aria-label="请求迁移任务并进入 Solo Mode"
-                data-testid="request-transfer-button"
-              >
-                <Target size={13} />
-                进入迁移 / Solo
-              </button>
+              {nativeState?.phase === "awaiting_revision" && !nativeState.completed_stages.includes("teach_back") ? (
+                <button
+                  type="button"
+                  className={styles.phaseButton}
+                  onClick={() => submitLearningNative({ commitment: null, confidence: null, teach_back: null, transfer_attempt: null, solo_attempt: null, request_transfer: false, request_solo_exit: false, request_teach_back: true, request_transfer_task: false })}
+                  disabled={turnMutation.isPending || resumeMutation.isPending}
+                  aria-label="请求 Teach-Back 重构"
+                  data-testid="request-teach-back-button"
+                >
+                  <PenLine size={13} />
+                  进入 Teach-Back
+                </button>
+              ) : null}
+              {nativeState?.phase === "transfer_required" ? (
+                <button
+                  type="button"
+                  className={styles.phaseButton}
+                  onClick={() => submitLearningNative({ commitment: null, confidence: null, teach_back: null, transfer_attempt: null, solo_attempt: null, request_transfer: false, request_solo_exit: false, request_teach_back: false, request_transfer_task: true })}
+                  disabled={turnMutation.isPending || resumeMutation.isPending}
+                  aria-label="请求迁移任务并进入 Solo Mode"
+                  data-testid="request-transfer-button"
+                >
+                  <Target size={13} />
+                  进入迁移 / Solo
+                </button>
+              ) : null}
             </section>
           ) : null}
 
@@ -1204,9 +1344,9 @@ export function AgentExperience() {
           ) : result ? (
             <article className={styles.tutorRecord} tabIndex={-1} data-testid="agent-tutor-result">
               <header><span><Atom /></span><div><small>QUANTUM AGENT · GROUNDED TURN</small><strong>{result.interpretation.relevant_concepts.join(" · ") || "课程辅导"}</strong></div><em>{result.release.release_level.replaceAll("_", " ")}</em></header>
-              <div className={styles.orientation}><span>本轮方向</span><h2>{result.response.orientation}</h2></div>
-              <div className={styles.claims}>{result.response.claims.map((claim, index) => <section key={`${claim.text}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{claim.text}</p><small>{claim.support_basis.replaceAll("_", " ")}</small></section>)}</div>
-              <blockquote><Sparkles /><div><span>请你接着做</span><p>{result.response.next_question}</p></div></blockquote>
+              <div className={styles.orientation}><span>本轮方向</span><h2><MathText text={result.response.orientation} /></h2></div>
+              <div className={styles.claims}>{result.response.claims.map((claim, index) => <section key={`${claim.text}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p><MathText text={claim.text} /></p><small>{claim.support_basis.replaceAll("_", " ")}</small></section>)}</div>
+              <blockquote><Sparkles /><div><span>请你接着做</span><p><MathText text={result.response.next_question} /></p></div></blockquote>
             </article>
           ) : null}
 
@@ -1274,7 +1414,7 @@ export function AgentExperience() {
       <aside className={`${styles.rightPanel} ${rightOpen ? styles.panelOpen : ""}`}>
         <div className={styles.mobilePanelTitle}><strong>证据与验证</strong><button onClick={() => setRightOpen(false)}><X /></button></div>
         <header className={styles.evidenceHead}><div><p className={styles.kicker}>EVIDENCE DESK</p><h2>本轮依据</h2></div><span><i /> LIVE</span></header>
-        {result?.learning_native?.cognitive_mirror ? (
+        {!loopDone && result?.learning_native?.cognitive_mirror ? (
           <CognitiveMirrorPanel mirror={result.learning_native.cognitive_mirror} />
         ) : null}
         {evidencePacket && diagnosis && release && validation && interpretation ? (

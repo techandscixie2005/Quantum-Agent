@@ -133,19 +133,44 @@ async function uploadBuffer(
 }
 
 async function waitForWorkflowTerminal(page: Page): Promise<"completed" | "interrupted"> {
+  // See golden-loop-deterministic.spec.ts for the rationale: settle on the
+  // COMPOSER state (not the always-mounted result card) to know the current
+  // turn has truly finished.  The composer's send button enters its pending
+  // "执行工作流" disabled state while the workflow streams and returns to the
+  // enabled "发送 / 运行" state after the terminal SSE event is consumed.  A
+  // HITL pause mounts `hitl-interrupt` with the send button showing
+  // "先完成上方复核".
   await expect
     .poll(
       async () => {
-        if (await page.getByTestId("agent-tutor-result").isVisible()) return "completed";
         if (await page.getByTestId("hitl-interrupt").isVisible()) return "interrupted";
+        if (await page.getByRole("button", { name: "发送 / 运行" }).isEnabled()) return "completed";
         return "pending";
       },
-      { timeout: 180_000 },
+      { timeout: 600_000, intervals: [2_000, 5_000, 10_000] },
     )
     .toMatch(/^(completed|interrupted)$/);
-  return (await page.getByTestId("agent-tutor-result").isVisible())
-    ? "completed"
-    : "interrupted";
+  return (await page.getByTestId("hitl-interrupt").isVisible()) ? "interrupted" : "completed";
+}
+
+/**
+ * Read the active conversation id from the browser's localStorage.  The
+ * frontend persists ``qa_conversation_id`` on every completed turn (including
+ * an interrupted one, whose id is written in the same state update that mounts
+ * the HITL card).  Replacing the old ``streamResponse.text()`` parser: with
+ * incremental BFF SSE the response body is consumed as a stream and Playwright
+ * can no longer re-fetch it with ``response.text()``.
+ */
+async function currentConversationId(page: Page): Promise<string> {
+  let conversationId = "";
+  await expect
+    .poll(async () => {
+      conversationId =
+        (await page.evaluate(() => window.localStorage.getItem("qa_conversation_id"))) ?? "";
+      return conversationId;
+    })
+    .toMatch(UUID);
+  return conversationId;
 }
 
 async function resolveStudentTranscriptionInterrupt(
@@ -164,23 +189,9 @@ async function resolveStudentTranscriptionInterrupt(
   await expect(card).toBeHidden();
 }
 
-function interruptedPayload(sse: string): Record<string, unknown> {
-  for (const block of sse.replace(/\r\n/g, "\n").split("\n\n")) {
-    if (!block.includes("event: workflow.interrupted")) continue;
-    const data = block
-      .split("\n")
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trimStart())
-      .join("\n");
-    const payload: unknown = JSON.parse(data);
-    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-      return payload as Record<string, unknown>;
-    }
-  }
-  throw new Error("The workflow did not return an interrupt payload");
-}
-
 test.describe.serial("Quantum Agent live competition workflow", () => {
+  test.setTimeout(900_000); // 15 minutes per live workflow test
+
   test("student opens the standalone responsive scientific workspace", async ({ page }) => {
     const auth = liveAuth();
     await installStudentSession(page, auth);
@@ -208,21 +219,13 @@ test.describe.serial("Quantum Agent live competition workflow", () => {
     await page.getByLabel("给 Quantum Agent 的问题").fill(
       "检查这个动能本征值推导，定位第一个有后果的错误，并用课程证据支持最小提示。",
     );
-    const streamResponsePromise = page.waitForResponse(
-      (response) => response.url().includes("/api/teaching/turns/stream") && response.ok(),
-    );
     await page.getByRole("button", { name: "发送 / 运行" }).click();
     const terminal = await waitForWorkflowTerminal(page);
-    const streamResponse = await streamResponsePromise;
     if (extractionStatus === "needs_confirmation") {
       expect(terminal).toBe("interrupted");
     }
     if (terminal === "interrupted") {
-      const pause = interruptedPayload(await streamResponse.text());
-      const conversationId = pause.conversation_id;
-      if (typeof conversationId !== "string" || !UUID.test(conversationId)) {
-        throw new Error("The transcription interrupt conversation id is invalid");
-      }
+      const conversationId = await currentConversationId(page);
       const resumeResponsePromise = page.waitForResponse(
         (response) => response.url().includes(`/teaching/threads/${conversationId}/resume`),
       );
@@ -297,22 +300,14 @@ test.describe.serial("Quantum Agent live competition workflow", () => {
     await installStudentSession(page, auth);
     await page.goto("/agent");
     await expect(page.getByTestId("agent-experience")).toBeVisible();
-    const responsePromise = page.waitForResponse(
-      (response) => response.url().includes("/api/teaching/turns/stream") && response.ok(),
-    );
     await page.getByRole("button", { name: /^概念/ }).click();
     await page.getByLabel("给 Quantum Agent 的问题").fill(
       "@TA 请检查我对波函数概率解释的理解。",
     );
     await page.getByLabel("学生当前尝试").fill("我认为波函数本身就是可观测概率。");
     await page.getByRole("button", { name: "发送 / 运行" }).click();
-    const streamResponse = await responsePromise;
-    const pause = interruptedPayload(await streamResponse.text());
-    await expect(page.getByTestId("hitl-interrupt")).toBeVisible();
-    const conversationId = pause.conversation_id;
-    if (typeof conversationId !== "string" || !UUID.test(conversationId)) {
-      throw new Error("The interrupted conversation id is invalid");
-    }
+    await expect(page.getByTestId("hitl-interrupt")).toBeVisible({ timeout: 420_000 });
+    const conversationId = await currentConversationId(page);
 
     const api = await playwrightRequest.newContext({
       baseURL: process.env.QUANTUM_API_BASE_URL ?? "http://127.0.0.1:8000",

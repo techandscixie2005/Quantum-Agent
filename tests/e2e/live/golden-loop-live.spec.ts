@@ -104,17 +104,26 @@ async function loginThroughProduct(page: Page): Promise<void> {
  * turn for the real model + tool pipeline.
  */
 async function waitForWorkflowTerminal(page: Page): Promise<"completed" | "interrupted"> {
+  // See golden-loop-deterministic.spec.ts for the rationale: settle on the
+  // COMPOSER state (not the always-mounted result card) to know the current
+  // turn has truly finished.  The composer's send button enters its pending
+  // "执行工作流" disabled state while the workflow streams and returns to the
+  // enabled "发送 / 运行" state after the terminal SSE event is consumed.
+  await expect(
+    page.getByRole("button", { name: /执行工作流|先完成上方复核/ }),
+    "workflow must start (composer enters its pending state)",
+  ).toBeVisible({ timeout: 30_000 });
   await expect
     .poll(
       async () => {
-        if (await page.getByTestId("agent-tutor-result").isVisible()) return "completed";
         if (await page.getByTestId("hitl-interrupt").isVisible()) return "interrupted";
+        if (await page.getByRole("button", { name: "发送 / 运行" }).isEnabled()) return "completed";
         return "pending";
       },
-      { timeout: 300_000, intervals: [2_000, 5_000, 10_000] },
+      { timeout: 600_000, intervals: [2_000, 5_000, 10_000] },
     )
     .toMatch(/^(completed|interrupted)$/);
-  return (await page.getByTestId("agent-tutor-result").isVisible()) ? "completed" : "interrupted";
+  return (await page.getByTestId("hitl-interrupt").isVisible()) ? "interrupted" : "completed";
 }
 
 /**
@@ -145,7 +154,7 @@ async function sendStudentMessage(
   await expect(sendButton).toBeEnabled();
   await sendButton.click();
   const response = await streamResponse;
-  expect(response.ok(), await response.text().catch(() => "")).toBe(true);
+  expect(response.ok()).toBe(true);
 }
 
 /**
@@ -159,7 +168,7 @@ async function maybeSubmitCommitment(
 ): Promise<boolean> {
   const card = page.getByTestId("commitment-card");
   if (!(await card.isVisible().catch(() => false))) return false;
-  await page.getByLabel("认知承诺文本").fill(response);
+  await page.getByRole("textbox", { name: "认知承诺文本" }).fill(response);
   const submitButton = page.getByRole("button", { name: /提交承诺/ });
   await expect(submitButton).toBeEnabled();
   const streamResponse = page.waitForResponse(
@@ -178,7 +187,7 @@ async function maybeSubmitCommitment(
 async function maybeSubmitTeachBack(page: Page, reconstruction: string): Promise<boolean> {
   const card = page.getByTestId("teach-back-card");
   if (!(await card.isVisible().catch(() => false))) return false;
-  await page.getByLabel("teach-back 重构").fill(reconstruction);
+  await page.getByRole("textbox", { name: "teach-back 重构" }).fill(reconstruction);
   const submitButton = page.getByRole("button", { name: /提交重构/ });
   await expect(submitButton).toBeEnabled();
   const streamResponse = page.waitForResponse(
@@ -202,7 +211,7 @@ async function maybeSubmitSoloAttempt(page: Page, response: string): Promise<boo
     .getByText(/AI 辅助暂时不可用/)
     .isVisible()
     .catch(() => false);
-  await page.getByLabel("迁移尝试").fill(response);
+  await page.getByRole("textbox", { name: "迁移尝试" }).fill(response);
   const submitButton = page.getByRole("button", { name: /提交迁移尝试/ });
   await expect(submitButton).toBeEnabled();
   const streamResponse = page.waitForResponse(
@@ -263,7 +272,7 @@ async function sendRealTunnellingTurn(
   await expect(sendButton).toBeEnabled();
   await sendButton.click();
   const response = await streamResponse;
-  expect(response.ok(), await response.text().catch(() => "")).toBe(true);
+  expect(response.ok()).toBe(true);
   await waitForWorkflowTerminal(page);
 }
 
@@ -331,7 +340,7 @@ async function fetchAgentTraceDetail(
 
 test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnelling)", () => {
   test("drives prediction → diagnosis → simulation → teach-back → transfer → solo → mirror with real persistence", async ({ page }) => {
-    test.setTimeout(900_000); // 15 minutes for the full live loop
+    test.setTimeout(1_800_000); // 30 minutes for the full live loop
     const auth = liveAuth();
     await loginThroughProduct(page);
 

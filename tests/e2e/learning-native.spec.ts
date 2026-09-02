@@ -167,6 +167,8 @@ function baseResult(overrides: Record<string, unknown> = {}) {
       detail: `${name} done`,
     })),
     learning_native: null,
+    turn_completed: true,
+    learning_loop_completed: false,
     ...overrides,
   };
 }
@@ -229,7 +231,7 @@ async function submitAndAssertCard(
   await sendButton.click();
 
   const response = await streamResponse;
-  expect(response.ok(), await response.text()).toBe(true);
+  expect(response.ok(), `teaching stream returned ${response.status()}`).toBe(true);
 
   await expect(page.getByTestId(cardTestid)).toBeVisible({ timeout: 15000 });
   await assertExtra();
@@ -254,6 +256,11 @@ test.describe("Golden Learning Loop · /agent", () => {
         solo: null,
         cognitive_mirror: null,
         evidence_persisted: [],
+        phase: "commitment_required",
+        current_stage: "predict",
+        completed_stages: [],
+        required_action: "commitment",
+        loop_required: true,
       },
     });
     await interceptAgentApis(page, result);
@@ -295,6 +302,11 @@ test.describe("Golden Learning Loop · /agent", () => {
           no_personality_profile: true,
         },
         evidence_persisted: [],
+        phase: "awaiting_revision",
+        current_stage: "explain",
+        completed_stages: ["predict", "diagnose"],
+        required_action: "revision",
+        loop_required: true,
       },
     });
     await interceptAgentApis(page, result);
@@ -310,6 +322,7 @@ test.describe("Golden Learning Loop · /agent", () => {
 
   test("renders Solo Mode transfer task with assistance lock", async ({ page }) => {
     const transfer = {
+      task_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       transfer_type: "representation",
       prompt: "画出不同势垒宽度下的透射率曲线并解释趋势。",
       source_concept_ids: [],
@@ -332,6 +345,11 @@ test.describe("Golden Learning Loop · /agent", () => {
         },
         cognitive_mirror: null,
         evidence_persisted: ["transfer"],
+        phase: "solo_active",
+        current_stage: "solo",
+        completed_stages: ["predict", "diagnose", "explore", "verify", "explain", "teach_back", "transfer"],
+        required_action: "solo_attempt",
+        loop_required: true,
       },
     });
     await interceptAgentApis(page, result);

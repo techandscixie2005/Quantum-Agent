@@ -199,6 +199,8 @@ function baseResult(overrides: Record<string, unknown> = {}) {
     })),
     code_artifact: null,
     learning_native: null,
+    turn_completed: true,
+    learning_loop_completed: false,
     ...overrides,
   };
 }
@@ -233,6 +235,11 @@ const GOLDEN_LOOP_STAGES: Array<{
         solo: null,
         cognitive_mirror: null,
         evidence_persisted: [],
+        phase: "commitment_required",
+        current_stage: "predict",
+        completed_stages: [],
+        required_action: "commitment",
+        loop_required: true,
       },
     }),
     assert: async (page) => {
@@ -280,6 +287,11 @@ const GOLDEN_LOOP_STAGES: Array<{
         solo: null,
         cognitive_mirror: null,
         evidence_persisted: ["commitment", "confidence"],
+        phase: "awaiting_revision",
+        current_stage: "explain",
+        completed_stages: ["predict", "diagnose"],
+        required_action: "revision",
+        loop_required: true,
       },
     }),
     assert: async (page) => {
@@ -378,6 +390,11 @@ const GOLDEN_LOOP_STAGES: Array<{
         solo: null,
         cognitive_mirror: null,
         evidence_persisted: ["tool_observation"],
+        phase: "awaiting_revision",
+        current_stage: "verify",
+        completed_stages: ["predict", "diagnose", "explore", "verify"],
+        required_action: "revision",
+        loop_required: true,
       },
     }),
     assert: async (page) => {
@@ -439,6 +456,11 @@ const GOLDEN_LOOP_STAGES: Array<{
         solo: null,
         cognitive_mirror: null,
         evidence_persisted: ["teach_back"],
+        phase: "reconstruction_required",
+        current_stage: "teach_back",
+        completed_stages: ["predict", "diagnose", "explore", "verify", "explain"],
+        required_action: "teach_back",
+        loop_required: true,
       },
     }),
     assert: async (page) => {
@@ -468,6 +490,7 @@ const GOLDEN_LOOP_STAGES: Array<{
         learning_action: "enter_solo",
         teach_back: null,
         transfer: {
+          task_id: EVIDENCE_ID,
           transfer_type: "representation",
           prompt: "画出不同势垒宽度下的透射率曲线并解释趋势。",
           source_concept_ids: [],
@@ -478,6 +501,7 @@ const GOLDEN_LOOP_STAGES: Array<{
         solo: {
           status: "active",
           active_transfer: {
+            task_id: EVIDENCE_ID,
             transfer_type: "representation",
             prompt: "画出不同势垒宽度下的透射率曲线并解释趋势。",
             source_concept_ids: [],
@@ -491,6 +515,11 @@ const GOLDEN_LOOP_STAGES: Array<{
         },
         cognitive_mirror: null,
         evidence_persisted: ["transfer"],
+        phase: "solo_active",
+        current_stage: "solo",
+        completed_stages: ["predict", "diagnose", "explore", "verify", "explain", "teach_back", "transfer"],
+        required_action: "solo_attempt",
+        loop_required: true,
       },
     }),
     assert: async (page) => {
@@ -551,7 +580,13 @@ const GOLDEN_LOOP_STAGES: Array<{
           no_personality_profile: true,
         },
         evidence_persisted: ["solo_attempt", "confidence"],
+        phase: "complete",
+        current_stage: null,
+        completed_stages: ["predict", "diagnose", "explore", "verify", "explain", "teach_back", "transfer", "solo"],
+        required_action: "none",
+        loop_required: true,
       },
+      learning_loop_completed: true,
     }),
     assert: async (page) => {
       await expect(page.getByTestId("cognitive-mirror")).toBeVisible({ timeout: 15000 });
@@ -586,6 +621,7 @@ async function interceptAgentApis(page: Page, stageResults: Record<string, unkno
     };
     const body =
       sse("workflow.started", { workflow_version: "teaching-state-machine/1.0.0" }) +
+      ": keepalive\n\n" +
       sse("workflow.completed", adaptedResult);
     await route.fulfill({
       status: 200,
@@ -609,7 +645,7 @@ async function sendStudentMessage(page: Page, message: string) {
   await expect(sendButton).toBeEnabled();
   await sendButton.click();
   const response = await streamResponse;
-  expect(response.ok(), await response.text()).toBe(true);
+  expect(response.ok(), `teaching stream returned ${response.status()}`).toBe(true);
 }
 
 test.describe("Golden Learning Loop · quantum tunnelling", () => {

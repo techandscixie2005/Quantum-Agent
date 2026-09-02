@@ -41,6 +41,7 @@ function parseCompletedSse(value: string): unknown {
   let failureCode: string | null = null;
   for (const block of blocks) {
     if (!block.trim()) continue;
+    if (block.trimStart().startsWith(":")) continue; // SSE keepalive comment
     let event = "message";
     const dataLines: string[] = [];
     for (const line of block.split("\n")) {

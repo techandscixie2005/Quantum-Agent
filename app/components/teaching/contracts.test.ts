@@ -149,6 +149,9 @@ function validResult(): Record<string, unknown> {
       status: name === "run_scientific_tools" ? "skipped" : "completed",
       detail: `${name} completed deterministically`,
     })),
+    learning_native: null,
+    turn_completed: true,
+    learning_loop_completed: false,
   };
 }
 
@@ -462,6 +465,11 @@ test("parses a Learning-Native commitment gate in a turn result", () => {
     solo: null,
     cognitive_mirror: null,
     evidence_persisted: ["commitment"],
+    phase: "commitment_required",
+    current_stage: "predict",
+    completed_stages: [],
+    required_action: "commitment",
+    loop_required: true,
   };
   const parsed = parseTeachingTurnResult(raw);
   assert.equal(parsed.learning_native?.commitment?.gate_decision, "attempt_required");
@@ -476,6 +484,7 @@ test("parses a Learning-Native solo-mode transfer task", () => {
     learning_action: "enter_solo",
     teach_back: null,
     transfer: {
+      task_id: EVIDENCE_ID,
       transfer_type: "representation",
       prompt: "画出不同势垒宽度下的透射率曲线。",
       source_concept_ids: [],
@@ -486,6 +495,7 @@ test("parses a Learning-Native solo-mode transfer task", () => {
     solo: {
       status: "active",
       active_transfer: {
+        task_id: EVIDENCE_ID,
         transfer_type: "representation",
         prompt: "画出不同势垒宽度下的透射率曲线。",
         source_concept_ids: [],
@@ -499,6 +509,11 @@ test("parses a Learning-Native solo-mode transfer task", () => {
     },
     cognitive_mirror: null,
     evidence_persisted: ["transfer"],
+    phase: "solo_active",
+    current_stage: "solo",
+    completed_stages: ["teach_back", "transfer"],
+    required_action: "solo_attempt",
+    loop_required: true,
   };
   const parsed = parseTeachingTurnResult(raw);
   assert.equal(parsed.learning_native?.solo?.status, "active");
@@ -534,6 +549,11 @@ test("parses a Cognitive Mirror without personality profile", () => {
       no_personality_profile: true,
     },
     evidence_persisted: [],
+    phase: "open",
+    current_stage: null,
+    completed_stages: [],
+    required_action: "none",
+    loop_required: false,
   };
   const parsed = parseTeachingTurnResult(raw);
   assert.equal(parsed.learning_native?.cognitive_mirror?.no_personality_profile, true);
