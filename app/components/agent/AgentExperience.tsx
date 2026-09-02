@@ -7,7 +7,6 @@ import {
   BookOpen,
   Braces,
   Check,
-  ChevronDown,
   CircleAlert,
   FileText,
   FlaskConical,
@@ -22,6 +21,7 @@ import {
   Paperclip,
   PenLine,
   Plus,
+  Search,
   Send,
   Sigma,
   Sparkles,
@@ -648,6 +648,20 @@ export function AgentExperience() {
   const [selectedSource, setSelectedSource] = useState<TeachingEvidence | null>(null);
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [cmdQuery, setCmdQuery] = useState("");
+  const [expandedClaim, setExpandedClaim] = useState<number | null>(null);
+  const [showAttempt, setShowAttempt] = useState(false);
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCmdOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
   const [projectCode, setProjectCode] = useState("# 在这里放置当前里程碑的最小可运行代码\n");
   const [dragging, setDragging] = useState(false);
   const [rabiFrequency, setRabiFrequency] = useState(1);
@@ -1066,6 +1080,41 @@ export function AgentExperience() {
     requiredAction !== "none" && nativeState?.phase !== "complete";
   const loopDone = result?.learning_loop_completed === true;
 
+  // Phase-driven Stage title + tag.  The Stage itself is the visual center;
+  // this quiet label is the only orienting text.  Everything else is the
+  // scientific object (equation / plot / code / verification / evidence).
+  const stageTitle = useMemo(() => {
+    if (interrupt) return "等待确认转录";
+    if (loopDone) return "学习闭环 · Cognitive Mirror";
+    if (nativeState?.solo?.status === "active") return "Solo Mode · 独立迁移";
+    if (nativeState?.transfer) return "迁移任务";
+    if (nativeState?.teach_back) return "Teach-Back · 用你的话讲一遍";
+    if (nativeState?.commitment && !nativeState.commitment.accepted) return "先做一个预测";
+    if (result) return result.interpretation.relevant_concepts.join(" · ") || "课程辅导";
+    return activeMode.short;
+  }, [interrupt, loopDone, nativeState, result, activeMode.short]);
+  const stagePhaseLabel = useMemo(() => {
+    if (interrupt) return "PAUSED";
+    if (loopDone) return "COMPLETE";
+    if (nativeState) {
+      const map: Record<string, string> = {
+        commitment_required: "COMMITMENT",
+        attempt_received: "ATTEMPT",
+        intervention: "INTERVENE",
+        awaiting_revision: "REVISE",
+        verifying: "VERIFY",
+        reconstruction_required: "TEACH-BACK",
+        transfer_required: "TRANSFER",
+        solo_active: "SOLO",
+        complete: "COMPLETE",
+        aborted: "ABORTED",
+        open: "OPEN",
+      };
+      return map[nativeState.phase] ?? nativeState.phase.toUpperCase();
+    }
+    return activeMode.label.toUpperCase();
+  }, [interrupt, loopDone, nativeState, activeMode.label]);
+
   if (contextQuery.isPending) {
     return <main className={styles.boot}><Atom /><p>正在建立课程边界与证据索引…</p></main>;
   }
@@ -1081,7 +1130,7 @@ export function AgentExperience() {
       <a className={styles.skipLink} href="#agent-main">跳到教学工作区</a>
       <header className={styles.topbar}>
         <button className={styles.mobileButton} onClick={() => setLeftOpen(true)} aria-label="打开课程导航"><Menu /></button>
-        <div className={styles.brand}><span><Atom /></span><div><strong>Quantum Agent</strong><small>USTC · COURSE-BOUNDED LAB</small></div></div>
+        <div className={styles.brand}><span><Atom /></span></div>
         <div className={styles.courseTitle}>
           <span>{activeCourse.course_code}</span><i />
           <strong>{activeCourse.course_title}</strong><i />
@@ -1089,81 +1138,80 @@ export function AgentExperience() {
         </div>
         <div className={styles.topActions}>
           <span className={styles.liveState} data-testid="model-service-status"><i /> {interrupt ? "工作流已暂停" : "模型服务已连接"}</span>
-          <button onClick={() => setRightOpen(true)} aria-label="打开证据面板"><PanelRight /></button>
+          <button className={styles.cmdHint} onClick={() => setCmdOpen(true)} aria-label="打开命令面板">
+            <Search size={14} /><kbd>⌘K</kbd>
+          </button>
+          <button onClick={() => setRightOpen(true)} aria-label="打开证据面板"><PanelRight size={15} /><span>证据</span></button>
           <span className={styles.userMark}>{contextQuery.data.display_name.slice(0, 1)}</span>
         </div>
       </header>
 
-      {(leftOpen || rightOpen) ? <button className={styles.backdrop} onClick={() => { setLeftOpen(false); setRightOpen(false); }} aria-label="关闭面板" /> : null}
+      {(leftOpen || rightOpen) ? <button className={`${styles.backdrop} ${styles.visible}`} onClick={() => { setLeftOpen(false); setRightOpen(false); }} aria-label="关闭面板" /> : null}
       <aside className={`${styles.leftPanel} ${leftOpen ? styles.panelOpen : ""}`}>
         <div className={styles.mobilePanelTitle}><strong>课程导航</strong><button onClick={() => setLeftOpen(false)}><X /></button></div>
-        <label className={styles.coursePicker}>
-          <span>{activeCourse.institution}</span>
-          <select
-            aria-label="选择课程版本"
-            value={courseKey ?? ""}
-            onChange={(event) => {
-              setCourseKey(event.target.value);
-              setConversationId(null);
-              setResult(null);
-              setInterrupt(null);
-              setConfirmedTranscription("");
-            }}
-          >
-            {courses.map((course) => (
-              <option key={`${course.course_id}:${course.curriculum_edition_id}`} value={`${course.course_id}:${course.curriculum_edition_id}`}>
-                {course.course_code} · {course.edition_title}
-              </option>
-            ))}
-          </select>
-          <ChevronDown aria-hidden="true" />
-        </label>
-
-        <p className={styles.navLabel}>学习模式</p>
-        <nav className={styles.modeList} aria-label="教学模式">
-          {MODES.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                className={mode === item.id ? styles.activeMode : ""}
-                onClick={() => {
-                  setMode(item.id);
-                  setConversationId(null);
-                  setResult(null);
-                  setInterrupt(null);
-                  setConfirmedTranscription("");
-                  setLeftOpen(false);
-                }}
-              >
-                <span><Icon /></span><div><strong>{item.label}</strong><small>{item.short}</small></div>
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className={styles.navLabelRow}><p className={styles.navLabel}>课程章节</p><button aria-label="知识图谱" onClick={() => setRightOpen(true)}><Network /></button></div>
-        <nav className={styles.chapterList} aria-label="课程章节">
-          {activeCourse.chapters.length ? activeCourse.chapters.map((chapter) => (
-            <button key={chapter.id} onClick={() => setMessage(`我想复习“${chapter.title}”中的核心概念。`)}>
-              <span>{String(chapter.ordinal).padStart(2, "0")}</span><strong>{chapter.title}</strong><small>{chapter.canonical_path}</small>
+        {MODES.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              className={styles.railIconButton}
+              data-active={mode === item.id ? "true" : "false"}
+              onClick={() => {
+                setMode(item.id);
+                setConversationId(null);
+                setResult(null);
+                setInterrupt(null);
+                setConfirmedTranscription("");
+                setLeftOpen(false);
+              }}
+              aria-label={`${item.label}模式 · ${item.short}`}
+              title={`${item.label} · ${item.short}`}
+            >
+              <Icon />
             </button>
-          )) : <p className={styles.emptyChapters}>课程目录将在教师发布后出现。</p>}
-        </nav>
-
-        <div className={styles.sidebarProject}>
-          <span>PROJECT MILESTONE</span>
-          <strong>当前工作只解锁下一步</strong>
-          <div><i /></div><small>不会一次生成可提交项目</small>
-        </div>
-        <button className={styles.newThread} onClick={() => { setConversationId(null); setResult(null); setInterrupt(null); setConfirmedTranscription(""); }}><Plus /> 新建学习记录</button>
+          );
+        })}
+        <div className={styles.railDivider} />
+        <button
+          className={styles.railIconButton}
+          onClick={() => setRightOpen(true)}
+          aria-label="打开证据面板"
+          title="证据与验证"
+        >
+          <PanelRight />
+        </button>
+        <button
+          className={styles.railIconButton}
+          onClick={() => setRightOpen(true)}
+          aria-label="课程知识图谱"
+          title="课程关系图谱"
+        >
+          <Network />
+        </button>
+        <button
+          className={styles.railIconButton}
+          onClick={() => setCmdOpen(true)}
+          aria-label="命令面板"
+          title="命令面板 ⌘K"
+        >
+          <Search />
+        </button>
+        <div className={styles.railSpacer} />
+        <button
+          className={styles.railIconButton}
+          onClick={() => { setConversationId(null); setResult(null); setInterrupt(null); setConfirmedTranscription(""); }}
+          aria-label="新建学习记录"
+          title="新建学习记录"
+        >
+          <Plus />
+        </button>
       </aside>
 
       <main className={styles.mainPanel} id="agent-main">
         <div className={styles.workspaceScroll}>
-          <section className={styles.workspaceHead}>
-            <div><p className={styles.kicker}>{activeMode.label.toUpperCase()} / SPECIALIST WORKFLOW</p><h1>{activeMode.label}工作台</h1></div>
-            <span><i /> {conversationId ? "线程已持续" : "新线程"}</span>
+          <section className={styles.stageHead}>
+            <h1>{stageTitle}</h1>
+            <span className={styles.phaseTag}><i />{stagePhaseLabel}</span>
           </section>
 
           <LearningJourney state={nativeState} />
@@ -1314,9 +1362,7 @@ export function AgentExperience() {
           {!result && !interrupt ? (
             <section className={styles.emptyCanvas}>
               <ModeMark mode={mode} />
-              <p className={styles.kicker}>START WITH EVIDENCE</p>
-              <h2>{mode === "review_derivations" ? "上传手写推导，先确认转录，再定位首错。" : mode === "run_experiments" ? "上传结果图，并用数值不变量约束解释。" : mode === "work_on_projects" ? "提交当前里程碑，而不是索取完整项目。" : "从课程概念、截图或一段困惑开始。"}</h2>
-              <p>系统只在需要时调用感知、证据、诊断与专业导师节点；答案范围始终由后端政策决定。</p>
+              <h2>{mode === "review_derivations" ? "上传手写推导，先确认转录，再定位首错。" : mode === "run_experiments" ? "先预测，再用数值不变量约束解释。" : mode === "work_on_projects" ? "提交当前里程碑的下一步。" : "从一个困惑或一张截图开始。"}</h2>
               {turnMutation.isPending && stageProgress ? (
                 <div
                   className={styles.stageProgress}
@@ -1336,7 +1382,7 @@ export function AgentExperience() {
                 </div>
               ) : (
                 <button type="button" className={styles.goldenLoopToggle} onClick={startGoldenTunnelingLoop}>
-                  <FlaskConical size={13} />
+                  <FlaskConical size={15} />
                   启动黄金学习循环 · 量子隧穿
                 </button>
               )}
@@ -1345,9 +1391,81 @@ export function AgentExperience() {
             <article className={styles.tutorRecord} tabIndex={-1} data-testid="agent-tutor-result">
               <header><span><Atom /></span><div><small>QUANTUM AGENT · GROUNDED TURN</small><strong>{result.interpretation.relevant_concepts.join(" · ") || "课程辅导"}</strong></div><em>{result.release.release_level.replaceAll("_", " ")}</em></header>
               <div className={styles.orientation}><span>本轮方向</span><h2><MathText text={result.response.orientation} /></h2></div>
-              <div className={styles.claims}>{result.response.claims.map((claim, index) => <section key={`${claim.text}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p><MathText text={claim.text} /></p><small>{claim.support_basis.replaceAll("_", " ")}</small></section>)}</div>
+              <div className={styles.claims}>{result.response.claims.map((claim, index) => {
+                const linkedEvidence = evidencePacket?.evidence.filter((evidence) => claim.evidence_ids.includes(evidence.evidence_id)) ?? [];
+                const linkedResults = scientificResults.filter((tool) => claim.scientific_result_ids.includes(`${tool.kind}:${tool.inputs_sha256}`));
+                const isOpen = expandedClaim === index;
+                return (
+                  <section key={`${claim.text}-${index}`} data-open={isOpen ? "true" : "false"}>
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <p><MathText text={claim.text} /></p>
+                    <button
+                      type="button"
+                      className={styles.whyToggle}
+                      onClick={() => setExpandedClaim(isOpen ? null : index)}
+                      aria-expanded={isOpen}
+                      aria-label={isOpen ? "收起依据" : "展开依据"}
+                    >
+                      {isOpen ? "收起" : "为什么？"}
+                    </button>
+                    {isOpen ? (
+                      <div className={styles.claimBasis}>
+                        <p className={styles.kicker}>SUPPORT BASIS · {claim.support_basis.replaceAll("_", " ")}</p>
+                        {linkedResults.length ? (
+                          <ul className={styles.basisList}>
+                            {linkedResults.map((tool) => (
+                              <li key={`${tool.kind}:${tool.inputs_sha256}`}>
+                                <Check size={12} /> {tool.kind.replaceAll("_", " ")} · <span data-status={tool.status}>{tool.status}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        {linkedEvidence.length ? (
+                          <ul className={styles.basisList}>
+                            {linkedEvidence.map((evidence, evidenceIndex) => (
+                              <li key={evidence.evidence_id}>
+                                <BookOpen size={12} /> {evidence.document_title} · {sourceLocator(evidence)} · {evidence.chapter ?? "课程材料"}
+                                <button type="button" className={styles.basisLink} onClick={() => setSelectedSource(evidence)} aria-label={`查看引文 ${evidenceIndex + 1}`}>查看原文</button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        <button type="button" className={styles.basisLink} onClick={() => setRightOpen(true)}>在证据面板查看全部 →</button>
+                      </div>
+                    ) : (
+                      <small>{claim.support_basis.replaceAll("_", " ")}</small>
+                    )}
+                  </section>
+                );
+              })}</div>
               <blockquote><Sparkles /><div><span>请你接着做</span><p><MathText text={result.response.next_question} /></p></div></blockquote>
             </article>
+          ) : null}
+
+          {scientificResults.length ? (
+            <section className={styles.stageVerification} aria-label="科学验证结果">
+              <p className={styles.kicker}>DETERMINISTIC VERIFICATION</p>
+              {scientificResults.map((tool) => {
+                const isBarrier = tool.kind === "rectangular_barrier_tunnelling";
+                const metrics = tool.metrics ?? {};
+                return (
+                  <article className={styles.toolResult} key={`${tool.kind}:${tool.inputs_sha256}`} data-testid="scientific-tool-result" data-tool-kind={tool.kind}>
+                    <strong>{tool.kind.replaceAll("_", " ")}</strong>
+                    <span data-status={tool.status}>{tool.status}</span>
+                    <p>{tool.observations[0] ?? "验证已运行"}</p>
+                    {isBarrier && typeof metrics.T === "number" && typeof metrics.R === "number" ? (
+                      <div data-testid="tunnelling-metrics" className={styles.tunnellingMetrics}>
+                        <span>透射 T = <strong>{Number(metrics.T).toPrecision(6)}</strong></span>
+                        <span>反射 R = <strong>{Number(metrics.R).toPrecision(6)}</strong></span>
+                        <span>守恒 |R+T−1| = <strong>{Number(metrics.conservation_error ?? 0).toExponential(3)}</strong></span>
+                        <span data-testid="tunnelling-regime">tunnelling</span>
+                      </div>
+                    ) : null}
+                    <small>{tool.tool.name} {tool.tool.version}</small>
+                  </article>
+                );
+              })}
+            </section>
           ) : null}
 
           <section
@@ -1384,18 +1502,21 @@ export function AgentExperience() {
               onChange={(event) => setMessage(event.target.value)}
               onPaste={onPaste}
               placeholder={mode === "review_derivations" ? "描述你卡住的位置；也可以直接粘贴截图或上传手写推导…" : "写下问题、预测或当前里程碑…"}
-              rows={3}
+              rows={2}
               maxLength={4_000}
               aria-label="给 Quantum Agent 的问题"
               disabled={Boolean(interrupt)}
             />
-            {mode === "review_derivations" || mode === "learn_concepts" ? <textarea className={styles.attemptInput} value={attempt} onChange={(event) => setAttempt(event.target.value)} placeholder="可选：粘贴当前尝试或 LaTeX 推导" rows={2} maxLength={12_000} aria-label="学生当前尝试" disabled={Boolean(interrupt)} /> : null}
+            {showAttempt && (mode === "review_derivations" || mode === "learn_concepts") ? <textarea className={styles.attemptInput} value={attempt} onChange={(event) => setAttempt(event.target.value)} placeholder="可选：粘贴当前尝试或 LaTeX 推导" rows={2} maxLength={12_000} aria-label="学生当前尝试" disabled={Boolean(interrupt)} /> : null}
             <footer>
               <div>
                 <input ref={fileInputRef} type="file" hidden multiple disabled={Boolean(interrupt)} accept="image/png,image/jpeg,image/webp,application/pdf,.pptx,.docx,.txt,.md" onChange={(event) => addFiles([...(event.target.files ?? [])])} />
                 <button onClick={() => fileInputRef.current?.click()} disabled={Boolean(interrupt)}><Paperclip /><span>图像 / 文档</span></button>
                 <button onClick={() => fileInputRef.current?.click()} disabled={Boolean(interrupt)}><ImageIcon /><span>粘贴截图</span></button>
-                <small>PNG · JPG · WEBP · PDF · PPTX · DOCX · 25 MiB</small>
+                {mode === "review_derivations" || mode === "learn_concepts" ? (
+                  <button onClick={() => setShowAttempt((v) => !v)} disabled={Boolean(interrupt)} aria-pressed={showAttempt}><PenLine /><span>{showAttempt ? "收起尝试" : "附上尝试"}</span></button>
+                ) : null}
+                <small>PNG · JPG · PDF · 25 MiB</small>
               </div>
               <button
                 className={styles.sendButton}
@@ -1454,29 +1575,6 @@ export function AgentExperience() {
               {diagnosis.likely_misconception ? <p className={styles.misconception}>候选误解：{diagnosis.likely_misconception}</p> : null}
               <dl><div><dt>进展</dt><dd>{diagnosis.progress_state ?? diagnosis.status}</dd></div><div><dt>首错</dt><dd>{diagnosis.first_error?.kind ?? "尚未定位"}</dd></div></dl>
             </section>
-            <section className={styles.sideCard}>
-              <div className={styles.cardTitle}><span><Check /></span><strong>验证器</strong><em>{scientificResults.length}</em></div>
-              {scientificResults.length ? scientificResults.map((tool) => {
-                const isBarrier = tool.kind === "rectangular_barrier_tunnelling";
-                const metrics = tool.metrics ?? {};
-                return (
-                  <article className={styles.toolResult} key={`${tool.kind}:${tool.inputs_sha256}`} data-testid="scientific-tool-result" data-tool-kind={tool.kind}>
-                    <strong>{tool.kind.replaceAll("_", " ")}</strong>
-                    <span data-status={tool.status}>{tool.status}</span>
-                    <p>{tool.observations[0] ?? "验证已运行"}</p>
-                    {isBarrier && typeof metrics.T === "number" && typeof metrics.R === "number" ? (
-                      <div data-testid="tunnelling-metrics" className={styles.tunnellingMetrics}>
-                        <span>透射 T = <strong>{Number(metrics.T).toPrecision(6)}</strong></span>
-                        <span>反射 R = <strong>{Number(metrics.R).toPrecision(6)}</strong></span>
-                        <span>守恒 |R+T−1| = <strong>{Number(metrics.conservation_error ?? 0).toExponential(3)}</strong></span>
-                        <span data-testid="tunnelling-regime">tunnelling</span>
-                      </div>
-                    ) : null}
-                    <small>{tool.tool.name} {tool.tool.version}</small>
-                  </article>
-                );
-              }) : <p className={styles.noEvidence}>本轮没有需要运行的确定性工具。</p>}
-            </section>
             <section className={styles.policyCard}>
               <p className={styles.kicker}>POLICY GATE</p><h3>{interrupt ? "拟议回答正在等待复核" : `回答已限制为 ${release.release_level.replaceAll("_", " ")}`}</h3><p>{release.reason_code}</p><div><span>引用</span><strong>{validation.citation_ids_valid ? "通过" : "失败"}</strong></div><div><span>科学引用</span><strong>{validation.scientific_references_valid ? "通过" : "失败"}</strong></div>
             </section>
@@ -1488,6 +1586,108 @@ export function AgentExperience() {
 
       <Dialog.Root open={selectedSource !== null} onOpenChange={(open) => { if (!open) setSelectedSource(null); }}>
         {selectedSource ? <SourcePreview evidence={selectedSource} scope={scope} close={() => setSelectedSource(null)} /> : null}
+      </Dialog.Root>
+
+      <Dialog.Root open={cmdOpen} onOpenChange={(open) => { if (!open) { setCmdOpen(false); setCmdQuery(""); } }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className={styles.cmdOverlay} />
+          <Dialog.Content
+            className={styles.cmdPalette}
+            aria-label="命令面板"
+            onOpenAutoFocus={(event) => { event.preventDefault(); const input = document.getElementById("qa-cmd-input") as HTMLInputElement | null; input?.focus(); }}
+          >
+            <header className={styles.cmdSearch}>
+              <Search size={15} />
+              <input
+                id="qa-cmd-input"
+                value={cmdQuery}
+                onChange={(event) => setCmdQuery(event.target.value)}
+                placeholder="搜索模式、课程或操作…"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <kbd>ESC</kbd>
+            </header>
+            <div className={styles.cmdList}>
+              <div className={styles.cmdGroup}>
+                <p className={styles.cmdGroupLabel}>学习模式</p>
+                {MODES.filter((item) => item.label.includes(cmdQuery) || item.short.includes(cmdQuery) || !cmdQuery).map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      className={styles.cmdItem}
+                      data-active={mode === item.id ? "true" : "false"}
+                      onClick={() => {
+                        setMode(item.id);
+                        setConversationId(null);
+                        setResult(null);
+                        setInterrupt(null);
+                        setConfirmedTranscription("");
+                        setCmdOpen(false);
+                        setCmdQuery("");
+                      }}
+                    >
+                      <Icon size={15} />
+                      <span><strong>{item.label}</strong><small>{item.short}</small></span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className={styles.cmdGroup}>
+                <p className={styles.cmdGroupLabel}>课程</p>
+                {courses.filter((course) => course.course_title.includes(cmdQuery) || course.course_code.includes(cmdQuery) || !cmdQuery).slice(0, 6).map((course) => (
+                  <button
+                    key={`${course.course_id}:${course.curriculum_edition_id}`}
+                    className={styles.cmdItem}
+                    data-active={`${course.course_id}:${course.curriculum_edition_id}` === courseKey ? "true" : "false"}
+                    onClick={() => {
+                      setCourseKey(`${course.course_id}:${course.curriculum_edition_id}`);
+                      setConversationId(null);
+                      setResult(null);
+                      setInterrupt(null);
+                      setConfirmedTranscription("");
+                      setCmdOpen(false);
+                      setCmdQuery("");
+                    }}
+                  >
+                    <BookOpen size={15} />
+                    <span><strong>{course.course_title}</strong><small>{course.course_code} · {course.edition_title}</small></span>
+                  </button>
+                ))}
+              </div>
+              <div className={styles.cmdGroup}>
+                <p className={styles.cmdGroupLabel}>操作</p>
+                <button
+                  className={styles.cmdItem}
+                  onClick={() => { setRightOpen(true); setCmdOpen(false); setCmdQuery(""); }}
+                >
+                  <PanelRight size={15} />
+                  <span><strong>打开证据面板</strong><small>课程引文 · 诊断 · 政策门</small></span>
+                </button>
+                <button
+                  className={styles.cmdItem}
+                  onClick={() => { startGoldenTunnelingLoop(); setCmdOpen(false); setCmdQuery(""); }}
+                >
+                  <FlaskConical size={15} />
+                  <span><strong>启动黄金学习循环</strong><small>量子隧穿 · 真实模型与验证</small></span>
+                </button>
+                <button
+                  className={styles.cmdItem}
+                  onClick={() => { setConversationId(null); setResult(null); setInterrupt(null); setConfirmedTranscription(""); setCmdOpen(false); setCmdQuery(""); }}
+                >
+                  <Plus size={15} />
+                  <span><strong>新建学习记录</strong><small>清空当前会话</small></span>
+                </button>
+              </div>
+              {!MODES.some((item) => item.label.includes(cmdQuery) || item.short.includes(cmdQuery))
+                && !courses.some((course) => course.course_title.includes(cmdQuery) || course.course_code.includes(cmdQuery))
+                && cmdQuery ? (
+                <p className={styles.cmdEmpty}>未匹配“{cmdQuery}”</p>
+              ) : null}
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
       </Dialog.Root>
     </div>
   );
