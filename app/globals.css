@@ -7,6 +7,15 @@ body { background:var(--paper); color:var(--ink); font-family:var(--font-geist-s
 button, textarea, input { font:inherit; }
 button { color:inherit; }
 .quantum-app { min-height:100vh; background:var(--paper); transition:.25s ease; }
+.home-redirect { min-height:100vh; display:grid; place-items:center; padding:40px 24px; background:radial-gradient(120% 90% at 50% -10%, color-mix(in srgb,var(--mint) 70%,transparent) 0%, var(--paper) 62%); }
+.home-redirect__card { max-width:560px; width:100%; text-align:center; padding:44px 40px 40px; border:1px solid var(--line); border-radius:18px; background:var(--panel); box-shadow:var(--shadow); position:relative; overflow:hidden; }
+.home-redirect__card::before { content:""; position:absolute; inset:0 0 auto; height:4px; background:linear-gradient(90deg, var(--green) 0%, var(--mint) 50%, var(--green-dark) 100%); }
+.home-redirect__card h1 { margin:0 0 12px; font:500 clamp(28px,3.4vw,38px)/1.2 Georgia,"Noto Serif SC",serif; letter-spacing:-.02em; color:var(--ink); }
+.home-redirect__card p { margin:0 0 26px; color:var(--muted); font-size:13px; line-height:1.7; }
+.home-redirect__cta { display:inline-flex; align-items:center; gap:8px; padding:13px 22px; border-radius:999px; background:var(--green-dark); color:#fff; font:600 12px var(--font-geist-mono),ui-monospace,monospace; letter-spacing:.08em; text-transform:uppercase; text-decoration:none; transition:transform .15s ease, box-shadow .15s ease; box-shadow:0 10px 28px color-mix(in srgb,var(--green-dark) 32%,transparent); }
+.home-redirect__cta:hover { transform:translateY(-1px); box-shadow:0 14px 34px color-mix(in srgb,var(--green-dark) 42%,transparent); }
+.home-redirect__cta:focus-visible { outline:3px solid color-mix(in srgb,var(--green) 40%,transparent); outline-offset:3px; }
+@media (max-width:520px) { .home-redirect__card { padding:34px 22px 28px; } }
 .theme-board { --ink:#edf5f0; --muted:#9fb0a9; --paper:#0b1512; --panel:#101f1a; --line:#294038; --green:#75c9a7; --green-dark:#d5f4e6; --mint:#17362b; --amber:#f0b86c; --amber-bg:#392a18; --blue:#8cc6e6; --blue-bg:#193143; --shadow:0 18px 48px rgba(0,0,0,.28); }
 .topbar { height:72px; display:grid; grid-template-columns:290px 1fr auto; align-items:center; border-bottom:1px solid var(--line); background:color-mix(in srgb,var(--panel) 94%,transparent); position:sticky; top:0; z-index:40; backdrop-filter:blur(16px); }
 .brand { display:flex; align-items:center; gap:12px; padding:0 24px; }

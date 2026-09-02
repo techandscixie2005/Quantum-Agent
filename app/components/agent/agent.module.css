@@ -510,9 +510,9 @@
 .bootError h1 { margin: 0; color: var(--ink); font: 500 30px Georgia, "Noto Serif SC", serif; }
 .bootError > p:not(.kicker) { max-width: 520px; margin: 0; font-size: 11px; line-height: 1.6; }
 .bootError button { margin-top: 8px; padding: 9px 14px; border: 0; border-radius: 7px; color: white; background: var(--green); cursor: pointer; }
-.demoLogin { display: grid; gap: 8px; margin-top: 18px; padding: 18px; border: 1px solid var(--rule); border-radius: 10px; background: var(--card); text-align: left; max-width: 360px; }
+.demoLogin { display: grid; gap: 8px; margin-top: 18px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); text-align: left; max-width: 360px; }
 .demoLogin label { font: 600 10px var(--font-geist-mono), monospace; color: var(--ink); }
-.demoLogin input { padding: 9px 11px; border: 1px solid var(--rule); border-radius: 6px; font-size: 12px; background: var(--paper); color: var(--ink); }
+.demoLogin input { padding: 9px 11px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; background: var(--paper); color: var(--ink); }
 .demoLogin button { margin-top: 4px; padding: 9px 14px; border: 0; border-radius: 7px; color: white; background: var(--green); cursor: pointer; font-size: 11px; }
 .demoLogin button:disabled { opacity: .55; cursor: not-allowed; }
 .backdrop { display: none; }
