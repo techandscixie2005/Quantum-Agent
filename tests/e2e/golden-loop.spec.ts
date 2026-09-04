@@ -248,20 +248,20 @@ const GOLDEN_LOOP_STAGES: Array<{
     },
   },
   {
-    name: "diagnosis_minimal_hint",
+    name: "commitment_accepted_minimal_intervention",
     result: baseResult({
       release: {
-        action: "ask_diagnostic_question",
+        action: "give_progressive_hint",
         release_level: "hint",
         attempts_observed: 1,
-        reason_code: "first_attempt_hint_only",
+        reason_code: "commitment_accepted_minimal_intervention",
       },
       response: {
-        orientation: "你的预测用了经典图像；量子力学中 E<V0 时波函数在势垒内指数衰减但不为零。",
+        orientation: "已收到你的承诺（预测 / 第一步 / 物理理由）。基于它给出最小干预提示。",
         claims: [],
         next_question: "势垒右侧的波函数振幅会是什么量级？",
         status: "grounded",
-        limitations: ["hint-only: the full explanation is withheld."],
+        limitations: ["Commitment accepted: a minimal intervention follows; the full course answer is released only as the backend policy allows."],
       },
       diagnosis: {
         status: "model_inference",
@@ -286,18 +286,24 @@ const GOLDEN_LOOP_STAGES: Array<{
         transfer: null,
         solo: null,
         cognitive_mirror: null,
+        minimal_intervention_prompt: "你的预测已被记录。现在基于它：势垒右侧的波函数振幅会是什么量级？请写出你的判断或推导。",
         evidence_persisted: ["commitment", "confidence"],
-        phase: "awaiting_revision",
+        phase: "attempt_received",
         current_stage: "explain",
-        completed_stages: ["predict", "diagnose"],
+        completed_stages: ["predict", "diagnose", "explore"],
         required_action: "revision",
         loop_required: true,
       },
     }),
     assert: async (page) => {
-      // The minimal hint orientation should be visible in the tutor record.
-      await expect(page.getByTestId("agent-tutor-result")).toBeVisible({ timeout: 15000 });
-      await expect(page.getByText(/经典图像/)).toBeVisible();
+      // PRD V3.4: after the commitment is accepted the loop must NOT dead-end;
+      // the user gets a concrete MINIMAL-INTERVENTION next step instead.
+      await expect(page.getByTestId("minimal-intervention-card")).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText(/最小干预/).first()).toBeVisible();
+      await expect(page.getByTestId("learning-phase")).toHaveAttribute(
+        "data-phase",
+        "attempt_received",
+      );
     },
   },
   {

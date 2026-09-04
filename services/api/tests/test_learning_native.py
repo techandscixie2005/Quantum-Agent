@@ -358,13 +358,15 @@ class TestLearningNativePolicy:
             submission=submission,
             submission_confidence=0.8,
         )
+        # PRD V3.4: an ACCEPTED commitment IS the initial attempt/prediction.
+        # The gate is satisfied and disarms (PROCEED) so the governing turn
+        # routes into Evidence → Diagnosis → Minimal Intervention.  Invariant B
+        # (commitment accepted ≠ full answer released on the SAME turn) is
+        # preserved by the deterministic release engine — the engine sees the
+        # commitment as this turn's attempt, so the release stays at the
+        # minimal-intervention envelope, never an unearned FULL_SOLUTION.
         assert commitment.accepted is True
-        # PRD V3.3 root-cause #4: an accepted commitment is a PREDICTION, not a
-        # verified learning signal.  The gate stays armed (ATTEMPT_REQUIRED) so
-        # the explanation is NOT released on the same turn; the student must
-        # submit a *revised* attempt.  Invariant B: commitment accepted ≠
-        # explanation released.
-        assert commitment.gate_decision is CommitmentGateDecision.ATTEMPT_REQUIRED
+        assert commitment.gate_decision is CommitmentGateDecision.PROCEED
         assert commitment.confidence == 0.8
         assert action.value == "give_hint"
         assert any(item.kind is LearningEvidenceKind.COMMITMENT for item in evidence)

@@ -464,6 +464,7 @@ test("parses a Learning-Native commitment gate in a turn result", () => {
     transfer: null,
     solo: null,
     cognitive_mirror: null,
+    minimal_intervention_prompt: "",
     evidence_persisted: ["commitment"],
     phase: "commitment_required",
     current_stage: "predict",
@@ -475,6 +476,55 @@ test("parses a Learning-Native commitment gate in a turn result", () => {
   assert.equal(parsed.learning_native?.commitment?.gate_decision, "attempt_required");
   assert.equal(parsed.learning_native?.learning_action, "ask_commitment");
   assert.deepEqual(parsed.learning_native?.evidence_persisted, ["commitment"]);
+});
+
+test("parses the PRD V3.4 post-commitment state (attempt_received, minimal intervention)", () => {
+  // The exact fixed payload that previously dead-ended the frontend: phase
+  // advanced to attempt_received, the accepted CommitmentCard suppressed, and
+  // a concrete minimal-intervention probe + required_action=revision exposed.
+  const raw = validResult();
+  raw.learning_native = {
+    commitment: null,
+    learning_action: "give_hint",
+    teach_back: null,
+    transfer: null,
+    solo: null,
+    cognitive_mirror: null,
+    minimal_intervention_prompt: "基态关于势阱中心对称，动量算符是奇算符，期望为零。现在请据此完成下一步。",
+    evidence_persisted: ["commitment", "confidence"],    phase: "attempt_received",
+    current_stage: "explain",
+    completed_stages: ["predict", "diagnose", "explore"],
+    required_action: "revision",
+    loop_required: true,
+  };
+  const parsed = parseTeachingTurnResult(raw);
+  const marginal = "基态关于势阱中心对称，动量算符是奇算符，期望为零。现在请据此完成下一步。";
+  assert.equal(parsed.learning_native?.phase, "attempt_received");
+  assert.equal(parsed.learning_native?.commitment, null);
+  assert.equal(parsed.learning_native?.minimal_intervention_prompt, marginal);
+  assert.equal(parsed.learning_native?.required_action, "revision");
+  assert.equal(parsed.learning_native?.current_stage, "explain");
+  assert.equal(parsed.learning_loop_completed, false);
+});
+
+test("rejects a Learning-Native state with a mismatched minimal_intervention_prompt type", () => {
+  const raw = validResult();
+  raw.learning_native = {
+    commitment: null,
+    learning_action: null,
+    teach_back: null,
+    transfer: null,
+    solo: null,
+    cognitive_mirror: null,
+    minimal_intervention_prompt: 42,
+    evidence_persisted: [],
+    phase: "attempt_received",
+    current_stage: "explain",
+    completed_stages: [],
+    required_action: "revision",
+    loop_required: true,
+  };
+  assert.throws(() => parseTeachingTurnResult(raw), /minimal_intervention_prompt/);
 });
 
 test("parses a Learning-Native solo-mode transfer task", () => {

@@ -52,10 +52,13 @@ from quantum_agent.teaching.learning_native import (
     LearningNativeEvidence,
     LearningNativePolicy,
     TransferProposal,
+    _required_action_for_phase,
     assert_phase_transition,
+    phase_is_actionable_next_step,
     propose_commitment,
     propose_teach_back_analysis,
     propose_transfer_task,
+    suppress_gated_commitment_evidence,
 )
 from quantum_agent.teaching.models import (
     CognitiveCommitment,
@@ -115,6 +118,13 @@ _MULTIMODAL_EVIDENCE_ADAPTER: TypeAdapter[ConfirmedEvidence] = TypeAdapter(
 # prediction mid-loop.
 _COMMITMENT_SATISFIED_PHASES = frozenset(
     {
+        # PRD V3.4: an accepted commitment (or a typed attempt) satisfies the
+        # gate for the REST of the episode.  ATTEMPT_RECEIVED and INTERVENTION
+        # must be in this set too, otherwise the very next revision turn would
+        # re-arm the gate (the same class of regression the experiment-turn
+        # test guards).
+        LearningPhase.ATTEMPT_RECEIVED,
+        LearningPhase.INTERVENTION,
         LearningPhase.AWAITING_REVISION,
         LearningPhase.RECONSTRUCTION_REQUIRED,
         LearningPhase.TRANSFER_REQUIRED,
@@ -572,11 +582,21 @@ async def learning_native_pre_node(
     # be used to jump directly to Teach-Back or Transfer.
     submitted_commitment = submission.commitment if submission is not None else None
 
-    # Revision is a typed cross-turn obligation.  While it is active, the
-    # student's message itself is the revised explanation and must enter the
-    # Diagnosis Agent as ``student_attempt``.
+    # Revision is a typed cross-turn obligation.  While the episode is in a
+    # revision-bearing phase (ATTEMPT_RECEIVED / INTERVENTION /
+    # AWAITING_REVISION), the student's message itself is the revised
+    # explanation and must enter the Diagnosis Agent as ``student_attempt``.
+    # PRD V3.4: after an accepted commitment the episode holds at
+    # ATTEMPT_RECEIVED and the minimal-intervention probe is answered as free
+    # text — so the same promotion applies there.
+    phase_at_start = durable_phase.phase
     if (
-        durable_phase.phase is LearningPhase.AWAITING_REVISION
+        phase_at_start
+        in {
+            LearningPhase.ATTEMPT_RECEIVED,
+            LearningPhase.INTERVENTION,
+            LearningPhase.AWAITING_REVISION,
+        }
         and not request.student_attempt
         and LearningNativePolicy.attempt_is_meaningful(request.message)
     ):
@@ -832,6 +852,22 @@ async def prepare_commitment_gate_node(
     candidate_prompt = str(commitment_data.get("candidate_prompt") or "")
     reason_summary = str(commitment_data.get("reason_summary") or "")
     solo_blocked = bool(pre_decision.get("solo_blocked"))
+
+    # PRD V3.4: an accepted Commitment Card routed through this gate node only
+    # when the durable phase was already advanced past COMMITMENT_REQUIRED (a
+    # stale pre-decision after an HITL restart / confirmation).  Acknowledge
+    # it positively instead of re-asking for an invisible second commitment.
+    accepted_gate_commitment = (
+        not solo_blocked
+        and bool(commitment_data.get("accepted"))
+        and commitment_data.get("attempt_required") is True
+        and started.durable_phase.phase
+        in {
+            LearningPhase.ATTEMPT_RECEIVED,
+            LearningPhase.INTERVENTION,
+            LearningPhase.AWAITING_REVISION,
+        }
+    )
     question_level = AnswerReleaseLevel.QUESTION_ONLY
 
     if solo_blocked:
@@ -847,6 +883,42 @@ async def prepare_commitment_gate_node(
         )
         warning_code = "answer_blocked_by_solo_mode"
         reason_code = "solo_mode_assistance_locked"
+    elif accepted_gate_commitment:
+        # PRD V3.4 positive acknowledgement: this gated turn ACCEPTED the
+        # student's commitment (prediction / first step / physical reason).
+        # Acknowledge it deterministically and hand the student the minimal
+        # intervention that follows from it — the tutorial step is at most the
+        # hint probe, never a full answer.  Invariant B holds: the accepted
+        # commitment is NOT the explanation, and it does NOT jump the phase
+        # forward by itself; Evidence → Diagnosis → Policy have run this turn
+        # and the student must revise/explain next.
+        orientation_text = (
+            "已收到你的承诺（预测 / 第一步 / 物理理由）。"
+            + (candidate_prompt or "接下来基于它给出最小干预提示。")
+        )
+        next_action = _required_action_for_phase(started.durable_phase.phase)
+        if next_action == "commitment":
+            next_question_text = (
+                candidate_prompt
+                or "现在请基于你的承诺，完成下一步：写出的你的判断/推导/理由。"
+            )
+        elif next_action == "revision":
+            next_question_text = (
+                candidate_prompt
+                or "现在请根据提示修正或解释你刚才的尝试（这是下一步）。"
+            )
+        else:
+            next_question_text = candidate_prompt or "请看上面的提示继续。"
+        limitation_text = (
+            "Commitment accepted: a minimal intervention follows; the full "
+            "course answer is released only as the backend policy allows."
+        )
+        generate_detail = (
+            "Commitment accepted; the gate produced a minimal-intervention "
+            "acknowledgement instead of the full answer."
+        )
+        warning_code = "answer_withheld_by_commitment_gate"
+        reason_code = "commitment_accepted_minimal_intervention"
     else:
         orientation_text = (
             candidate_prompt or reason_summary or _orientation(question_level)
@@ -1011,6 +1083,16 @@ async def generate_response_node(
         candidate_prompt = str(commitment_data.get("candidate_prompt") or "")
         reason_summary = str(commitment_data.get("reason_summary") or "")
         solo_blocked = bool(pre_decision.get("solo_blocked"))
+        accepted_gate_commitment = (
+            not solo_blocked
+            and bool(commitment_data.get("accepted"))
+            and runtime.context.started_turn.durable_phase.phase
+            in {
+                LearningPhase.ATTEMPT_RECEIVED,
+                LearningPhase.INTERVENTION,
+                LearningPhase.AWAITING_REVISION,
+            }
+        )
         question_level = AnswerReleaseLevel.QUESTION_ONLY
         if solo_blocked:
             orientation_text = reason_summary or candidate_prompt or _orientation(question_level)
@@ -1024,6 +1106,30 @@ async def generate_response_node(
                 "independent transfer attempt before AI assistance resumes."
             )
             warning_code = "answer_blocked_by_solo_mode"
+        elif accepted_gate_commitment:
+            orientation_text = (
+                "已收到你的承诺（预测 / 第一步 / 物理理由）。"
+                + (candidate_prompt or "接下来基于它给出最小干预提示。")
+            )
+            next_action = _required_action_for_phase(
+                runtime.context.started_turn.durable_phase.phase
+            )
+            if next_action == "revision":
+                next_question_text = (
+                    candidate_prompt
+                    or "现在请根据提示修正或解释你刚才的尝试（这是下一步）。"
+                )
+            else:
+                next_question_text = candidate_prompt or "请看上面的提示继续。"
+            limitation_text = (
+                "Commitment accepted: a minimal intervention follows; the full "
+                "course answer is released only as the backend policy allows."
+            )
+            generate_detail = (
+                "Commitment accepted; the gate produced a minimal-intervention "
+                "acknowledgement instead of the full answer."
+            )
+            warning_code = "answer_withheld_by_commitment_gate"
         else:
             orientation_text = (
                 candidate_prompt or reason_summary or _orientation(question_level)
@@ -1359,6 +1465,34 @@ async def assemble_result_node(
     result = result.model_copy(
         update={"learning_loop_completed": loop_complete}
     )
+    # PRD V3.4 no-orphan invariant: it must NEVER be possible to end a turn in
+    # a loop-required, incomplete LearningPhase with ZERO actionable next
+    # steps.  The historical commit turn (phase=commitment_required,
+    # commitment.accepted=true, gate_decision=attempt_required) is exactly the
+    # forbidden machine state the UI cannot advance.  Fail CLOSED by raising
+    # instead of returning an orphan result.
+    if (
+        loop_complete is False
+        and native_state is not None
+        and native_state.loop_required
+        and native_state.phase is not LearningPhase.ABORTED
+    ):
+        actionable = phase_is_actionable_next_step(
+            phase=native_state.phase,
+            commitment=native_state.commitment,
+            teach_back=native_state.teach_back,
+            transfer=native_state.transfer,
+            solo=native_state.solo,
+        )
+        if not actionable:
+
+            raw = result.model_dump(mode="json")
+            del raw["trace"]
+            raise RuntimeError(
+                "no-orphan invariant violated: loop-required learning phase "
+                f"{native_state.phase.value} exposes no actionable next step. "
+                f"result skeleton={str(raw)[:800]}"
+            )
     learning_native_records = _learning_native_records(state)
     await TeachingRepository(session).complete_turn(
         actor=actor,
@@ -1614,6 +1748,8 @@ async def learning_native_node(
         request.scientific_request is not None
         and phase_at_start
         in {
+            LearningPhase.ATTEMPT_RECEIVED,
+            LearningPhase.INTERVENTION,
             LearningPhase.AWAITING_REVISION,
             LearningPhase.RECONSTRUCTION_REQUIRED,
             LearningPhase.TRANSFER_REQUIRED,
@@ -1732,34 +1868,86 @@ async def learning_native_node(
     # learning signal: a scientific PASS correlated with the persisted
     # pending_scientific_request, OR an explicit student phase-advance request,
     # OR a *revised* student_attempt (not the commitment prediction itself).
-    #
-    # PRD V3.3 root-cause #4 fix (commitment must not release the explanation):
-    # submitting the Commitment Card is a PREDICTION, not a verified learning
-    # signal.  The pre_node feeds ``submitted_commitment.candidate_prompt`` into
-    # ``request.student_attempt`` so the Diagnosis Agent can reason about the
-    # prediction (nodes.py:668), but that must NOT trigger the verified_attempt
-    # transition — otherwise the phase jumps to AWAITING_REVISION on the very
-    # turn the student commits a prediction, immediately releasing the full
-    # explanation.  That was the user-reported "question seems to jump to the
-    # last step": the student commits a prediction, and the next render shows
-    # the complete answer.  The phase must HOLD at COMMITMENT_REQUIRED until
-    # the student submits a *revised* attempt (a follow-up turn with a typed
-    # attempt and no commitment card), a scientific PASS, or an explicit
-    # advance.  This is invariant B: commitment accepted ≠ explanation released.
     commitment_submitted_this_turn = (
         submission is not None and submission.commitment is not None
-    )
-    explicit_advance = (
-        submission is not None
-        and (submission.request_teach_back or submission.request_transfer_task)
     )
     revised_attempt_this_turn = (
         LearningNativePolicy.attempt_is_meaningful(request.student_attempt)
         and not commitment_submitted_this_turn
     )
-    positive_learning_signal = (
-        revised_attempt_this_turn or passed_verification or explicit_advance
+    # An explicit phase-advance flag is only a valid learning signal when the
+    # requested transition is pedagogically legal from the current phase:
+    # request_teach_back advances only from AWAITING_REVISION (D), and
+    # request_transfer_task only from TRANSFER_REQUIRED (F).  Anything else is
+    # ignored (fail closed) so flags cannot skip teach-back or transfer.
+    explicit_advance = (
+        submission is not None
+        and (
+            (
+                submission.request_teach_back
+                and phase_at_start is LearningPhase.AWAITING_REVISION
+            )
+            or (
+                submission.request_transfer_task
+                and phase_at_start is LearningPhase.TRANSFER_REQUIRED
+            )
+        )
     )
+    # The verified_attempt advance to AWAITING_REVISION requires a REVISED,
+    # non-commitment attempt.  A bare scientific PASS on the commitment turn
+    # must NOT trigger it (the release generated this turn is at most the
+    # minimal-intervention probe, and the student must revise/explain next).
+    # Excluding the commitment turn here is invariant B: commitment accepted ≠
+    # episode auto-advances / full answer released on the same turn.
+    positive_learning_signal = (
+        revised_attempt_this_turn
+        or (passed_verification and not commitment_submitted_this_turn)
+        or explicit_advance
+    )
+
+    # PRD V3.4 root-cause fix (accepted commitment = the initial attempt):
+    # when this turn accepted a formal Commitment Card, the phase advances
+    # COMMITMENT_REQUIRED -> ATTEMPT_RECEIVED (cause "commitment_processed")
+    # so the episode CONTINUES into Evidence / Diagnosis / Minimal
+    # Intervention instead of holding at COMMITMENT_REQUIRED with an accepted
+    # commitment the UI cannot act on.  Invariant B still holds: the full
+    # explanation is NOT auto-released by this advance and the phase does NOT
+    # jump to AWAITING_REVISION on the commitment turn — the release engine
+    # sees ``request.student_attempt`` set from the commitment candidate so
+    # the response is at most the minimal-intervention probe, and the student
+    # must revise/explain next (required_action == revision).
+    if (
+        loop_needed
+        and not state.get("answer_withheld_by_gate")
+        and commitment_submitted_this_turn
+        and phase_at_start is LearningPhase.COMMITMENT_REQUIRED
+        and commitment is not None
+        and commitment.accepted
+    ):
+        assert_phase_transition(
+            phase_at_start,
+            LearningPhase.ATTEMPT_RECEIVED,
+            cause="commitment_processed",
+        )
+        durable_phase = durable_phase.model_copy(
+            update={
+                "phase": LearningPhase.ATTEMPT_RECEIVED,
+                "loop_required": True,
+                "completed_stages": _append_learning_stages(
+                    durable_phase.completed_stages,
+                    LearningStage.PREDICT,
+                    LearningStage.DIAGNOSE,
+                    LearningStage.EXPLORE,
+                    *((LearningStage.VERIFY,) if passed_verification else ()),
+                ),
+                "pending_scientific_request": (
+                    request.scientific_request.model_dump(mode="json")
+                    if request.scientific_request is not None
+                    else durable_phase.pending_scientific_request
+                ),
+            }
+        )
+
     if (
         loop_needed
         and not state.get("answer_withheld_by_gate")
@@ -2171,8 +2359,13 @@ async def learning_native_node(
     )
 
     evidence_kinds = [item.kind.value for item in all_evidence]
+    # PRD V3.4: once the accepted commitment has advanced the durable phase to
+    # ATTEMPT_RECEIVED, the student-facing state must NOT carry an accepted
+    # CommitmentCard (the UI would hide it — the historical orphan).  The
+    # card is replaced by the minimal-intervention probe below.
+    effective_commitment = suppress_gated_commitment_evidence(commitment, durable_phase.phase)
     native_state = policy.assemble_turn_state(
-        commitment=commitment,
+        commitment=effective_commitment,
         learning_action=learning_action,
         teach_back=teach_back,
         transfer=transfer,
@@ -2181,6 +2374,33 @@ async def learning_native_node(
         evidence_kinds=evidence_kinds,
         durable_phase=durable_phase,
     )
+    if native_state is not None and (
+        native_state.phase
+        in {LearningPhase.ATTEMPT_RECEIVED, LearningPhase.INTERVENTION}
+    ):
+        # PRD V3.4: after an accepted commitment the episode holds at
+        # ATTEMPT_RECEIVED with a MINIMAL-INTERVENTION probe.  Include the
+        # interpret probe (the current response's next_question) as the
+        # concrete next-step content the student must act on; the backend
+        # state remains authoritative, the probe is only the visible question.
+        raw_response = state.get("response")
+        if raw_response is None:
+            probe = ""
+        elif isinstance(raw_response, dict):
+            probe = str(raw_response.get("next_question") or "")
+        else:
+            probe = str(getattr(raw_response, "next_question", "") or "")
+        native_state = native_state.model_copy(
+            update={
+                "learning_action": (
+                    native_state.learning_action
+                    or LearningPolicyAction.GIVE_HINT
+                ),
+                "minimal_intervention_prompt": (
+                    probe or "请先针对当前提示给出你的判断，再继续。"
+                ),
+            }
+        )
 
     native_evidence_payload = [
         {

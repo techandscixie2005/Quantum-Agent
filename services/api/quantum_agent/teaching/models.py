@@ -461,6 +461,11 @@ class LearningNativeTurnState(BaseModel):
     transfer: TransferTask | None = None
     solo: SoloMode | None = None
     cognitive_mirror: CognitiveMirror | None = None
+    # PRD V3.4: the concrete MINIMAL-INTERVENTION probe the student must act
+    # on while the episode holds at ATTEMPT_RECEIVED / INTERVENTION (after the
+    # commitment was accepted).  Deterministic content (the interpret probe /
+    # next-question from the current response), never model chain-of-thought.
+    minimal_intervention_prompt: str = Field(default="", max_length=2000)
     evidence_persisted: list[str] = Field(default_factory=list, max_length=24)
     phase: LearningPhase = LearningPhase.OPEN
     current_stage: LearningStage | None = None

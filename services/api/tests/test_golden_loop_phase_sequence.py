@@ -180,6 +180,7 @@ async def _seed_conversation(
     *,
     phase: str,
     extra_phase: dict[str, object] | None = None,
+    mode: TeachingMode = TeachingMode.LEARN_CONCEPTS,
 ) -> UUID:
     learning_phase_json: dict[str, object] = {"phase": phase}
     if extra_phase is not None:
@@ -188,7 +189,7 @@ async def _seed_conversation(
         course_id=seed.actor.course_id,
         curriculum_edition_id=seed.edition_id,
         student_user_id=seed.actor.user_id,
-        mode=TeachingMode.LEARN_CONCEPTS,
+        mode=mode,
         status=TeachingConversationStatus.ACTIVE,
         last_activity_at=datetime.now(UTC),
         learning_phase_json=learning_phase_json,
@@ -335,10 +336,19 @@ class TestGoldenLoopAntiSkip:
         assert result.response.claims == []
         assert result.learning_loop_completed is False
 
-    async def test_commitment_does_not_imply_episode_complete(
+    async def test_commitment_advances_and_episode_continues(
         self,
         golden_loop_database: async_sessionmaker[AsyncSession],
     ) -> None:
+        """PRD V3.4 regression: an accepted commitment is the student's initial
+        attempt, NOT the end of the episode.  It must advance the durable phase
+        COMMITMENT_REQUIRED -> ATTEMPT_RECEIVED (cause ``commitment_processed``)
+        so the episode CONTINUES into Evidence / Diagnosis / Minimal
+        Intervention — the UI must never be left with zero actionable steps
+        (the reported "frontend ends after I answer the first question" bug).
+        Invariant B still holds: the phase does NOT jump to AWAITING_REVISION
+        and the full explanation is NOT auto-released by the commitment alone.
+        """
         async with golden_loop_database() as session:
             seed = await _seed_actor(session)
             conversation_id = await _seed_conversation(
@@ -351,6 +361,31 @@ class TestGoldenLoopAntiSkip:
                 },
             )
 
+        class _ProbeGateway(FakeModelGateway):
+            """Counts whether the full-explain compose was called on the
+            commitment turn; over an interpretation fallback it reports the
+            exercise classification so the release engine caps at SCAFFOLD."""
+
+            def __init__(self) -> None:
+                super().__init__(
+                    {
+                        "interpret_teaching_turn": {
+                            "task_kind": "exercise_help",
+                            "relevant_concepts": ["tunnelling"],
+                            "needs_scientific_verification": False,
+                            "confidence": 0.8,
+                        }
+                    }
+                )
+                self.compose_calls = 0
+
+            async def structured_generate(self, *args: object, **kwargs: object) -> object:
+                task = kwargs.get("task") or (args[0] if args else "")
+                if task == "compose_grounded_teaching_response":
+                    self.compose_calls += 1
+                return await super().structured_generate(*args, **kwargs)
+
+        gateway = _ProbeGateway()
         submission = LearningNativeSubmission(
             commitment=CognitiveCommitment(
                 gate_decision=CommitmentGateDecision.ATTEMPT_REQUIRED,
@@ -369,31 +404,69 @@ class TestGoldenLoopAntiSkip:
             learning_native=submission,
         )
         async with golden_loop_database() as session:
-            result = await _graph().run(
+            result = await _graph(gateway=gateway).run(
                 session=session,
                 actor=seed.actor,
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
             await session.commit()
-        # PRD V3.3 root-cause #4: an accepted commitment is a PREDICTION, not a
-        # verified learning signal.  The phase must HOLD at COMMITMENT_REQUIRED
-        # (the commitment_accepted_but_phase_holds invariant) — the explanation
-        # is NOT released on the commitment turn.  The student must submit a
-        # *revised* attempt to advance to AWAITING_REVISION.  This is invariant
-        # B: commitment accepted ≠ explanation released, and it is the fix for
-        # the user-reported "question seems to jump to the last step."
-        assert result.learning_native is not None
+        # The episode is NOT complete; but it is NOT an orphan either.
         assert result.learning_loop_completed is False
-        assert result.learning_native.phase is LearningPhase.COMMITMENT_REQUIRED
+        assert result.learning_native is not None
+        assert result.learning_native.loop_required is True
+        # The accepted commitment advances the durable phase forward.
+        assert result.learning_native.phase is LearningPhase.ATTEMPT_RECEIVED
         assert (
             await _read_phase(golden_loop_database, conversation_id)
-            == "commitment_required"
+            == "attempt_received"
         )
-        # The commitment itself is accepted (the prediction was captured), even
-        # though the phase holds.
-        assert result.learning_native.commitment is not None
-        assert result.learning_native.commitment.accepted is True
+        # At least one concrete next step MUST be visible/actionable
+        # (no-orphan invariant).
+        assert result.learning_native.required_action.value != "none"
+        assert result.learning_native.current_stage is not None
+        # Invariant B: the phase does NOT jump to AWAITING_REVISION and the
+        # full explanation is NOT auto-released on the commitment turn.  The
+        # release stays at the minimal-intervention envelope (SCAFFOLD max).
+        assert result.learning_native.phase is not LearningPhase.AWAITING_REVISION
+        assert result.release.release_level.value in {
+            AnswerReleaseLevel.QUESTION_ONLY.value,
+            AnswerReleaseLevel.HINT.value,
+            AnswerReleaseLevel.SCAFFOLD.value,
+        }
+        # The commitment was accepted and flows into diagnosis as the attempt,
+        # but the UI must not re-render an invisible accepted card.
+        if result.learning_native.commitment is not None:
+            assert result.learning_native.commitment.accepted is True
+        # The episode CAN continue: the next turn with a revised attempt must
+        # run the real evidence/diagnosis/policy work (retrieve trace step is
+        # no longer SKIPPED as "retrieval_skipped_until_commitment").
+        assert not any(
+            "retrieval_skipped_until_commitment" in step.detail
+            for step in result.trace
+        ), "a continued episode must actually run retrieval"
+
+    async def test_commitment_hold_is_rejected_by_transition_table(
+        self,
+    ) -> None:
+        # PRD V3.4: the old "commitment_accepted_but_phase_holds" same-phase
+        # hold is REMOVED from the legal transition table — it was the machine
+        # state that produced the post-commitment orphan.  Assert it is no
+        # longer a legal transition.
+        import pytest as _pytest
+
+        with _pytest.raises(ValueError):
+            assert_phase_transition(
+                LearningPhase.COMMITMENT_REQUIRED,
+                LearningPhase.COMMITMENT_REQUIRED,
+                cause="commitment_accepted_but_phase_holds",
+            )
+        # The new forward edge is legal.
+        assert_phase_transition(
+            LearningPhase.COMMITMENT_REQUIRED,
+            LearningPhase.ATTEMPT_RECEIVED,
+            cause="commitment_processed",
+        )
 
     async def test_explanation_does_not_imply_mastery(
         self,
@@ -458,7 +531,21 @@ class TestGoldenLoopAntiSkip:
                 seed,
                 phase="awaiting_revision",
                 extra_phase={"loop_required": True},
+                mode=TeachingMode.RUN_EXPERIMENTS,
             )
+            session.add(
+                AnswerPolicy(
+                    course_id=seed.actor.course_id,
+                    curriculum_edition_id=seed.edition_id,
+                    mode=TeachingMode.RUN_EXPERIMENTS,
+                    active=True,
+                    allow_full_solution=False,
+                    minimum_attempts_for_scaffold=0,
+                    minimum_attempts_for_full_solution=3,
+                    max_hint_level=2,
+                )
+            )
+            await session.commit()
 
         request = TeachingTurnInput(
             mode=TeachingMode.RUN_EXPERIMENTS,

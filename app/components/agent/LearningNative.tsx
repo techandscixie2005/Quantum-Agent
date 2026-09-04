@@ -438,7 +438,72 @@ export function hasLearningNativeAction(state: LearningNativeTurnState | null): 
     (state.commitment?.gate_decision === "attempt_required" && !state.commitment.accepted) ||
     state.teach_back !== null ||
     state.transfer !== null ||
-    state.solo?.status === "active"
+    state.solo?.status === "active" ||
+    state.minimal_intervention_prompt.trim().length > 0 ||
+    state.required_action === "revision" ||
+    state.required_action === "commitment"
+  );
+}
+
+function MinimalInterventionCard({
+  state,
+  pending,
+  onSubmit,
+}: {
+  state: LearningNativeTurnState;
+  pending: boolean;
+  onSubmit: (submission: LearningNativeSubmission) => void;
+}) {
+  const [response, setResponse] = useState("");
+
+  function submit() {
+    const trimmed = response.trim();
+    if (!trimmed) return;
+    onSubmit({
+      commitment: null,
+      confidence: null,
+      teach_back: null,
+      transfer_attempt: null,
+      solo_attempt: null,
+      request_transfer: false,
+      request_solo_exit: false,
+      request_teach_back: false,
+      request_transfer_task: false,
+    });
+  }
+
+  const probe =
+    state.minimal_intervention_prompt.trim() ||
+    "你的初步尝试已被记录。现在填写你的判断 / 推导 / 理由，我会给出下一步提示。";
+
+  return (
+    <section className={styles.learningCard} data-testid="minimal-intervention-card" aria-live="polite">
+      <header>
+        <span><Lightbulb aria-hidden="true" /></span>
+        <div>
+          <p className={styles.kicker}>MINIMAL INTERVENTION</p>
+          <h2>基于你的尝试，完成下一步</h2>
+        </div>
+        <em>ATTEMPT RECEIVED</em>
+      </header>
+      <p>{probe}</p>
+      <textarea
+        value={response}
+        onChange={(event) => setResponse(event.target.value)}
+        placeholder="写下你的判断、推导或理由…"
+        rows={3}
+        maxLength={12000}
+        disabled={pending}
+        aria-label="最小干预回复"
+      />
+      <footer>
+        <small>提交后会继续诊断并给出最小提示；完整解释按政策逐步释放。</small>
+        <button type="button" onClick={submit} disabled={pending || !response.trim()}>
+          {pending ? <span className={styles.spin}>…</span> : <Check />}
+          {pending ? "提交中" : "提交下一步"}
+        </button>
+      </footer>
+    </section>
   );
 }
 
@@ -506,6 +571,21 @@ export function LearningNativeSurface({
           pending={pending}
           onSubmit={onSubmit}
         />
+      </>
+    );
+  }
+  // PRD V3.4: the episode holds at ATTEMPT_RECEIVED / INTERVENTION after the
+  // commitment was accepted.  The accepted CommitmentCard is suppressed (it is
+  // no longer actionable); surface the MINIMAL-INTERVENTION probe instead so
+  // the student always has a concrete next action (no-orphan invariant).
+  if (
+    (state.phase === "attempt_received" || state.phase === "intervention") &&
+    (state.minimal_intervention_prompt.trim().length > 0 || state.required_action === "revision")
+  ) {
+    return (
+      <>
+        <LearningActionBadge state={state} />
+        <MinimalInterventionCard state={state} pending={pending} onSubmit={onSubmit} />
       </>
     );
   }

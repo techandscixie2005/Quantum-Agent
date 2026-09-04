@@ -472,6 +472,10 @@ export type LearningNativeTurnState = Readonly<{
   transfer: TransferTask | null;
   solo: SoloMode | null;
   cognitive_mirror: CognitiveMirror | null;
+  // PRD V3.4: the concrete MINIMAL-INTERVENTION probe the student must act on
+  // while the episode holds at attempt_received / intervention (after the
+  // commitment was accepted).  Deterministic content, never chain-of-thought.
+  minimal_intervention_prompt: string;
   evidence_persisted: readonly string[];
   phase: LearningPhase;
   current_stage: LearningStage | null;
@@ -2435,6 +2439,7 @@ function parseLearningNativeTurnState(value: unknown, path: string): LearningNat
       "transfer",
       "solo",
       "cognitive_mirror",
+      "minimal_intervention_prompt",
       "evidence_persisted",
       "phase",
       "current_stage",
@@ -2485,6 +2490,13 @@ function parseLearningNativeTurnState(value: unknown, path: string): LearningNat
       input.cognitive_mirror === undefined || input.cognitive_mirror === null
         ? null
         : parseCognitiveMirror(input.cognitive_mirror, `${path}.cognitive_mirror`),
+    minimal_intervention_prompt: boundedTextAllowEmpty(
+      input.minimal_intervention_prompt === undefined
+        ? ""
+        : input.minimal_intervention_prompt,
+      `${path}.minimal_intervention_prompt`,
+      2000,
+    ),
     evidence_persisted: strings(input.evidence_persisted, `${path}.evidence_persisted`, 24, 64),
     phase: oneOf(
       input.phase,

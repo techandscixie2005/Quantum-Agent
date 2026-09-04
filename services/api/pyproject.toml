@@ -91,6 +91,7 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
 "tests/test_auth_login.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 "tests/test_learning_native.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_golden_loop_phase_sequence.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_contract_v34.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 "tests/live/test_live_multimodal_workflow.py" = ["RUF001", "RUF002", "RUF003"]
 
 [tool.mypy]

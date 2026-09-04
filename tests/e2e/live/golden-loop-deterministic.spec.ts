@@ -26,7 +26,7 @@ import {
  *
  *   1.  Login                          → phase open
  *   2.  Tunnelling question            → phase commitment_required
- *   3.  Commitment submitted           → phase commitment_required (holds — invariant B)
+ *   3.  Commitment submitted           → phase attempt_received (accepted commitment = initial attempt; invariant B: not complete, not full answer)
  *   4.  Revised attempt                → phase awaiting_revision
  *   4.5 Refresh during durable phase   → phase awaiting_revision (persists across reload)
  *   5.  Diagnosis rendered
@@ -428,14 +428,24 @@ test.describe.serial("Golden Learning Loop · live deterministic 22-stage closur
     await expectPhase(page, "commitment_required");
     await expect(page.getByTestId("commitment-card"), "Stage 2: CommitmentCard must render").toBeVisible({ timeout: 30_000 });
 
-    // ── Stage 3: Commitment submitted — phase HOLDS (invariant B) ──
+    // ── Stage 3: Commitment submitted — accepted commitment = the initial
+    // attempt.  PRD V3.4: the accepted commitment advances the durable phase
+    // COMMITMENT_REQUIRED → ATTEMPT_RECEIVED so the episode CONTINUES (it is
+    // NOT the end and NOT a full answer).  Invariant B still holds: phase ≠
+    // complete and is NOT awaiting_revision — the student must answer the
+    // minimal-intervention probe next. ──
     await submitCommitment(
       page,
       "我预测：E<V0 时透射概率为零，粒子不可能穿越势垒。",
     );
-    await expectPhase(page, "commitment_required", 30_000);
-
-    // ── Stage 4: Revised attempt — verified learning signal advances to awaiting_revision ──
+    await expectPhase(page, "attempt_received", 30_000);
+    await expectLoopComplete(page, false);
+    // The no-orphan invariant: a concrete minimal-intervention next step must
+    // be actionable instead of a dead-end.
+    await expect(
+      page.getByTestId("minimal-intervention-card"),
+      "Stage 3: the accepted commitment must surface an actionable minimal-intervention step",
+    ).toBeVisible({ timeout: 30_000 });
     await sendStudentMessage(
       page,
       "我修正：势垒右侧的波函数振幅应该很小但不为零，透射概率可能是一个很小的正数。",
@@ -449,8 +459,9 @@ test.describe.serial("Golden Learning Loop · live deterministic 22-stage closur
     // The diagnosis (status / summary / confidence) renders in the Evidence
     // desk, not the tutor record.  The desk is closed by default after each
     // turn (auto-open was removed to keep the commitment controls clickable),
-    // so open it on demand and assert the diagnosis surfaced.
-    await page.getByRole("button", { name: "打开证据面板" }).click();
+    // so open it on demand and assert the diagnosis surfaced.  Both the topbar
+    // and the left rail expose a "打开证据面板" button; scope to the topbar.
+    await page.getByRole("banner").getByRole("button", { name: "打开证据面板" }).click();
     await expect(
       page.getByRole("heading", { name: "本轮依据" }),
       "Stage 5: Evidence desk must open",
@@ -483,6 +494,8 @@ test.describe.serial("Golden Learning Loop · live deterministic 22-stage closur
       page,
       "请用矩势垒散射工具计算 E=5eV, V0=10eV, a=1e-10m 的透射概率 T 和反射概率 R，并验证 R+T=1。",
     );
+    // §12 SSE ordering is asserted inside sendRealTunnellingTurn (the evidence
+    // spine must light from a REAL progress event before the terminal).
     await expect(page.getByTestId("coding-artifact"), "Stage 6: coding-artifact panel must render").toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("coding-generated-code"), "Stage 7: generated code must contain METRICS_JSON").toContainText(/METRICS_JSON/, { timeout: 10_000 });
     await expect(page.getByTestId("coding-verification-status"), "Stage 8: coding verifier must report PASS").toContainText(/PASS/, { timeout: 10_000 });

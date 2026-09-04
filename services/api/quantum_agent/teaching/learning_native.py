@@ -60,6 +60,8 @@ __all__ = [
     "TeachBackProposal",
     "TransferProposal",
     "assert_phase_transition",
+    "phase_is_actionable_next_step",
+    "suppress_gated_commitment_evidence",
 ]
 
 
@@ -78,6 +80,14 @@ _UNTAGGED_CONCEPT_BUCKET: UUID = UUID("00000000-0000-4000-8000-000000000000")
 # frontend (which mirrors the same table in ``contracts.ts``).
 _PHASE_TO_STAGE: dict[LearningPhase, LearningStage] = {
     LearningPhase.COMMITMENT_REQUIRED: LearningStage.PREDICT,
+    # PRD V3.4: once the student's commitment/prediction is accepted, the
+    # episode holds at ATTEMPT_RECEIVED while the backend runs Evidence →
+    # Diagnosis → Minimal Intervention; the student's next pedagogical job is
+    # to revise/explain, so the active stage is EXPLAIN.
+    LearningPhase.ATTEMPT_RECEIVED: LearningStage.EXPLAIN,
+    # INTERVENTION maps the same way so an intervention-phase conversation can
+    # never report a NONE required action (orphan-state invariant).
+    LearningPhase.INTERVENTION: LearningStage.EXPLAIN,
     LearningPhase.AWAITING_REVISION: LearningStage.EXPLAIN,
     LearningPhase.RECONSTRUCTION_REQUIRED: LearningStage.TEACH_BACK,
     LearningPhase.TRANSFER_REQUIRED: LearningStage.TRANSFER,
@@ -86,6 +96,13 @@ _PHASE_TO_STAGE: dict[LearningPhase, LearningStage] = {
 
 _PHASE_TO_REQUIRED_ACTION: dict[LearningPhase, RequiredLearningAction] = {
     LearningPhase.COMMITMENT_REQUIRED: RequiredLearningAction.COMMITMENT,
+    # PRD V3.4 commitment-is-an-attempt: an accepted commitment advances the
+    # durable phase to ATTEMPT_RECEIVED.  The student's next action is to
+    # revise/explain (the minimal-intervention probe is answered as free
+    # text), so the required action is REVISION — never an invisible second
+    # commitment.
+    LearningPhase.ATTEMPT_RECEIVED: RequiredLearningAction.REVISION,
+    LearningPhase.INTERVENTION: RequiredLearningAction.REVISION,
     LearningPhase.AWAITING_REVISION: RequiredLearningAction.REVISION,
     LearningPhase.RECONSTRUCTION_REQUIRED: RequiredLearningAction.TEACH_BACK,
     LearningPhase.SOLO_ACTIVE: RequiredLearningAction.SOLO_ATTEMPT,
@@ -120,14 +137,18 @@ _ALLOWED_PHASE_TRANSITIONS: frozenset[tuple[LearningPhase, LearningPhase, str]] 
             (LearningPhase.OPEN, LearningPhase.COMMITMENT_REQUIRED, "gate_fired"),
             (LearningPhase.ATTEMPT_RECEIVED, LearningPhase.COMMITMENT_REQUIRED, "gate_fired"),
             (LearningPhase.INTERVENTION, LearningPhase.COMMITMENT_REQUIRED, "gate_fired"),
-            # B. Commitment accepted this turn, but the phase still needs a
-            # verified attempt to advance.  This is a hold, not a forward step.
+            # B. PRD V3.4: an ACCEPTED commitment IS the student's initial
+            # attempt/prediction.  It advances the durable phase to
+            # ATTEMPT_RECEIVED (a forward move) so the backend may run
+            # Evidence → Diagnosis → Minimal Intervention — the student must
+            # then REVISE/EXPLAIN, never re-commit invisibly.  The full
+            # explanation is still NOT auto-released on this turn.
             (
                 LearningPhase.COMMITMENT_REQUIRED,
-                LearningPhase.COMMITMENT_REQUIRED,
-                "commitment_accepted_but_phase_holds",
+                LearningPhase.ATTEMPT_RECEIVED,
+                "commitment_processed",
             ),
-            # C. A verified learning signal (accepted commitment this turn OR a
+            # C. A verified learning signal (a revised student attempt OR a
             # scientific PASS correlated with pending_scientific_request OR an
             # explicit student advance) releases the explanation.  The phase
             # moves to AWAITING_REVISION so the student must revise/explain.
@@ -204,6 +225,82 @@ def assert_phase_transition(
         f"illegal LearningPhase transition: {old.value} -> {new.value} "
         f"(cause={cause}); the durable phase is unchanged and the turn fails closed"
     )
+
+
+def phase_is_actionable_next_step(
+    *,
+    phase: LearningPhase,
+    commitment: CognitiveCommitment | None,
+    teach_back: object | None,
+    transfer: object | None,
+    solo: SoloMode | None,
+) -> bool:
+    """Deterministic no-orphan check: would the UI have at least one control?
+
+    The frontend renders an actionable surface iff:
+      - a commitment card is open (ATTEMPT_REQUIRED and NOT accepted), OR
+      - a teach-back card is present, OR
+      - a transfer task or an active Solo Mode is present, OR
+      - the phase's required action is answered through the free-text
+        composer / the phase-advance buttons (ATTEMPT_RECEIVED / INTERVENTION /
+        AWAITING_REVISION / RECONSTRUCTION_REQUIRED / TRANSFER_REQUIRED all
+        surface either a card or an explicit button / revision probe).
+
+    Any loop-required incomplete phase MUST satisfy one of these; otherwise the
+    turn would dead-end with no actionable next step (the reported bug).
+    Defense in depth: a commitment that is ACCEPTED while the gate is still
+    armed is exactly the historical orphan (no card, no action) — reject it.
+    """
+    if phase is LearningPhase.ABORTED:
+        return True
+    if phase is LearningPhase.COMPLETE:
+        return True
+    if commitment is not None:
+        if (
+            commitment.gate_decision is CommitmentGateDecision.ATTEMPT_REQUIRED
+            and commitment.accepted
+        ):
+            return False
+        if (
+            commitment.gate_decision is CommitmentGateDecision.ATTEMPT_REQUIRED
+            and not commitment.accepted
+        ):
+            return True
+    if teach_back is not None:
+        return True
+    if transfer is not None:
+        return True
+    if solo is not None and solo.status is SoloModeStatus.ACTIVE:
+        return True
+    if phase in {
+        LearningPhase.ATTEMPT_RECEIVED,
+        LearningPhase.INTERVENTION,
+        LearningPhase.AWAITING_REVISION,
+        LearningPhase.RECONSTRUCTION_REQUIRED,
+        LearningPhase.TRANSFER_REQUIRED,
+        LearningPhase.SOLO_ACTIVE,
+    }:
+        return True
+    return False
+
+
+def suppress_gated_commitment_evidence(
+    commitment: CognitiveCommitment | None,
+    phase: LearningPhase,
+) -> CognitiveCommitment | None:
+    """Return the commitment the student-facing result should expose.
+
+    PRD V3.4: once an accepted commitment has advanced the durable phase to
+    ATTEMPT_RECEIVED, the UI must NOT re-render an accepted CommitmentCard
+    (there is no action on it — that was the orphan state).  The card is
+    replaced by the free-text revision probe (required_action == revision).
+    A still-open gate (ATTEMPT_REQUIRED, not accepted) keeps its card.
+    """
+    if commitment is None:
+        return None
+    if phase is LearningPhase.ATTEMPT_RECEIVED and commitment.accepted:
+        return None
+    return commitment
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,26 +498,28 @@ class LearningNativePolicy:
             )
 
         # The student submitted a formal commitment; validate it deterministically.
-        # PRD V3.3 root-cause #4 fix: an accepted commitment is a PREDICTION,
-        # not a verified learning signal.  The gate must STAY armed
-        # (gate_decision = ATTEMPT_REQUIRED, withhold = True) even after the
-        # commitment is accepted, so the full explanation is NOT released on
-        # the same turn.  The phase holds at COMMITMENT_REQUIRED; the student
-        # must submit a *revised* attempt (a follow-up turn with a typed
-        # attempt and no commitment card) to release the explanation.  This
-        # is invariant B: commitment accepted ≠ explanation released.  The
-        # accepted flag is still persisted so downstream nodes know the
-        # prediction was captured, and the Diagnosis Agent can reason about
-        # the candidate_prompt (nodes.py:668 feeds it into student_attempt).
+        # PRD V3.4 root-cause fix: an accepted commitment IS the student's
+        # initial attempt / prediction.  The gate is therefore SATISFIED and
+        # disarms (gate_decision = PROCEED) so the governing turn routes into
+        # Evidence → Diagnosis → Policy → Minimal Intervention and the full
+        # explanation is released only within the deterministic release
+        # envelope (the release engine sees this turn's student_attempt, so
+        # the release level is at most SCAFFOLD / minimal-intervention — never
+        # an unearned FULL_SOLUTION).  Invariant B is preserved: commitment
+        # accepted ≠ the same turn auto-advances to AWAITING_REVISION or emits
+        # a full answer; evidence/diagnosis/policy may run, then the student
+        # must revise/explain.
         if submission is not None and submission.attempt_required:
             accepted = self._submission_accepted(submission, submission_confidence)
             resolved = submission.model_copy(
                 update={
                     "accepted": accepted,
                     "confidence": submission_confidence,
-                    # The gate stays armed: an accepted prediction does not
-                    # release the explanation.  The student must revise.
-                    "gate_decision": CommitmentGateDecision.ATTEMPT_REQUIRED,
+                    "gate_decision": (
+                        CommitmentGateDecision.PROCEED
+                        if accepted
+                        else CommitmentGateDecision.ATTEMPT_REQUIRED
+                    ),
                 }
             )
             action = (

@@ -145,6 +145,9 @@ const STAGE_LABELS: Readonly<Record<string, string>> = {
   diagnose: "诊断学习状态",
   policy: "应用答案政策",
   scientific_tools: "运行科学工具 / Coding Agent",
+  coding: "Coding Agent：生成任务代码",
+  sandbox: "沙箱执行任务代码",
+  verification: "科学验证器：核对计算结果",
   generate: "生成教学回应",
   learning_native: "学习原生策略（教学回返 / 迁移）",
   hitl_gate: "等待人工复核",
@@ -352,6 +355,9 @@ const PROGRESS_ORDER: readonly string[] = [
   "diagnose",
   "policy",
   "scientific_tools",
+  "coding",
+  "sandbox",
+  "verification",
   "generate",
   "learning_native",
   "hitl_gate",
@@ -382,7 +388,7 @@ function EvidenceSpine({
     { label: "感知", graphStages: ["interpret"] as readonly string[], done: perceptionReady, detail: uploads.length ? "结构化提取" : "无需调用" },
     { label: "证据", graphStages: ["retrieve"] as readonly string[], done: Boolean(reviewed), detail: reviewed ? reviewed.evidence_packet.coverage : "课程检索" },
     { label: "诊断", graphStages: ["commitment_gate", "diagnose"] as readonly string[], done: Boolean(reviewed), detail: reviewed ? reviewed.diagnosis.status : "首错定位" },
-    { label: "验证", graphStages: ["scientific_tools"] as readonly string[], done: Boolean(reviewed), detail: reviewed?.scientific_results.length ? "工具证据" : "按需运行" },
+    { label: "验证", graphStages: ["scientific_tools", "coding", "sandbox", "verification"] as readonly string[], done: Boolean(reviewed), detail: reviewed?.scientific_results.length ? "工具证据" : "按需运行" },
     { label: "提示", graphStages: ["policy", "generate", "learning_native", "assemble"] as readonly string[], done: Boolean(result), detail: interrupt ? "等待人工确认" : result?.release.release_level ?? "政策门控" },
   ];
   // While a turn is running, each step's state comes from the latest real
@@ -1090,6 +1096,9 @@ export function AgentExperience() {
     if (nativeState?.transfer) return "迁移任务";
     if (nativeState?.teach_back) return "Teach-Back · 用你的话讲一遍";
     if (nativeState?.commitment && !nativeState.commitment.accepted) return "先做一个预测";
+    if (nativeState?.phase === "attempt_received" || nativeState?.phase === "intervention") {
+      return "已收到你的尝试 · 最小干预";
+    }
     if (result) return result.interpretation.relevant_concepts.join(" · ") || "课程辅导";
     return activeMode.short;
   }, [interrupt, loopDone, nativeState, result, activeMode.short]);
