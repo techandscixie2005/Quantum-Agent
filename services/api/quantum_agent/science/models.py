@@ -141,7 +141,10 @@ _SYMBOL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,31}$")
 
 class _SymbolicRequestBase(_RequestBase):
     symbols: tuple[str, ...] = Field(default=(), max_length=16)
-    timeout_seconds: float = Field(default=2.0, ge=0.1, le=5.0)
+    # Default equals the cap: spawning the isolated sympy subprocess (fork
+    # server + import) can itself approach 2s under load, and a budget smaller
+    # than that turns legitimate results into spurious SYMBOLIC_TIMEOUT.
+    timeout_seconds: float = Field(default=5.0, ge=0.1, le=5.0)
 
     @field_validator("symbols")
     @classmethod

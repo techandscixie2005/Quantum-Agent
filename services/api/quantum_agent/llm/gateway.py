@@ -90,6 +90,7 @@ async def _retry_transient(
     max_delay: float,
     label: str,
     deadline: float | None = None,
+    attempt_timeout: float | None = None,
     clock: Any = time.monotonic,
 ) -> Any:
     """Run ``operation`` with bounded exponential backoff + jitter on transient errors.
@@ -99,33 +100,59 @@ async def _retry_transient(
     to decorrelate concurrent clients.
 
     PRD V3.1 P1-2: ``deadline`` caps the total retry budget for this gateway
-    call (default ~30s).  When the next sleep would cross the deadline, we
-    raise the last exception instead of sleeping.  This keeps a single
-    gateway call from exhausting the 240s proxy deadline and leaves headroom
-    for the router to try the next profile.
+    call.  When the next sleep would cross the deadline, we raise the last
+    exception instead of sleeping.  This keeps a single gateway call from
+    exhausting the proxy budget and leaves headroom for the router to try the
+    next profile.
+
+    Wall-time safety: each attempt is additionally wrapped in
+    ``asyncio.wait_for`` bounded by ``attempt_timeout`` (and, tighter, by the
+    remaining ``deadline``).  The HTTP client's own read timeout does not fire
+    when an upstream keeps a connection open with periodic or no bytes; the
+    wall-time cap is the backstop that guarantees every attempt — and thus the
+    whole turn — terminates.  A wall-time expiry is treated as transient.
     """
 
     last_exc: BaseException | None = None
     for attempt in range(1, max_attempts + 1):
+        budget = attempt_timeout
+        if deadline is not None and budget is not None:
+            # Clamp the wall cap by the remaining budget so a late attempt
+            # cannot overshoot the deadline.  Without an explicit wall cap
+            # the deadline keeps its legacy meaning: it bounds the backoff
+            # sleeps, not the attempts themselves.
+            budget = min(budget, max(deadline - clock(), 0.0))
         try:
-            return await operation()
+            if budget is None:
+                return await operation()
+            return await asyncio.wait_for(operation(), timeout=budget)
+        except TimeoutError as exc:
+            last_exc = exc
+            if attempt == max_attempts:
+                raise GatewayError(
+                    f"{label} exceeded its bounded wall-time budget"
+                ) from exc
         except BaseException as exc:
             last_exc = exc
             if not _is_transient_exception(exc) or attempt == max_attempts:
                 raise
-            # Exponential backoff with full jitter, capped at max_delay.
-            capped = min(max_delay, base_delay * (2 ** (attempt - 1)))
-            delay = random.uniform(0.0, capped)
-            if deadline is not None:
-                remaining = deadline - clock()
-                if remaining <= 0:
-                    # Budget exhausted; surface the last transient error
-                    # rather than sleeping past the deadline.
-                    raise
-                delay = min(delay, remaining)
-                if delay <= 0:
-                    raise
-            await asyncio.sleep(delay)
+        # Exponential backoff with full jitter, capped at max_delay.
+        capped = min(max_delay, base_delay * (2 ** (attempt - 1)))
+        delay = random.uniform(0.0, capped)
+        if deadline is not None:
+            remaining = deadline - clock()
+            if remaining <= 0:
+                # Budget exhausted; surface the last transient error
+                # rather than sleeping past the deadline.
+                if last_exc is not None:
+                    raise last_exc
+                raise GatewayError(f"{label} retry budget exhausted")
+            delay = min(delay, remaining)
+            if delay <= 0:
+                if last_exc is not None:
+                    raise last_exc
+                raise GatewayError(f"{label} retry budget exhausted")
+        await asyncio.sleep(delay)
     # Unreachable, but keeps mypy happy.
     if last_exc is not None:
         raise last_exc
@@ -219,11 +246,17 @@ class PydanticAIModelGateway:
         transient_retry_attempts: int = 4,
         transient_retry_base_delay: float = 0.8,
         transient_retry_max_delay: float = 12.0,
-        # PRD V3.1 P1-2: cap the total retry budget per gateway call at ~30s
-        # so a single transient storm cannot exhaust the 240s proxy deadline.
-        # 4 attempts * 60s timeout already totals 240s; the deadline ensures
-        # the router still has headroom to try the next profile.
-        transient_retry_budget_seconds: float = 30.0,
+        # Hard wall-time cap for a single attempt.  Backstop for transports
+        # that hold a connection open without completing: the HTTP read
+        # timeout never fires if the upstream stalls after connect, but the
+        # attempt must still terminate so the turn can degrade gracefully.
+        attempt_wall_seconds: float = 90.0,
+        # PRD V3.1 P1-2: cap the total retry budget per gateway call so a
+        # single transient storm cannot exhaust the turn budget.  Widened
+        # from 30s to 120s: slow-but-legitimate USTC generations (25-60s)
+        # were being aborted before producing output; the per-attempt wall
+        # cap above keeps termination deterministic either way.
+        transient_retry_budget_seconds: float = 120.0,
         model_http_client: httpx2.AsyncClient | None = None,
         probe_http_client: httpx.AsyncClient | None = None,
     ) -> None:
@@ -240,6 +273,7 @@ class PydanticAIModelGateway:
         self._transient_retry_max_delay = max(
             self._transient_retry_base_delay, transient_retry_max_delay
         )
+        self._attempt_wall_seconds = max(1.0, attempt_wall_seconds)
         self._transient_retry_budget_seconds = max(1.0, transient_retry_budget_seconds)
         self._model_http_client = model_http_client
         self._probe_http_client = probe_http_client
@@ -300,8 +334,9 @@ class PydanticAIModelGateway:
                 return await agent.run(conversation)
 
             # PRD V3.1 P1-2: enforce a per-call retry deadline so a single
-            # gateway call cannot burn the entire 240s proxy budget.  The
-            # deadline is relative to the start of this call.
+            # gateway call cannot burn the turn budget.  The deadline is
+            # relative to the start of this call; each attempt is additionally
+            # capped by the hard per-attempt wall time.
             call_deadline = time.monotonic() + self._transient_retry_budget_seconds
             try:
                 result = await _retry_transient(
@@ -311,6 +346,7 @@ class PydanticAIModelGateway:
                     max_delay=self._transient_retry_max_delay,
                     label=task,
                     deadline=call_deadline,
+                    attempt_timeout=self._attempt_wall_seconds,
                 )
             except GatewayError:
                 raise

@@ -19,6 +19,7 @@ This is NOT a substitute for real SSO.  It exists so a student can enter
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import defaultdict
@@ -134,12 +135,27 @@ async def _probe_ustc_key(
         "max_tokens": 1,
         "temperature": 0,
     }
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(url, headers=headers, json=body)
-    except httpx.HTTPError:
+    # An explicit 401/403 is a real rejection and fails closed immediately.
+    # Timeouts / 5xx / network errors are transient stalls under load, so we
+    # grant one retry before failing closed.
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(url, headers=headers, json=body)
+        except httpx.HTTPError:
+            if attempt == 0:
+                await asyncio.sleep(0.5)
+                continue
+            return False
+        if response.status_code == 200:
+            return True
+        if response.status_code in (401, 403):
+            return False
+        if response.status_code >= 500 and attempt == 0:
+            await asyncio.sleep(0.5)
+            continue
         return False
-    return response.status_code == 200
+    return False
 
 
 @router.post("/login", response_model=LoginResponse)

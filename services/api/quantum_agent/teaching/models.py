@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -376,6 +376,43 @@ class SoloAttemptSubmission(BaseModel):
     confidence: float | None = Field(default=None, ge=0, le=1)
 
 
+class LearningPhase(StrEnum):
+    """Durable pedagogical phase persisted on the teaching conversation."""
+
+    OPEN = "open"
+    COMMITMENT_REQUIRED = "commitment_required"
+    ATTEMPT_RECEIVED = "attempt_received"
+    INTERVENTION = "intervention"
+    AWAITING_REVISION = "awaiting_revision"
+    VERIFYING = "verifying"
+    RECONSTRUCTION_REQUIRED = "reconstruction_required"
+    TRANSFER_REQUIRED = "transfer_required"
+    SOLO_ACTIVE = "solo_active"
+    COMPLETE = "complete"
+    ABORTED = "aborted"
+
+
+class LearningStage(StrEnum):
+    """Auditable student-facing stages; never a chain-of-thought surface."""
+
+    PREDICT = "predict"
+    DIAGNOSE = "diagnose"
+    EXPLORE = "explore"
+    VERIFY = "verify"
+    EXPLAIN = "explain"
+    TEACH_BACK = "teach_back"
+    TRANSFER = "transfer"
+    SOLO = "solo"
+
+
+class RequiredLearningAction(StrEnum):
+    NONE = "none"
+    COMMITMENT = "commitment"
+    REVISION = "revision"
+    TEACH_BACK = "teach_back"
+    SOLO_ATTEMPT = "solo_attempt"
+
+
 class TeachingTurnResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -393,6 +430,11 @@ class TeachingTurnResult(BaseModel):
     code_artifact: CodeArtifactRun | None = None
     trace: list[WorkflowStep]
     learning_native: LearningNativeTurnState | None = None
+    # A bounded graph turn reaching its terminal node is not the same thing as
+    # the student completing the Learning-Native loop.  The browser must use
+    # these explicit flags instead of inferring completion from an SSE event.
+    turn_completed: bool = True
+    learning_loop_completed: bool = False
 
     @model_validator(mode="after")
     def trace_has_fixed_order(self) -> TeachingTurnResult:
@@ -420,6 +462,11 @@ class LearningNativeTurnState(BaseModel):
     solo: SoloMode | None = None
     cognitive_mirror: CognitiveMirror | None = None
     evidence_persisted: list[str] = Field(default_factory=list, max_length=24)
+    phase: LearningPhase = LearningPhase.OPEN
+    current_stage: LearningStage | None = None
+    completed_stages: list[LearningStage] = Field(default_factory=list, max_length=12)
+    required_action: RequiredLearningAction = RequiredLearningAction.NONE
+    loop_required: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -510,6 +557,7 @@ class TransferTask(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    task_id: UUID = Field(default_factory=uuid4)
     transfer_type: TransferType
     prompt: str = Field(min_length=1, max_length=2000)
     source_concept_ids: list[UUID] = Field(default_factory=list, max_length=6)
@@ -537,23 +585,15 @@ class SoloMode(BaseModel):
     unlock_reason: str = Field(default="", max_length=400)
 
 
-class LearningPhase(StrEnum):
-    """Durable pedagogical phase persisted on the teaching conversation.
+class TransferVerificationSpec(BaseModel):
+    """Persisted deterministic oracle contract for the active transfer task."""
 
-    The phase is loaded BEFORE answer generation so the tutor graph can route
-    deterministically (PRD V3.0 P0-2): e.g. SOLO_ACTIVE blocks Ask AI,
-    RECONSTRUCTION_REQUIRED requires a teach-back before advancing.
-    """
+    model_config = ConfigDict(extra="forbid")
 
-    OPEN = "open"
-    COMMITMENT_REQUIRED = "commitment_required"
-    ATTEMPT_RECEIVED = "attempt_received"
-    INTERVENTION = "intervention"
-    RECONSTRUCTION_REQUIRED = "reconstruction_required"
-    TRANSFER_REQUIRED = "transfer_required"
-    SOLO_ACTIVE = "solo_active"
-    COMPLETE = "complete"
-    ABORTED = "aborted"
+    scientific_request: dict[str, object] = Field(default_factory=dict)
+    metric_name: str = Field(default="", max_length=80)
+    expected_value: float | None = None
+    absolute_tolerance: float = Field(default=1e-6, gt=0, le=0.1)
 
 
 class DurableLearningPhase(BaseModel):
@@ -575,6 +615,10 @@ class DurableLearningPhase(BaseModel):
     # later message cannot count as completion of the transfer task unless
     # it is correlated with this identity.
     expected_attempt_kind: str = Field(default="", max_length=80)
+    loop_required: bool = False
+    completed_stages: list[LearningStage] = Field(default_factory=list, max_length=12)
+    pending_scientific_request: dict[str, object] = Field(default_factory=dict)
+    transfer_verification: TransferVerificationSpec | None = None
 
 
 class ConceptStateLabel(StrEnum):

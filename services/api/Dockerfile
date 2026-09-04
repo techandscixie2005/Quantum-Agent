@@ -22,10 +22,15 @@ WORKDIR /build
 
 COPY --from=uv /uv /uvx /bin/
 
+# ``uv sync`` builds the project wheel (hatchling), so ``quantum_agent`` must
+# be present.  The ``--mount=type=cache`` keeps uv's downloaded wheels across
+# rebuilds, so a source-only edit no longer re-fetches scipy/numpy from the
+# network in the container (the previous single-threaded stall).
 COPY pyproject.toml uv.lock ./
 COPY quantum_agent ./quantum_agent
 
-RUN uv sync --frozen --no-dev --no-editable
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv sync --frozen --no-dev --no-editable
 
 
 FROM dependencies AS test-dependencies

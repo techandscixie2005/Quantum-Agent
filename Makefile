@@ -46,11 +46,11 @@ up: require-secrets ## Start databases, migrate, and launch healthy API/web serv
 
 bootstrap: up ingest ## Start the stack, then ingest the checksum-verified real manifest.
 
-demo-bootstrap: require-secrets ## Seed the competition demo student account for /api/v1/auth/demo-login.
-	$(COMPOSE) -f compose.yaml exec -T api quantum-agent seed-demo-account --activate-course
+demo-bootstrap: require-secrets ## Seed the competition demo student account for API-key login.
+	$(COMPOSE) -f compose.yaml exec -T api quantum-agent seed-login-account --activate-course
 	@echo ""
-	@echo "Demo account seeded. Set DEMO_LOGIN_SECRET on the API container, then"
-	@echo "POST /api/auth/demo-login with {\"secret\": \"...\"} from the browser to enter /agent."
+	@echo "Login account seeded. From the browser, enter /agent, submit your USTC"
+	@echo "API key in the login card, and the API mints a session on demand."
 	@echo "See DEMO.md for the full judge entry procedure."
 
 down: ## Stop all stack services while preserving named data volumes.

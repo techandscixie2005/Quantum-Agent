@@ -57,6 +57,7 @@ next-env.d.ts
 # local tooling
 /.claude/
 /.omc/
+/.qoder/
 
 # research papers (large PDFs, not project source)
 /*.pdf

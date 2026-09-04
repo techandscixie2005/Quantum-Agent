@@ -38,8 +38,9 @@ SESSION_VAULT_KEY=<fernet key>
 ```
 
 When `SESSION_VAULT_KEY` is unset, the vault falls back to `SESSION_SECRET`,
-and when neither is set the vault is disabled and the startup `USTC_API` env
-key is used for all sessions (dev/deploy fallback per PRD §3.3).
+and when neither is set the API-key login fails closed with an HTTP 503 (no
+session can be minted and no deployment key is ever billed for a student
+session). Set `SESSION_VAULT_KEY` for any real deployment.
 
 Each judge or student also needs their own 词元计划/一〇七杯 API key from the
 USTC model service (`https://api.llm.ustc.edu.cn/v1/chat/completions`).

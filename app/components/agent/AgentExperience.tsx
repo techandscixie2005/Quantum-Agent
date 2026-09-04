@@ -1132,16 +1132,13 @@ export function AgentExperience() {
         <button className={styles.mobileButton} onClick={() => setLeftOpen(true)} aria-label="打开课程导航"><Menu /></button>
         <div className={styles.brand}><span><Atom /></span></div>
         <div className={styles.courseTitle}>
-          <span>{activeCourse.course_code}</span><i />
-          <strong>{activeCourse.course_title}</strong><i />
-          <small>{activeCourse.edition_title}</small>
+          <strong>{activeCourse.edition_title}</strong>
         </div>
         <div className={styles.topActions}>
-          <span className={styles.liveState} data-testid="model-service-status"><i /> {interrupt ? "工作流已暂停" : "模型服务已连接"}</span>
           <button className={styles.cmdHint} onClick={() => setCmdOpen(true)} aria-label="打开命令面板">
             <Search size={14} /><kbd>⌘K</kbd>
           </button>
-          <button onClick={() => setRightOpen(true)} aria-label="打开证据面板"><PanelRight size={15} /><span>证据</span></button>
+          <button onClick={() => setRightOpen(true)} aria-label="打开证据面板" title="证据与验证"><PanelRight size={15} /><span>证据</span></button>
           <span className={styles.userMark}>{contextQuery.data.display_name.slice(0, 1)}</span>
         </div>
       </header>
@@ -1636,7 +1633,7 @@ export function AgentExperience() {
               </div>
               <div className={styles.cmdGroup}>
                 <p className={styles.cmdGroupLabel}>课程</p>
-                {courses.filter((course) => course.course_title.includes(cmdQuery) || course.course_code.includes(cmdQuery) || !cmdQuery).slice(0, 6).map((course) => (
+                {courses.filter((course) => course.course_title.includes(cmdQuery) || course.edition_title.includes(cmdQuery) || !cmdQuery).slice(0, 6).map((course) => (
                   <button
                     key={`${course.course_id}:${course.curriculum_edition_id}`}
                     className={styles.cmdItem}
@@ -1652,7 +1649,7 @@ export function AgentExperience() {
                     }}
                   >
                     <BookOpen size={15} />
-                    <span><strong>{course.course_title}</strong><small>{course.course_code} · {course.edition_title}</small></span>
+                    <span><strong>{course.edition_title}</strong><small>{course.course_title}</small></span>
                   </button>
                 ))}
               </div>
@@ -1681,7 +1678,7 @@ export function AgentExperience() {
                 </button>
               </div>
               {!MODES.some((item) => item.label.includes(cmdQuery) || item.short.includes(cmdQuery))
-                && !courses.some((course) => course.course_title.includes(cmdQuery) || course.course_code.includes(cmdQuery))
+                && !courses.some((course) => course.course_title.includes(cmdQuery) || course.edition_title.includes(cmdQuery))
                 && cmdQuery ? (
                 <p className={styles.cmdEmpty}>未匹配“{cmdQuery}”</p>
               ) : null}

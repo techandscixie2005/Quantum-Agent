@@ -84,10 +84,7 @@
   white-space: nowrap;
 }
 
-.courseTitle span { color: var(--green); font: 700 10px var(--font-geist-mono), monospace; letter-spacing: .04em; }
 .courseTitle strong { overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; letter-spacing: -.01em; }
-.courseTitle small { color: var(--muted); font-size: 11px; }
-.courseTitle i { width: 3px; height: 3px; background: var(--faint); border-radius: 50%; align-self: center; }
 
 .topActions { display: flex; align-items: center; gap: 6px; padding: 0 14px; }
 .topActions > button,
@@ -108,8 +105,11 @@
 .topActions > button svg,
 .mobileButton svg { width: 15px; }
 .topActions > button:hover { border-color: var(--line-strong); background: var(--paper); }
-.liveState { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; padding: 0 6px; }
-.liveState i { display: inline-block; width: 6px; height: 6px; background: var(--green); border-radius: 50%; }
+/* Right cluster mirrors the left rail: icon-only when collapsed; the label
+   is revealed on hover/focus as a tooltip via each button's title. */
+.topActions > button span {
+  display: none;
+}
 .userMark { width: 30px; height: 30px; display: grid; place-items: center; color: white; background: var(--green-dark); border-radius: 50%; font-size: 11px; font-weight: 600; }
 .mobileButton { display: none; }
 .cmdHint { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; background: var(--paper); font: 600 11px var(--font-geist-mono), monospace; }
@@ -652,7 +652,6 @@
   .brand { height: 56px; justify-self: start; border: 0; }
   .brand > span { width: 30px; height: 30px; }
   .courseTitle,
-  .liveState,
   .cmdHint { display: none; }
   .topActions { padding: 0; gap: 4px; }
   .userMark { display: none; }

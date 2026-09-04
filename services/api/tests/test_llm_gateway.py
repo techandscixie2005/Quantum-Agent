@@ -294,6 +294,63 @@ async def test_retry_transient_deadline_caps_total_retry_budget() -> None:
     assert elapsed < 1.0, "deadline must prevent the full 10s sleep"
 
 
+async def test_retry_transient_wall_cap_aborts_a_hung_attempt() -> None:
+    """Wall-time safety: an attempt that never completes (an upstream that
+    holds the connection open without responding) must be aborted by the
+    per-attempt cap and surface as a GatewayError, not hang the turn."""
+
+    import asyncio
+    import time as _time
+
+    async def op() -> str:
+        await asyncio.sleep(30.0)  # would hang far past any test budget
+        return "never"
+
+    start = _time.monotonic()
+    with pytest.raises(GatewayError):
+        await _retry_transient(
+            op,
+            max_attempts=1,
+            base_delay=0.001,
+            max_delay=0.01,
+            label="test",
+            attempt_timeout=0.05,
+        )
+    elapsed = _time.monotonic() - start
+    assert elapsed < 2.0, "attempt_timeout must abort the hung attempt fast"
+
+
+async def test_retry_transient_wall_cap_expiry_is_transient_then_budget_ends() -> None:
+    """A wall-time expiry is treated as transient: the loop retries, and once
+    the deadline is exhausted it terminates deterministically instead of
+    hanging."""
+
+    import asyncio
+    import time as _time
+
+    calls = {"n": 0}
+
+    async def op() -> str:
+        calls["n"] += 1
+        await asyncio.sleep(5.0)
+        return "never"
+
+    start = _time.monotonic()
+    with pytest.raises((GatewayError, asyncio.TimeoutError)):
+        await _retry_transient(
+            op,
+            max_attempts=5,
+            base_delay=0.001,
+            max_delay=0.01,
+            label="test",
+            deadline=start + 0.2,
+            attempt_timeout=0.05,
+        )
+    elapsed = _time.monotonic() - start
+    assert elapsed < 2.0, "wall cap + deadline must bound the whole retry loop"
+    assert calls["n"] >= 1
+
+
 async def test_structured_generate_classifies_401_as_permanent() -> None:
     """PRD V3.1 P1-2: 401/403 must raise PermanentGatewayError.
 

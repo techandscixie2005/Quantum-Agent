@@ -104,9 +104,9 @@ Ingestion creates `REVIEW_REQUIRED` candidates and does not approve/publish anyt
 | `config.py` | Pydantic-settings `Settings` (env-driven, secrets as `SecretStr`; SQLite allowed for tests, PostgreSQL required in production) |
 | `cli.py` | `quantum-agent` operational CLI (migrate/ingest/sync-graph/probe/publish/ocr/seed-demo-account) |
 | `db_models.py` | ~2000-line SQLAlchemy async models (users, courses, memberships, document versions, source chunks, evidence, review candidates, outbox, teaching sessions) |
-| `alembic/` | 4 migrations (knowledge graph foundation, teaching policy/learning evidence, parser-scoped versions, multimodal attachments/doc runs) |
+| `alembic/` | 7 migrations (knowledge graph foundation, teaching policy/learning evidence, parser-scoped versions, multimodal attachments/doc runs, extended evidence kinds, durable learning phase, separate transfer/solo evidence kinds) |
 | `knowledge/` | ingestion, extraction, ontology, retrieval (hybrid FTS+pgvector+Neo4j fusion), evidence packets, graph sync outbox, review, structural import |
-| `teaching/` | fixed-order `TeachingStateMachine` (interpret → diagnose → retrieve evidence → generate → scientific validation → assemble), policy/release engine, hitl, specialist agents, repository, `learning_native.py` (native learning-evidence path) |
+| `teaching/` | fixed-order `TeachingStateMachine` (interpret → diagnose → retrieve evidence → generate → scientific validation → assemble), policy/release engine, hitl, specialist agents, repository, `learning_native.py` (native learning-evidence path + deterministic cognitive policy: commitment gates, teach-back, transfer, Solo Mode) |
 | `coding/` | V3.1 Coding Agent: `agent.py` (subprocess-driven coding specialist), `sandbox.py` + top-level `sandbox_runner.py` (isolated subprocess execution), `safety.py` (boundary checks), `models.py` |
 | `credential_vault.py` | Fernet-encrypted per-session credential vault (API-key login → encrypted-at-rest USTC_API per session) |
 | `credential_router.py` | `CredentialScopedRouterFactory` — builds a model/embedding router scoped to the session's unlocked credential, so per-credential routing keys never touch the global `Settings` |
@@ -118,7 +118,11 @@ Ingestion creates `REVIEW_REQUIRED` candidates and does not approve/publish anyt
 | `api/` | FastAPI routers: `attachments`, `course_context`, `graph`, `retrieval`, `review`, `source_files`, `teacher_insights`, `teaching` |
 | `gateways.py`, `database.py`, `auth.py` | model/embedding/graph-store builders (gateways wires the credential vault + scoped router into the USTC gateway); async engine/session factory; `CourseActor` auth |
 
-The teaching data flow: fixed-order state machine (see `teaching/state_machine.py`) mirrors the legacy LangGraph.js 18-node graph, but reimplemented server-side in Python. `TutorGraph` reads/writes the same `TutorState` fields and produces identical `TeachingTurnResult`.
+The teaching data flow: fixed-order state machine (see `teaching/state_machine.py`) mirrors the legacy LangGraph.js 18-node graph, but reimplemented server-side in Python. `TutorGraph` (`tutor/`, the LangGraph re-expression) reads/writes the same `TutorState` fields and produces identical `TeachingTurnResult`.
+
+### Golden Loop (V3.3) — durable learning-phase sequence
+
+The current sprint implements a multi-turn **Golden Loop**: each `TeachingConversation` carries a durable `learning_phase_json` (migration `0006`) whose `phase` is a `LearningPhase` enum in `teaching/models.py` (`open → commitment_required → attempt_received → intervention → awaiting_revision → verifying → reconstruction_required → transfer_required → solo_active → complete`). The non-skipping invariants: every phase mutation must pass `assert_phase_transition` (`teaching/learning_native.py:184`), which rejects transitions outside `_ALLOWED_PHASE_TRANSITIONS` — students cannot bypass commitment, teach-back (reconstruction), transfer, or the Solo Mode durable lock. `learning_native.py` is the pure deterministic policy (no personality/mastery-score output): the LLM only proposes *content*; code enforces gates, persistence, and Solo arming. The TS frontend mirrors this in `app/components/teaching/contracts.ts` (`LearningPhase`, `LearningStage`, `LearningNativeTurnState`) and renders it via `app/components/agent/LearningJourney.tsx`.
 
 ### TypeScript layout (legacy, still in CI)
 
@@ -149,8 +153,8 @@ Required before `make up`/`make require-secrets`: `POSTGRES_PASSWORD`, `POSTGRES
 
 ## Testing
 
-- Python tests are pytest with `asyncio_mode=auto`, `testpaths=["tests"]`, strict config/markers. Cover ingestion, extraction, OCR, ontology, retrieval, evidence packets, gateways, graph store/sync, teaching state machine, tutor graph, scientific tools, API, auth, pipeline safety, and real E2E against the Docker stack (`test_phase1_real_e2e.py`, `test_phase2_real_e2e.py`).
-- TS tests: `tests/backend.test.ts`, `tests/validators-citations-auth.test.ts`, `tests/golden/eval.test.ts` (deterministic, no tokens), `tests/rendered-html.test.mjs`, Playwright `tests/e2e/`.
+- Python tests are pytest with `asyncio_mode=auto`, `testpaths=["tests"]`, strict config/markers. Cover ingestion, extraction, OCR, ontology, retrieval, evidence packets, gateways, graph store/sync, teaching state machine, tutor graph, scientific tools, API, auth, pipeline safety, and real E2E against the Docker stack (`test_phase1_real_e2e.py`, `test_phase2_real_e2e.py`). `test_golden_loop_phase_sequence.py` drives the real `TutorGraph` (with `_TunnelingRetriever` + `FakeModelGateway`, no tokens) through the durable `LearningPhase` sequence and asserts the anti-skip invariants.
+- TS tests: `tests/backend.test.ts`, `tests/validators-citations-auth.test.ts`, `tests/golden/eval.test.ts` (deterministic, no tokens), `tests/rendered-html.test.mjs`, Playwright `tests/e2e/` (including `golden-loop.spec.ts` and live `tests/e2e/live/golden-loop-deterministic.spec.ts`).
 
 ## Key documents
 

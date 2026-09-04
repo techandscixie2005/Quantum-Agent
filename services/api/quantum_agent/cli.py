@@ -37,6 +37,7 @@ from quantum_agent.db_models import (
     UserStatus,
 )
 from quantum_agent.gateways import (
+    build_credential_vault,
     build_embedding_gateway,
     build_graph_store,
     build_model_gateway,
@@ -494,7 +495,7 @@ async def _seed_live_e2e_async(arguments: argparse.Namespace) -> int:
                     )
                 course.status = CourseStatus.ACTIVE
 
-            seeded: dict[CourseRole, tuple[User, str]] = {}
+            seeded: dict[CourseRole, tuple[User, str, UUID]] = {}
             for role, email, display_name in (
                 (CourseRole.STUDENT, LIVE_E2E_STUDENT_EMAIL, "Live E2E Student"),
                 (CourseRole.TA, LIVE_E2E_TA_EMAIL, "Live E2E TA"),
@@ -535,20 +536,34 @@ async def _seed_live_e2e_async(arguments: argparse.Namespace) -> int:
                     membership.joined_at = membership.joined_at or now
                     membership.ended_at = None
                 raw_token = issue_opaque_session_token()
-                session.add(
-                    UserSession(
-                        user_id=user.id,
-                        session_token_sha256=hash_session_token(raw_token),
-                        status=SessionStatus.ACTIVE,
-                        expires_at=now + timedelta(hours=arguments.expires_hours),
-                        user_agent="quantum-agent-live-e2e",
-                    )
+                user_session = UserSession(
+                    user_id=user.id,
+                    session_token_sha256=hash_session_token(raw_token),
+                    status=SessionStatus.ACTIVE,
+                    expires_at=now + timedelta(hours=arguments.expires_hours),
+                    user_agent="quantum-agent-live-e2e",
                 )
-                seeded[role] = (user, raw_token)
+                session.add(user_session)
+                await session.flush()
+                seeded[role] = (user, raw_token, user_session.id)
             await session.commit()
 
-        student, student_token = seeded[CourseRole.STUDENT]
-        ta, ta_token = seeded[CourseRole.TA]
+        # PRD V3.1 §3.3: when the session vault is enabled, per-session
+        # credentials are mandatory for the attachment/vision and teaching
+        # paths.  Seeded sessions bypass API-key login, so the seeder must
+        # unlock the vault with the startup USTC_API itself; otherwise every
+        # session-scoped request fails closed with 503.
+        vault = build_credential_vault(settings)
+        startup_key = settings.ustc_api
+        if vault is not None and startup_key is not None and startup_key.get_secret_value():
+            try:
+                for _user, _token, session_id in seeded.values():
+                    await vault.store(session_id, startup_key)
+            finally:
+                await vault.close()
+
+        student, student_token, _student_session_id = seeded[CourseRole.STUDENT]
+        ta, ta_token, _ta_session_id = seeded[CourseRole.TA]
         _write_private_json(
             Path(arguments.output),
             {

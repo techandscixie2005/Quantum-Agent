@@ -8,6 +8,7 @@ state machine (B0) and the graph (B1) exercise identical logic.
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import TYPE_CHECKING, Any
 
 from langgraph.runtime import Runtime
@@ -50,6 +51,8 @@ from quantum_agent.teaching.hitl import (
 from quantum_agent.teaching.learning_native import (
     LearningNativeEvidence,
     LearningNativePolicy,
+    TransferProposal,
+    assert_phase_transition,
     propose_commitment,
     propose_teach_back_analysis,
     propose_transfer_task,
@@ -62,6 +65,7 @@ from quantum_agent.teaching.models import (
     DurableLearningPhase,
     LearningPhase,
     LearningPolicyAction,
+    LearningStage,
     ReleaseDecision,
     ResponseStatus,
     SoloMode,
@@ -72,6 +76,7 @@ from quantum_agent.teaching.models import (
     TeachingTurnInput,
     TransferTask,
     TransferType,
+    TransferVerificationSpec,
     ValidationReport,
     WorkflowStep,
     WorkflowStepName,
@@ -100,6 +105,22 @@ if TYPE_CHECKING:
 
 _MULTIMODAL_EVIDENCE_ADAPTER: TypeAdapter[ConfirmedEvidence] = TypeAdapter(
     ConfirmedEvidence
+)
+
+# Durable phases at which the commitment gate has already been satisfied earlier
+# in the episode.  While the conversation sits in any of these phases, neither
+# the commitment gate (learning_native_pre) nor the answer-release engine may
+# re-arm on a later turn — the student has produced a verified learning signal;
+# re-arming would block the experiment (Coding Agent) stage or re-request a
+# prediction mid-loop.
+_COMMITMENT_SATISFIED_PHASES = frozenset(
+    {
+        LearningPhase.AWAITING_REVISION,
+        LearningPhase.RECONSTRUCTION_REQUIRED,
+        LearningPhase.TRANSFER_REQUIRED,
+        LearningPhase.SOLO_ACTIVE,
+        LearningPhase.COMPLETE,
+    }
 )
 
 
@@ -275,6 +296,8 @@ async def apply_policy_node(
         has_current_attempt=request.student_attempt is not None,
         coverage=packet.coverage,
         message=request.message,
+        commitment_already_satisfied=started.durable_phase.phase
+        in _COMMITMENT_SATISFIED_PHASES,
     )
     trace = list(state.get("trace", []))
     trace.extend(
@@ -344,11 +367,24 @@ async def scientific_tools_node(
     toolbox = runtime.context.scientific_toolbox
     scientific_results = list(state.get("scientific_results", []))
 
+    # Release-review P0 companion fix: Solo verification must not depend on
+    # retrieval coverage.  When the durable phase is SOLO_ACTIVE and the
+    # pre-node restored the persisted transfer oracle, the deterministic
+    # verifier runs regardless of the release level — it checks the
+    # student's independent answer rather than releasing any course answer
+    # (generation still honours the release level).
+    durable_phase = runtime.context.started_turn.durable_phase
+    solo_verification_due = (
+        durable_phase.phase is LearningPhase.SOLO_ACTIVE
+        and durable_phase.transfer_verification is not None
+        and bool(durable_phase.transfer_verification.scientific_request)
+        and request.scientific_request is not None
+    )
     tool_allowed = release.release_level in {
         AnswerReleaseLevel.SCAFFOLD,
         AnswerReleaseLevel.FULL_EXPLANATION,
         AnswerReleaseLevel.FULL_SOLUTION,
-    }
+    } or solo_verification_due
     code_artifact: dict[str, Any] | None = None
     if request.scientific_request is None:
         has_visual_derivation = any(
@@ -385,11 +421,21 @@ async def scientific_tools_node(
         gateway = runtime.context.model_gateway
         coding_task = _coding_task_from_request(request, request.scientific_request)
         oracle_coro = asyncio.to_thread(toolbox.verify, request.scientific_request)
+        # PRD V3.3 Solo shield: during Solo verification only the deterministic
+        # oracle may run.  Its PASS status is the secondary signal for
+        # ``_attempt_verified``; its numeric outcome is redacted below.  The
+        # Coding Agent must NOT run here even though the restored transfer
+        # request is a RectangularBarrierRequest — its ``code_artifact`` would
+        # carry ``oracle_metrics`` with the correct T, leaking the answer to
+        # the browser through the CodingArtifactPanel before the independent
+        # attempt passes.
+        coding_disabled_for_solo = solo_verification_due
         if (
             coding_agent is not None
             and gateway is not None
             and coding_task is not None
             and not isinstance(request.scientific_request, CodeTestRequest)
+            and not coding_disabled_for_solo
         ):
             oracle_outcome, coding_outcome = await asyncio.gather(
                 oracle_coro,
@@ -464,6 +510,24 @@ async def scientific_tools_node(
         )
     trace = list(state.get("trace", []))
     trace.append(tool_step)
+    if solo_verification_due and scientific_results:
+        # Solo Mode answer shield: the oracle ran so deterministic verification
+        # is possible, but its numeric outcome must not leak into the response
+        # (panels or the generation context) before the student's own attempt
+        # passes.  The PASS status survives as _attempt_verified's secondary
+        # signal; values, observations, and visualizations are withheld.
+        scientific_results = [
+            result.model_copy(
+                update={
+                    "observations": [
+                        "Solo 验证已执行；在独立验证通过前，数值结果不予显示。"
+                    ],
+                    "metrics": {},
+                    "visualization": None,
+                }
+            )
+            for result in scientific_results
+        ]
     update: dict[str, Any] = {"scientific_results": scientific_results, "trace": trace}
     if code_artifact is not None:
         update["code_artifact"] = code_artifact
@@ -501,6 +565,64 @@ async def learning_native_pre_node(
     model_gateway = runtime.context.model_gateway
     submission = request.learning_native
 
+    durable_phase = runtime.context.started_turn.durable_phase
+
+    # Only an actual cognitive artefact can satisfy the commitment gate.  A
+    # boolean UI transition request is never an attempt and therefore cannot
+    # be used to jump directly to Teach-Back or Transfer.
+    submitted_commitment = submission.commitment if submission is not None else None
+
+    # Revision is a typed cross-turn obligation.  While it is active, the
+    # student's message itself is the revised explanation and must enter the
+    # Diagnosis Agent as ``student_attempt``.
+    if (
+        durable_phase.phase is LearningPhase.AWAITING_REVISION
+        and not request.student_attempt
+        and LearningNativePolicy.attempt_is_meaningful(request.message)
+    ):
+        request = request.model_copy(update={"student_attempt": request.message})
+
+    # A Solo attempt is verified against the exact persisted transfer oracle,
+    # never against an unrelated client-selected tool request.
+    if (
+        durable_phase.phase is LearningPhase.SOLO_ACTIVE
+        and submission is not None
+        and (submission.solo_attempt is not None or submission.transfer_attempt is not None)
+        and durable_phase.transfer_verification is not None
+        and durable_phase.transfer_verification.scientific_request
+    ):
+        scientific_request = runtime.context.scientific_toolbox.validate_request(
+            durable_phase.transfer_verification.scientific_request
+        )
+        request = request.model_copy(update={"scientific_request": scientific_request})
+
+    # PRD V3.0 P0-2: load the durable Learning Phase.  Solo Mode is
+    # server-authoritative and restored BEFORE generation, so a normal Ask
+    # AI request during Solo is blocked here rather than after the LLM
+    # has already written an answer.
+    solo_active = durable_phase.phase is LearningPhase.SOLO_ACTIVE
+    solo_submission = (
+        submission is not None
+        and (submission.solo_attempt is not None or submission.transfer_attempt is not None)
+    )
+    solo_exit_requested = submission is not None and submission.request_solo_exit
+
+    # Release-review P0 fix: a submitted Solo/Transfer attempt IS the
+    # cognitive artefact for this turn.  Promote it to ``student_attempt``
+    # so BOTH the commitment gate below and ``AnswerReleaseEngine.decide``
+    # treat the turn as attempt-bearing.  Without this, the gate re-arms on
+    # top of the solo submission (release stays QUESTION_ONLY), the
+    # deterministic oracle is skipped in ``scientific_tools_node``, and a
+    # numerically correct solo answer can never satisfy ``_attempt_verified``
+    # — the Golden Loop could not close.  The promotion also replaces any
+    # client-supplied ``student_attempt``, so an unrelated typed attempt
+    # cannot ride along inside a Solo turn.
+    if solo_active and solo_submission:
+        assert submission is not None
+        solo_artefact = submission.solo_attempt or submission.transfer_attempt
+        assert solo_artefact is not None
+        request = request.model_copy(update={"student_attempt": solo_artefact.response})
+
     # PRD V3.0 Axiom 1: the gate decision is deterministic and pre-retrieval.
     # ``commitment_eligibility`` returns True when the task kind requires a
     # cognitive commitment (reasoning / exercise / prediction / experiment)
@@ -510,28 +632,37 @@ async def learning_native_pre_node(
     # so the gate decision is consistent with the release decision that
     # ``apply_policy`` would have made post-retrieval.
     request_has_attempt = LearningNativePolicy.attempt_is_meaningful(request.student_attempt)
-    gate_eligible = commitment_eligibility(
-        mode=request.mode,
-        task_kind=interpretation.task_kind,
-        message=request.message,
-        has_current_attempt=request_has_attempt or (submission is not None),
+    # PRD V3.3 root-cause #4 fix: a submitted Commitment Card is a PREDICTION,
+    # not an attempt that satisfies the commitment gate.  The gate must stay
+    # armed (release = question_only) after the student commits a prediction,
+    # so the explanation is NOT released on the same turn.  Only a *revised*
+    # student_attempt (a follow-up turn with a typed attempt and no commitment
+    # card) satisfies the gate.  Including ``submitted_commitment is not None``
+    # here previously disarmed the gate on the commitment turn, which released
+    # the full explanation immediately — the "jump to the last step" symptom.
+    #
+    # PRD V3.3 Golden Loop closure: once the durable phase has advanced past
+    # the commitment stages, the student has ALREADY satisfied the commitment
+    # gate earlier in this episode (invariant C advanced the phase on a verified
+    # learning signal).  The gate must NOT re-arm on a later turn — e.g. the
+    # experiment turn that runs the Coding Agent after ``AWAITING_REVISION``
+    # would otherwise re-request a prediction and skip the scientific tools
+    # entirely.  Re-arming the gate after commitment is a regression that
+    # blocks the Coding Agent stage of the loop.
+    commitment_satisfied_in_episode = durable_phase.phase in _COMMITMENT_SATISFIED_PHASES
+    gate_eligible = (
+        not commitment_satisfied_in_episode
+        and commitment_eligibility(
+            mode=request.mode,
+            task_kind=interpretation.task_kind,
+            message=request.message,
+            has_current_attempt=request_has_attempt,
+        )
     )
     # The release is QUESTION_ONLY (from the gate's perspective) when the
     # gate is eligible.  This mirrors ``AnswerReleaseEngine.decide`` without
     # needing the retrieved coverage.
     release_is_question_only = gate_eligible
-
-    # PRD V3.0 P0-2: load the durable Learning Phase.  Solo Mode is
-    # server-authoritative and restored BEFORE generation, so a normal Ask
-    # AI request during Solo is blocked here rather than after the LLM
-    # has already written an answer.
-    durable_phase = runtime.context.started_turn.durable_phase
-    solo_active = durable_phase.phase is LearningPhase.SOLO_ACTIVE
-    solo_submission = (
-        submission is not None
-        and (submission.solo_attempt is not None or submission.transfer_attempt is not None)
-    )
-    solo_exit_requested = submission is not None and submission.request_solo_exit
 
     if solo_active and not solo_submission and not solo_exit_requested:
         # The student is in Solo Mode but is asking for AI help (not
@@ -555,10 +686,38 @@ async def learning_native_pre_node(
             "solo_blocked": True,
         }
         return {
+            "request": request,
             "learning_native_pre_decision": solo_pre_decision,
             "answer_withheld_by_gate": True,
             "learning_native_evidence": [],
             "solo_assistance_locked": True,
+        }
+
+    if (
+        durable_phase.phase is LearningPhase.RECONSTRUCTION_REQUIRED
+        and not (submission is not None and submission.teach_back is not None)
+    ):
+        reconstruction_commitment = CognitiveCommitment(
+            gate_decision=CommitmentGateDecision.PROCEED,
+            attempt_required=False,
+            candidate_prompt=(
+                "请先完成当前 Teach-Back：不看上面的解释，用自己的话重构核心机制。"
+            ),
+            reason_summary="学习阶段要求先完成 Teach-Back，不能跳到迁移或新答案。",
+            accepted=True,
+        )
+        phase_pre_decision: dict[str, Any] = {
+            "commitment": reconstruction_commitment.model_dump(mode="json"),
+            "learning_action": LearningPolicyAction.START_TEACH_BACK.value,
+            "withhold_answer": True,
+            "commitment_evidence": [],
+            "phase_blocked": True,
+        }
+        return {
+            "request": request,
+            "learning_native_pre_decision": phase_pre_decision,
+            "answer_withheld_by_gate": True,
+            "learning_native_evidence": [],
         }
 
     # PRD V3.0 P0-1: when the turn carries an unconfirmed perception (e.g. an
@@ -591,6 +750,22 @@ async def learning_native_pre_node(
         submission_confidence=submission.confidence if submission is not None else None,
     )
 
+    # The formal Commitment Card is the student's first attempt.  Feed it to
+    # retrieval/diagnosis and restore the scientific task that was captured
+    # when the initial question opened the commitment gate.
+    if commitment.accepted and submitted_commitment is not None:
+        restored_scientific_request = request.scientific_request
+        if durable_phase.pending_scientific_request:
+            restored_scientific_request = runtime.context.scientific_toolbox.validate_request(
+                durable_phase.pending_scientific_request
+            )
+        request = request.model_copy(
+            update={
+                "student_attempt": submitted_commitment.candidate_prompt,
+                "scientific_request": restored_scientific_request,
+            }
+        )
+
     # Stash the pre-decision so the post node can assemble the final state
     # without re-running the commitment logic.
     pre_decision: dict[str, Any] = {
@@ -609,6 +784,7 @@ async def learning_native_pre_node(
         ],
     }
     return {
+        "request": request,
         "learning_native_pre_decision": pre_decision,
         "answer_withheld_by_gate": withhold,
         "learning_native_evidence": pre_decision["commitment_evidence"],
@@ -1168,6 +1344,21 @@ async def assemble_result_node(
         trace=state["trace"],
         learning_native=state.get("learning_native"),
     )
+    # PRD V3.3 root-cause #8 fix: ``learning_loop_completed`` is a computed
+    # function of the authoritative durable phase, not a hardcoded False.  A
+    # bounded graph turn reaching ``assemble_result`` is ``turn_completed``;
+    # the *Learning-Native loop* is complete only when the durable phase is
+    # ``COMPLETE``.  The browser reads this flag to render a distinct terminal
+    # state and must NOT infer completion from the SSE ``workflow.completed``
+    # lifecycle event, which fires for every bounded turn.
+    native_state = state.get("learning_native")
+    loop_complete = (
+        native_state is not None
+        and native_state.phase is LearningPhase.COMPLETE
+    )
+    result = result.model_copy(
+        update={"learning_loop_completed": loop_complete}
+    )
     learning_native_records = _learning_native_records(state)
     await TeachingRepository(session).complete_turn(
         actor=actor,
@@ -1248,6 +1439,63 @@ def _iter_native_evidence(state: TutorState) -> list[LearningNativeEvidence]:
     return evidence
 
 
+def _append_learning_stages(
+    existing: list[LearningStage],
+    *stages: LearningStage,
+) -> list[LearningStage]:
+    ordered = list(existing)
+    for stage in stages:
+        if stage not in ordered:
+            ordered.append(stage)
+    return ordered
+
+
+def _tunnelling_transfer_contract(
+    payload: dict[str, object],
+    runtime: Runtime[TutorContext],
+) -> tuple[TransferProposal, TransferVerificationSpec] | None:
+    """Create a changed-parameter, deterministically verifiable near transfer."""
+
+    try:
+        original = runtime.context.scientific_toolbox.validate_request(payload)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(original, RectangularBarrierRequest):
+        return None
+    changed_width = min(original.barrier_width_m * 1.5, 1e-3)
+    changed = original.model_copy(update={"barrier_width_m": changed_width})
+    oracle = runtime.context.scientific_toolbox.verify(changed)
+    expected = oracle.metrics.get("T")
+    if oracle.status is not ScientificVerificationStatus.PASS or not isinstance(
+        expected, (float, int)
+    ):
+        return None
+    prompt = (
+        "近迁移（独立完成）：保持粒子能量 "
+        f"E={changed.energy_eV:g} eV 与势垒高度 V₀={changed.barrier_height_eV:g} eV，"
+        f"把势垒宽度改为 a={changed.barrier_width_m * 1e9:.4g} nm。"
+        "先判断透射率相对原情形如何变化，再计算透射系数 T；给出数值和物理理由。"
+    )
+    return (
+        TransferProposal(
+            transfer_type=TransferType.PARAMETER,
+            prompt=prompt,
+            key_parameters=[
+                f"E={changed.energy_eV:g} eV",
+                f"V0={changed.barrier_height_eV:g} eV",
+                f"a={changed.barrier_width_m * 1e9:.4g} nm",
+            ],
+            expected_observable="transmission coefficient T",
+        ),
+        TransferVerificationSpec(
+            scientific_request=changed.model_dump(mode="json"),
+            metric_name="T",
+            expected_value=float(expected),
+            absolute_tolerance=5e-3,
+        ),
+    )
+
+
 async def learning_native_node(
     state: TutorState,
     runtime: Runtime[TutorContext],
@@ -1277,6 +1525,7 @@ async def learning_native_node(
     # loaded from the conversation row in ``start_turn`` and is available on
     # the started turn.  We mutate a local copy and persist it at the end.
     durable_phase = runtime.context.started_turn.durable_phase
+    phase_at_start = durable_phase.phase
     conversation = runtime.context.started_turn.conversation
     repository = TeachingRepository(session)
 
@@ -1311,57 +1560,307 @@ async def learning_native_node(
         if isinstance(item, dict) and "kind" in item and "observation" in item
     ]
 
-    # Teach-back analysis (only when the student submitted a reconstruction).
-    teach_back: Any = None
-    teach_back_evidence: list[LearningNativeEvidence] = []
-    if submission is not None and submission.teach_back is not None:
-        target_names = [
-            node.name
-            for node in evidence_packet.graph_nodes
-            if node.node_type in {"Concept", "Topic", "Formula"}
-        ][:6]
-        proposal = await propose_teach_back_analysis(
-            reconstruction=submission.teach_back.reconstruction,
-            target_concept_names=target_names,
-            model_gateway=model_gateway,
-        )
-        teach_back, teach_back_evidence = policy.analyze_teach_back(
-            submission_text=submission.teach_back.reconstruction,
-            proposal=proposal,
-        )
-        # PRD V3.0 P0-2: after a teach-back reconstruction is submitted,
-        # advance the durable phase to TRANSFER_REQUIRED so the next turn
-        # can issue a transfer task.
-        if durable_phase.phase is LearningPhase.RECONSTRUCTION_REQUIRED:
-            durable_phase = durable_phase.model_copy(
-                update={"phase": LearningPhase.TRANSFER_REQUIRED}
-            )
-    elif submission is not None and submission.request_teach_back:
-        # PRD V3.0 P0-2: the UI requests a Teach-Back transition.  Set the
-        # durable phase so the next turn requires a reconstruction.  The
-        # frontend renders the TeachBackCard from the learning_native state.
-        if durable_phase.phase in {
+    loop_needed = durable_phase.loop_required or commitment_eligibility(
+        mode=request.mode,
+        task_kind=state["interpretation"].task_kind,
+        message=request.message,
+        has_current_attempt=False,
+    )
+
+    # The first gated turn must persist what the student actually sees.  It is
+    # never OPEN while the UI is asking for a commitment.  This only applies
+    # when the durable phase is one of the pre-explanation phases; once the
+    # student has advanced to AWAITING_REVISION / RECONSTRUCTION_REQUIRED /
+    # TRANSFER_REQUIRED / SOLO_ACTIVE the commitment gate must not regress the
+    # durable phase to COMMITMENT_REQUIRED.
+    if (
+        loop_needed
+        and commitment is not None
+        and commitment.gate_decision is CommitmentGateDecision.ATTEMPT_REQUIRED
+        and not commitment.accepted
+        and phase_at_start
+        in {
             LearningPhase.OPEN,
             LearningPhase.ATTEMPT_RECEIVED,
             LearningPhase.INTERVENTION,
-        }:
-            durable_phase = durable_phase.model_copy(
-                update={"phase": LearningPhase.RECONSTRUCTION_REQUIRED}
+        }
+    ):
+        assert_phase_transition(
+            phase_at_start,
+            LearningPhase.COMMITMENT_REQUIRED,
+            cause="gate_fired",
+        )
+        pending_request = (
+            request.scientific_request.model_dump(mode="json")
+            if request.scientific_request is not None
+            else durable_phase.pending_scientific_request
+        )
+        durable_phase = durable_phase.model_copy(
+            update={
+                "phase": LearningPhase.COMMITMENT_REQUIRED,
+                "loop_required": True,
+                "pending_scientific_request": pending_request,
+            }
+        )
+
+    # The barrier experiment frequently runs AFTER the phase has advanced to
+    # AWAITING_REVISION (commitment holds, then the revised attempt is
+    # verified, then the student runs the experiment).  Refresh the persisted
+    # scientific request whenever a validated one arrives in a post-commitment
+    # phase so the transfer oracle contract can be reconstructed
+    # deterministically when Solo Mode is armed.  SOLO_ACTIVE is excluded:
+    # solo turns resubmit the oracle request itself and must not overwrite it.
+    if (
+        request.scientific_request is not None
+        and phase_at_start
+        in {
+            LearningPhase.AWAITING_REVISION,
+            LearningPhase.RECONSTRUCTION_REQUIRED,
+            LearningPhase.TRANSFER_REQUIRED,
+        }
+    ):
+        durable_phase = durable_phase.model_copy(
+            update={
+                "pending_scientific_request": request.scientific_request.model_dump(
+                    mode="json"
+                )
+            }
+        )
+
+    # Teach-Back is required only after a diagnosed revision.  Invalid or
+    # premature submissions fail closed and never advance the durable phase.
+    teach_back: Any = None
+    teach_back_evidence: list[LearningNativeEvidence] = []
+    teach_back_satisfied = False
+    if (
+        submission is not None
+        and submission.teach_back is not None
+        and phase_at_start is LearningPhase.RECONSTRUCTION_REQUIRED
+    ):
+        reconstruction = submission.teach_back.reconstruction.strip()
+        if len(reconstruction) < 24:
+            teach_back = TeachBackAnalysis(
+                covered_relations=[],
+                missing_relations=[],
+                contradictions=[],
+                unsupported_claims=[],
+                recommended_probe="请至少用两三句话重构机制，并说明关键因果关系。",
+                verified=False,
+                is_model_inference=False,
             )
-        # Surface a teach-back prompt even without a model proposal so the
-        # frontend can render the card.
+        else:
+            target_names = [
+                node.name
+                for node in evidence_packet.graph_nodes
+                if node.node_type in {"Concept", "Topic", "Formula"}
+            ][:6]
+            proposal = await propose_teach_back_analysis(
+                reconstruction=reconstruction,
+                target_concept_names=target_names,
+                model_gateway=model_gateway,
+            )
+            teach_back, teach_back_evidence = policy.analyze_teach_back(
+                submission_text=reconstruction,
+                proposal=proposal,
+            )
+            # Length alone never advances the loop.  The reconstruction passes
+            # only when the analysis covers at least one relation and reports
+            # no contradictions.  When the model is unavailable (proposal is
+            # None), a substantial reconstruction advances deterministically
+            # so a model outage cannot deadlock the Golden Loop — the same
+            # guarantee force-armed transfers provide.
+            reconstruction_acceptable = bool(
+                teach_back.covered_relations
+            ) and not teach_back.contradictions
+            model_unavailable_fallback = proposal is None and len(reconstruction) >= 120
+            if reconstruction_acceptable or model_unavailable_fallback:
+                teach_back_satisfied = True
+                assert_phase_transition(
+                    phase_at_start,
+                    LearningPhase.TRANSFER_REQUIRED,
+                    cause="teach_back_verified",
+                )
+                durable_phase = durable_phase.model_copy(
+                    update={
+                        "phase": LearningPhase.TRANSFER_REQUIRED,
+                        "completed_stages": _append_learning_stages(
+                            durable_phase.completed_stages,
+                            LearningStage.TEACH_BACK,
+                        ),
+                    }
+                )
+            else:
+                # Fail closed: the reconstruction covered no relations or
+                # contains contradictions.  The phase holds and the card asks
+                # for another attempt (legal same-phase hold).
+                assert_phase_transition(
+                    phase_at_start,
+                    LearningPhase.RECONSTRUCTION_REQUIRED,
+                    cause="teach_back_rejected",
+                )
+                if not teach_back.recommended_probe:
+                    teach_back = teach_back.model_copy(
+                        update={
+                            "recommended_probe": (
+                                "重构中还没有看到覆盖的关键关系；请用自己的话"
+                                "说明核心机制和因果链，再提交一次。"
+                            )
+                        }
+                    )
+    elif phase_at_start is LearningPhase.RECONSTRUCTION_REQUIRED:
+        # The required card is reconstructed from durable backend phase on
+        # every turn; it does not depend on an LLM phrase or optional button.
         teach_back = TeachBackAnalysis(
             covered_relations=[],
             missing_relations=[],
             contradictions=[],
             unsupported_claims=[],
             recommended_probe=(
-                "不看上面的解释，现在用自己的话向一个第一次学这个概念的同学"
-                "重新解释这个结论。"
+                "不看上面的解释，现在用自己的话向第一次学习这个概念的同学"
+                "重构核心机制。"
             ),
             verified=False,
             is_model_inference=False,
         )
+
+    passed_verification = any(
+        result.status is ScientificVerificationStatus.PASS
+        for result in state.get("scientific_results", [])
+    )
+    # PRD V3.3 root-cause #3 fix: a bare non-empty student_attempt must NOT
+    # advance the phase to AWAITING_REVISION.  Invariant C requires a positive
+    # learning signal: a scientific PASS correlated with the persisted
+    # pending_scientific_request, OR an explicit student phase-advance request,
+    # OR a *revised* student_attempt (not the commitment prediction itself).
+    #
+    # PRD V3.3 root-cause #4 fix (commitment must not release the explanation):
+    # submitting the Commitment Card is a PREDICTION, not a verified learning
+    # signal.  The pre_node feeds ``submitted_commitment.candidate_prompt`` into
+    # ``request.student_attempt`` so the Diagnosis Agent can reason about the
+    # prediction (nodes.py:668), but that must NOT trigger the verified_attempt
+    # transition — otherwise the phase jumps to AWAITING_REVISION on the very
+    # turn the student commits a prediction, immediately releasing the full
+    # explanation.  That was the user-reported "question seems to jump to the
+    # last step": the student commits a prediction, and the next render shows
+    # the complete answer.  The phase must HOLD at COMMITMENT_REQUIRED until
+    # the student submits a *revised* attempt (a follow-up turn with a typed
+    # attempt and no commitment card), a scientific PASS, or an explicit
+    # advance.  This is invariant B: commitment accepted ≠ explanation released.
+    commitment_submitted_this_turn = (
+        submission is not None and submission.commitment is not None
+    )
+    explicit_advance = (
+        submission is not None
+        and (submission.request_teach_back or submission.request_transfer_task)
+    )
+    revised_attempt_this_turn = (
+        LearningNativePolicy.attempt_is_meaningful(request.student_attempt)
+        and not commitment_submitted_this_turn
+    )
+    positive_learning_signal = (
+        revised_attempt_this_turn or passed_verification or explicit_advance
+    )
+    if (
+        loop_needed
+        and not state.get("answer_withheld_by_gate")
+        and not teach_back_satisfied
+        and positive_learning_signal
+    ):
+        if phase_at_start in {
+            LearningPhase.OPEN,
+            LearningPhase.COMMITMENT_REQUIRED,
+            LearningPhase.ATTEMPT_RECEIVED,
+            LearningPhase.INTERVENTION,
+        } and LearningNativePolicy.attempt_is_meaningful(request.student_attempt):
+            completed = _append_learning_stages(
+                durable_phase.completed_stages,
+                LearningStage.PREDICT,
+                LearningStage.DIAGNOSE,
+                LearningStage.EXPLORE,
+            )
+            if passed_verification:
+                completed = _append_learning_stages(completed, LearningStage.VERIFY)
+            assert_phase_transition(
+                phase_at_start,
+                LearningPhase.AWAITING_REVISION,
+                cause="verified_attempt",
+            )
+            durable_phase = durable_phase.model_copy(
+                update={
+                    "phase": LearningPhase.AWAITING_REVISION,
+                    "loop_required": True,
+                    "completed_stages": completed,
+                    "pending_scientific_request": (
+                        request.scientific_request.model_dump(mode="json")
+                        if request.scientific_request is not None
+                        else durable_phase.pending_scientific_request
+                    ),
+                }
+            )
+        elif (
+            phase_at_start is LearningPhase.AWAITING_REVISION
+            and submission is not None
+            and submission.teach_back is not None
+            and len(submission.teach_back.reconstruction.strip()) >= 24
+        ):
+            assert_phase_transition(
+                phase_at_start,
+                LearningPhase.RECONSTRUCTION_REQUIRED,
+                cause="teach_back_requested",
+            )
+            durable_phase = durable_phase.model_copy(
+                update={
+                    "phase": LearningPhase.RECONSTRUCTION_REQUIRED,
+                    "completed_stages": _append_learning_stages(
+                        durable_phase.completed_stages,
+                        LearningStage.DIAGNOSE,
+                        LearningStage.EXPLORE,
+                        *(
+                            (LearningStage.VERIFY,)
+                            if passed_verification
+                            else ()
+                        ),
+                        LearningStage.EXPLAIN,
+                    ),
+                }
+            )
+            teach_back = TeachBackAnalysis(
+                covered_relations=[],
+                missing_relations=[],
+                contradictions=[],
+                unsupported_claims=[],
+                recommended_probe=(
+                    "不看上面的解释，现在用自己的话向第一次学习这个概念的同学"
+                    "重构核心机制。"
+                ),
+                verified=False,
+                is_model_inference=False,
+            )
+        elif (
+            phase_at_start is LearningPhase.AWAITING_REVISION
+            and submission is not None
+            and submission.request_teach_back
+        ):
+            # PRD V3.3: the student clicked "进入 Teach-Back" from
+            # AWAITING_REVISION.  The typed reconstruction has not arrived yet,
+            # so the durable phase HOLDS at AWAITING_REVISION while we surface
+            # a TeachBackCard (placeholder analysis + deterministic probe) to
+            # type into.  The legal teach_back_requested transition fires on
+            # the NEXT turn, when the actual reconstruction is submitted (see
+            # the branch above).  Advancing on the bare click would consume
+            # the transition before the student has produced any artefact.
+            teach_back = TeachBackAnalysis(
+                covered_relations=[],
+                missing_relations=[],
+                contradictions=[],
+                unsupported_claims=[],
+                recommended_probe=(
+                    "不看上面的解释，现在用自己的话向第一次学习这个概念的同学"
+                    "重构核心机制。"
+                ),
+                verified=False,
+                is_model_inference=False,
+            )
 
     # PRD V3.0 P0-2: Transfer / Solo Mode is driven by the durable phase, not
     # by ad-hoc submission flags.  The durable phase is the single source of
@@ -1378,6 +1877,14 @@ async def learning_native_node(
         active_solo = SoloMode(
             status=SoloModeStatus.ACTIVE,
             active_transfer=TransferTask(
+                task_id=(
+                    durable_phase.active_transfer_task_id
+                    if durable_phase.active_transfer_task_id is not None
+                    else TransferTask(
+                        transfer_type=TransferType.NEAR,
+                        prompt=solo_prompt,
+                    ).task_id
+                ),
                 transfer_type=TransferType.NEAR,
                 prompt=solo_prompt,
                 source_concept_ids=[],
@@ -1418,6 +1925,11 @@ async def learning_native_node(
             assistance_locked=False,
             unlock_reason="学生主动退出 Solo Mode（记录为 SOLO_ABORTED）。",
         )
+        assert_phase_transition(
+            durable_phase.phase,
+            LearningPhase.ABORTED,
+            cause="student_exit",
+        )
         durable_phase = durable_phase.model_copy(
             update={
                 "phase": LearningPhase.ABORTED,
@@ -1457,7 +1969,11 @@ async def learning_native_node(
             assert transfer_attempt is not None
             attempt_text = transfer_attempt.response
             attempt_confidence = transfer_attempt.confidence
-        verified = _attempt_verified(state, attempt_text)
+        verified = _attempt_verified(
+            state,
+            attempt_text,
+            durable_phase.transfer_verification,
+        )
         task_id = (
             str(durable_phase.active_transfer_task_id)
             if durable_phase.active_transfer_task_id
@@ -1470,10 +1986,19 @@ async def learning_native_node(
                 assistance_locked=False,
                 unlock_reason="学生提交了通过确定性验证的迁移尝试，Solo Mode 解除。",
             )
+            assert_phase_transition(
+                durable_phase.phase,
+                LearningPhase.COMPLETE,
+                cause="solo_verified",
+            )
             durable_phase = durable_phase.model_copy(
                 update={
                     "phase": LearningPhase.COMPLETE,
                     "solo_assistance_locked": False,
+                    "completed_stages": _append_learning_stages(
+                        durable_phase.completed_stages,
+                        LearningStage.SOLO,
+                    ),
                 }
             )
             transfer_evidence = [
@@ -1535,18 +2060,60 @@ async def learning_native_node(
 
     # PRD V3.0 P0-2: the UI can request a Teach-Back or Transfer transition.
     # The policy honours the request only when the durable phase allows it.
-    elif submission is not None and submission.request_transfer_task:
+    elif teach_back_satisfied:
+        # The Teach-Back turn previews the upcoming transfer task but does
+        # NOT arm Solo Mode: arming is the student's next explicit action
+        # from TRANSFER_REQUIRED (transition F, cause "transfer_armed").
+        # Arming in this same turn would assert the illegal
+        # RECONSTRUCTION_REQUIRED -> SOLO_ACTIVE transition and kill the
+        # stream mid-turn.
         source_concept_ids = [
             node.id for node in evidence_packet.graph_nodes[:6]
         ]
         source_names = [
             node.name for node in evidence_packet.graph_nodes[:6]
         ]
-        transfer_proposal = await propose_transfer_task(
-            source_concept_names=source_names,
-            transfer_type=None,
-            model_gateway=model_gateway,
+        deterministic_contract = _tunnelling_transfer_contract(
+            durable_phase.pending_scientific_request,
+            runtime,
         )
+        transfer_proposal: TransferProposal | None
+        if deterministic_contract is not None:
+            # The verification oracle is recomputed deterministically at
+            # Solo-arming time; only the task preview is needed here.
+            transfer_proposal, _ = deterministic_contract
+        else:
+            transfer_proposal = await propose_transfer_task(
+                source_concept_names=source_names,
+                transfer_type=None,
+                model_gateway=model_gateway,
+            )
+        transfer = policy.build_transfer_task(transfer_proposal, source_concept_ids)
+
+    elif (
+        submission is not None
+        and submission.request_transfer_task
+        and phase_at_start is LearningPhase.TRANSFER_REQUIRED
+    ):
+        source_concept_ids = [
+            node.id for node in evidence_packet.graph_nodes[:6]
+        ]
+        source_names = [
+            node.name for node in evidence_packet.graph_nodes[:6]
+        ]
+        deterministic_contract = _tunnelling_transfer_contract(
+            durable_phase.pending_scientific_request,
+            runtime,
+        )
+        transfer_verification: TransferVerificationSpec | None = None
+        if deterministic_contract is not None:
+            transfer_proposal, transfer_verification = deterministic_contract
+        else:
+            transfer_proposal = await propose_transfer_task(
+                source_concept_names=source_names,
+                transfer_type=None,
+                model_gateway=model_gateway,
+            )
         # PRD V3.0 Golden Loop closure: when the student explicitly requests a
         # transfer task, force-arm Solo Mode even if the model fails to propose
         # a task.  A deterministic near-transfer fallback is used so the Golden
@@ -1558,15 +2125,26 @@ async def learning_native_node(
             force_arm=True,
         )
         if solo.status is SoloModeStatus.ACTIVE and transfer is not None:
+            assert_phase_transition(
+                phase_at_start,
+                LearningPhase.SOLO_ACTIVE,
+                cause="transfer_armed",
+            )
             durable_phase = DurableLearningPhase(
                 phase=LearningPhase.SOLO_ACTIVE,
-                active_transfer_task_id=transfer.source_concept_ids[0]
-                if transfer.source_concept_ids
-                else None,
+                active_transfer_task_id=transfer.task_id,
                 active_transfer_task_prompt=transfer.prompt,
                 solo_started_at=solo.started_at,
                 solo_assistance_locked=True,
                 expected_attempt_kind="transfer",
+                loop_required=True,
+                completed_stages=_append_learning_stages(
+                    durable_phase.completed_stages,
+                    LearningStage.TEACH_BACK,
+                    LearningStage.TRANSFER,
+                ),
+                pending_scientific_request=durable_phase.pending_scientific_request,
+                transfer_verification=transfer_verification,
             )
 
     # Persist the durable phase so the next turn in this conversation
@@ -1601,6 +2179,7 @@ async def learning_native_node(
         solo=solo,
         cognitive_mirror=cognitive_mirror,
         evidence_kinds=evidence_kinds,
+        durable_phase=durable_phase,
     )
 
     native_evidence_payload = [
@@ -1630,20 +2209,52 @@ def _state_solo(state: TutorState) -> SoloMode | None:
     return None
 
 
-def _attempt_verified(state: TutorState, response: str) -> bool:
-    """Best-effort deterministic verification of a transfer response.
+_NUMERIC_PATTERN = re.compile(
+    r"[-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?"
+)
 
-    We only mark a transfer attempt as verified when a scientific tool result
-    for this turn passed and the response references its observable.  The LLM
-    is never allowed to assert verification on its own.
+
+def _attempt_verified(
+    state: TutorState,
+    response: str,
+    verification: TransferVerificationSpec | None,
+) -> bool:
+    """Deterministic verification of a Solo transfer attempt.
+
+    PRD V3.3 root-cause #5 fix: this is NO LONGER a substring match against
+    passing scientific observations (an accidental phrase could close the
+    loop).  The decisive check is a *numeric* match against the persisted
+    ``transfer_verification`` oracle: we extract every number from the
+    student's free-text response and require at least one to equal
+    ``expected_value`` within ``absolute_tolerance``.  A correlated scientific
+    PASS for this turn is still required as a secondary signal so a bare
+    number without a supporting computation cannot pass.  The LLM never
+    asserts verification on its own.
+
+    When ``verification`` is None (legacy conversation with no persisted
+    oracle) we fail closed: the loop cannot close without a deterministic
+    contract to verify against.
     """
 
-    response_lower = response.lower()
+    if verification is None or verification.expected_value is None:
+        return False
+
+    # Secondary signal: a scientific tool result for this turn must have PASSed.
     scientific_results = state.get("scientific_results") or []
-    for result in scientific_results:
-        if result.status is not ScientificVerificationStatus.PASS:
+    has_pass = any(
+        result.status is ScientificVerificationStatus.PASS
+        for result in scientific_results
+    )
+    if not has_pass:
+        return False
+
+    expected = float(verification.expected_value)
+    tolerance = float(verification.absolute_tolerance)
+    for match in _NUMERIC_PATTERN.finditer(response):
+        try:
+            value = float(match.group())
+        except ValueError:
             continue
-        for observation in result.observations:
-            if observation.lower() in response_lower:
-                return True
+        if abs(value - expected) <= tolerance:
+            return True
     return False

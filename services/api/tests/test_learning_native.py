@@ -72,9 +72,11 @@ from quantum_agent.teaching.models import (
     CommitmentKind,
     ConceptStateLabel,
     LearningNativeSubmission,
+    LearningPhase,
     SoloAttemptSubmission,
     SoloMode,
     SoloModeStatus,
+    TeachBackSubmission,
     TeachingTurnInput,
     TransferType,
     WorkflowStepName,
@@ -171,6 +173,43 @@ async def _seed_actor(session: AsyncSession) -> LearningSeed:
         course_role=CourseRole.STUDENT,
     )
     return LearningSeed(actor=actor, edition_id=edition.id)
+
+
+async def _seed_conversation_with_phase(
+    session: AsyncSession,
+    seed: LearningSeed,
+    *,
+    phase: str,
+    extra_phase: dict[str, object] | None = None,
+    mode: TeachingMode = TeachingMode.LEARN_CONCEPTS,
+) -> UUID:
+    """Persist a conversation with a pre-seeded durable LearningPhase.
+
+    The Phase 3 transition guards make every durable-phase mutation pass
+    through ``assert_phase_transition``.  Tests that exercise a *later* phase
+    (AWAITING_REVISION, RECONSTRUCTION_REQUIRED, TRANSFER_REQUIRED, SOLO_ACTIVE)
+    must therefore seed the conversation into that phase rather than expecting
+    a single fresh turn to skip there — skipping is exactly the behaviour the
+    guards now forbid.
+    """
+
+    learning_phase_json: dict[str, object] = {"phase": phase}
+    if extra_phase is not None:
+        learning_phase_json.update(extra_phase)
+    conversation = TeachingConversation(
+        course_id=seed.actor.course_id,
+        curriculum_edition_id=seed.edition_id,
+        student_user_id=seed.actor.user_id,
+        mode=mode,
+        status=TeachingConversationStatus.ACTIVE,
+        last_activity_at=datetime.now(UTC),
+        learning_phase_json=learning_phase_json,
+    )
+    session.add(conversation)
+    await session.flush()
+    conversation_id = conversation.id
+    await session.commit()
+    return conversation_id
 
 
 def _evidence_packet(scope: RetrievalScope, *, with_concept: bool) -> EvidencePacket:
@@ -320,7 +359,12 @@ class TestLearningNativePolicy:
             submission_confidence=0.8,
         )
         assert commitment.accepted is True
-        assert commitment.gate_decision is CommitmentGateDecision.PROCEED
+        # PRD V3.3 root-cause #4: an accepted commitment is a PREDICTION, not a
+        # verified learning signal.  The gate stays armed (ATTEMPT_REQUIRED) so
+        # the explanation is NOT released on the same turn; the student must
+        # submit a *revised* attempt.  Invariant B: commitment accepted ≠
+        # explanation released.
+        assert commitment.gate_decision is CommitmentGateDecision.ATTEMPT_REQUIRED
         assert commitment.confidence == 0.8
         assert action.value == "give_hint"
         assert any(item.kind is LearningEvidenceKind.COMMITMENT for item in evidence)
@@ -882,6 +926,23 @@ class TestTutorGraphLearningNative:
     ) -> None:
         async with learning_native_database() as session:
             seed = await _seed_actor(session)
+            # Phase 3 invariants: transfer-arming requires TRANSFER_REQUIRED
+            # and Solo verification requires a persisted transfer oracle.
+            # This test exercises an UNVERIFIED attempt, so we seed SOLO_ACTIVE
+            # directly (no oracle) and confirm the attempt fails closed — Solo
+            # stays active.  The previous single-turn jump from OPEN to Solo
+            # is exactly what the Phase 3 guards now forbid.
+            conversation_id = await _seed_conversation_with_phase(
+                session,
+                seed,
+                phase="solo_active",
+                extra_phase={
+                    "active_transfer_task_prompt": "画出不同势垒宽度下的透射率曲线。",
+                    "solo_started_at": datetime.now(UTC).isoformat(),
+                    "solo_assistance_locked": True,
+                    "expected_attempt_kind": "transfer",
+                },
+            )
 
         fake = FakeModelGateway(
             responses={
@@ -900,34 +961,14 @@ class TestTutorGraphLearningNative:
             use_specialist_agents=False,
             enable_hitl=False,
         )
-        # First turn: arm Solo Mode by requesting a transfer task.  PRD V3.0
-        # P0-2: the new ``request_transfer_task`` flag drives the durable
-        # phase transition; the old ``request_transfer`` flag is deprecated.
-        request1 = TeachingTurnInput(
-            mode=TeachingMode.LEARN_CONCEPTS,
-            message="我想挑战一个迁移任务。",
-            learning_native=LearningNativeSubmission(request_transfer_task=True),
-        )
-        async with learning_native_database() as session:
-            result1 = await graph.run(
-                session=session,
-                actor=seed.actor,
-                curriculum_edition_id=seed.edition_id,
-                request=request1,
-            )
-            await session.commit()
-        assert result1.learning_native is not None
-        assert result1.learning_native.solo is not None
-        assert result1.learning_native.solo.status is SoloModeStatus.ACTIVE
-        assert result1.learning_native.transfer is not None
-
-        # Second turn: submit a solo attempt.  PRD V3.0 P0-2: an unverified
-        # attempt does NOT exit Solo.  The attempt is recorded as evidence
-        # but Solo stays active until a verified attempt is submitted.
+        # Submit a solo attempt.  PRD V3.0 P0-2 + Phase 3 root-cause #5: an
+        # unverified attempt (no persisted oracle / no scientific PASS this
+        # turn) does NOT exit Solo.  The attempt is recorded as evidence but
+        # Solo stays active until a numerically-verified attempt is submitted.
         request2 = TeachingTurnInput(
             mode=TeachingMode.LEARN_CONCEPTS,
             message="这是我的迁移尝试。",
-            conversation_id=result1.conversation_id,
+            conversation_id=conversation_id,
             learning_native=LearningNativeSubmission(
                 solo_attempt=SoloAttemptSubmission(
                     response="透射率随势垒宽度增加而指数下降。",
@@ -1707,6 +1748,15 @@ class TestTeachBackAndTransferUIInitiation:
     ) -> None:
         async with learning_native_database() as session:
             seed = await _seed_actor(session)
+            # Phase 3 invariant D: Teach-Back is reachable only from
+            # AWAITING_REVISION.  A fresh OPEN conversation can no longer jump
+            # straight to Teach-Back — the student must commit, then explain,
+            # first.  Seed the durable phase to AWAITING_REVISION.
+            conversation_id = await _seed_conversation_with_phase(
+                session,
+                seed,
+                phase="awaiting_revision",
+            )
 
         graph = TutorGraph(
             evidence_retriever=TunnelingRetriever(),
@@ -1718,7 +1768,16 @@ class TestTeachBackAndTransferUIInitiation:
         request = TeachingTurnInput(
             mode=TeachingMode.LEARN_CONCEPTS,
             message="我想用自己的话重新解释这个概念。",
-            learning_native=LearningNativeSubmission(request_teach_back=True),
+            conversation_id=conversation_id,
+            learning_native=LearningNativeSubmission(
+                request_teach_back=True,
+                teach_back=TeachBackSubmission(
+                    reconstruction=(
+                        "基态波函数在势阱内关于中心对称，动量算符是奇算符，"
+                        "所以动量期望值在对称态上为零。"
+                    ),
+                ),
+            ),
         )
         async with learning_native_database() as session:
             result = await graph.run(
@@ -1728,10 +1787,13 @@ class TestTeachBackAndTransferUIInitiation:
                 request=request,
             )
             await session.commit()
-        # The Teach-Back card is rendered (teach_back is non-null).
+        # The Teach-Back card is rendered (teach_back is non-null) and the
+        # durable phase advanced from AWAITING_REVISION to
+        # RECONSTRUCTION_REQUIRED (invariant D, cause teach_back_requested).
         assert result.learning_native is not None
         assert result.learning_native.teach_back is not None
         assert result.learning_native.teach_back.recommended_probe
+        assert result.learning_native.phase is LearningPhase.RECONSTRUCTION_REQUIRED
 
     async def test_request_transfer_task_arms_solo(
         self,
@@ -1739,6 +1801,15 @@ class TestTeachBackAndTransferUIInitiation:
     ) -> None:
         async with learning_native_database() as session:
             seed = await _seed_actor(session)
+            # Phase 3 invariant F: transfer-arming requires the durable phase
+            # to already be TRANSFER_REQUIRED.  A fresh OPEN conversation can
+            # no longer jump straight to Solo — the student must first commit,
+            # explain, and complete Teach-Back.  Seed TRANSFER_REQUIRED.
+            conversation_id = await _seed_conversation_with_phase(
+                session,
+                seed,
+                phase="transfer_required",
+            )
 
         fake = FakeModelGateway(
             responses={
@@ -1760,6 +1831,7 @@ class TestTeachBackAndTransferUIInitiation:
         request = TeachingTurnInput(
             mode=TeachingMode.LEARN_CONCEPTS,
             message="给我一个迁移任务。",
+            conversation_id=conversation_id,
             learning_native=LearningNativeSubmission(request_transfer_task=True),
         )
         async with learning_native_database() as session:
@@ -1801,6 +1873,12 @@ class TestTeachBackAndTransferUIInitiation:
 
         async with learning_native_database() as session:
             seed = await _seed_actor(session)
+            # Phase 3 invariant F: seed TRANSFER_REQUIRED (see test above).
+            conversation_id = await _seed_conversation_with_phase(
+                session,
+                seed,
+                phase="transfer_required",
+            )
 
         # model_gateway=None simulates model unavailability; the fallback path
         # must still arm Solo Mode.
@@ -1814,6 +1892,7 @@ class TestTeachBackAndTransferUIInitiation:
         request = TeachingTurnInput(
             mode=TeachingMode.LEARN_CONCEPTS,
             message="给我一个迁移任务。",
+            conversation_id=conversation_id,
             learning_native=LearningNativeSubmission(request_transfer_task=True),
         )
         async with learning_native_database() as session:

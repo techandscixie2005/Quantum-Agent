@@ -158,6 +158,7 @@ class AnswerReleaseEngine:
         has_current_attempt: bool,
         coverage: RetrievalCoverage,
         message: str | None = None,
+        commitment_already_satisfied: bool = False,
     ) -> ReleaseDecision:
         attempts = prior_attempts + int(has_current_attempt)
         if coverage is RetrievalCoverage.NOT_FOUND:
@@ -173,7 +174,13 @@ class AnswerReleaseEngine:
         # level must be QUESTION_ONLY regardless of the underlying task kind.
         # This ensures the learning_native_pre node's commitment gate fires
         # for reasoning / exercise / prediction tasks, not just RUN_EXPERIMENTS.
-        if message is not None and commitment_eligibility(
+        # PRD V3.3 Golden Loop closure: once the durable phase has advanced past
+        # the commitment stages the student has ALREADY satisfied the gate
+        # earlier in this episode, so it must not re-arm here — otherwise the
+        # experiment turn that runs the Coding Agent after AWAITING_REVISION
+        # would be withheld again and the loop could never reach the scientific
+        # stage.
+        if message is not None and not commitment_already_satisfied and commitment_eligibility(
             mode=mode,
             task_kind=task_kind,
             message=message,
@@ -199,12 +206,14 @@ class AnswerReleaseEngine:
                 action=TeachingAction.PREDICT_THEN_SIMULATE,
                 release_level=(
                     AnswerReleaseLevel.SCAFFOLD
-                    if has_current_attempt
+                    if has_current_attempt or commitment_already_satisfied
                     else AnswerReleaseLevel.QUESTION_ONLY
                 ),
                 attempts_observed=attempts,
                 reason_code=(
-                    "prediction_submitted" if has_current_attempt else "prediction_required"
+                    "prediction_submitted"
+                    if has_current_attempt or commitment_already_satisfied
+                    else "prediction_required"
                 ),
             )
 

@@ -39,8 +39,12 @@ from quantum_agent.teaching.models import (
     ConceptStateLabel,
     DiagnosisOutput,
     DiagnosisStatus,
+    DurableLearningPhase,
     LearningNativeTurnState,
+    LearningPhase,
     LearningPolicyAction,
+    LearningStage,
+    RequiredLearningAction,
     SoloMode,
     SoloModeStatus,
     TeachBackAnalysis,
@@ -55,6 +59,7 @@ __all__ = [
     "LearningNativePolicy",
     "TeachBackProposal",
     "TransferProposal",
+    "assert_phase_transition",
 ]
 
 
@@ -63,6 +68,142 @@ __all__ = [
 # every ``build_cognitive_mirror`` call) means untagged observations group
 # together across turns rather than each appearing under a fresh concept id.
 _UNTAGGED_CONCEPT_BUCKET: UUID = UUID("00000000-0000-4000-8000-000000000000")
+
+
+# PRD V3.3: deterministic mappings from the authoritative durable
+# ``LearningPhase`` to the student-facing ``LearningStage`` and the
+# ``RequiredLearningAction`` the UI must surface.  These are pure functions of
+# the persisted phase — the LLM never chooses them.  They are the single
+# source of truth for both the backend (``assemble_turn_state``) and the
+# frontend (which mirrors the same table in ``contracts.ts``).
+_PHASE_TO_STAGE: dict[LearningPhase, LearningStage] = {
+    LearningPhase.COMMITMENT_REQUIRED: LearningStage.PREDICT,
+    LearningPhase.AWAITING_REVISION: LearningStage.EXPLAIN,
+    LearningPhase.RECONSTRUCTION_REQUIRED: LearningStage.TEACH_BACK,
+    LearningPhase.TRANSFER_REQUIRED: LearningStage.TRANSFER,
+    LearningPhase.SOLO_ACTIVE: LearningStage.SOLO,
+}
+
+_PHASE_TO_REQUIRED_ACTION: dict[LearningPhase, RequiredLearningAction] = {
+    LearningPhase.COMMITMENT_REQUIRED: RequiredLearningAction.COMMITMENT,
+    LearningPhase.AWAITING_REVISION: RequiredLearningAction.REVISION,
+    LearningPhase.RECONSTRUCTION_REQUIRED: RequiredLearningAction.TEACH_BACK,
+    LearningPhase.SOLO_ACTIVE: RequiredLearningAction.SOLO_ATTEMPT,
+}
+
+
+def _current_stage_for_phase(phase: LearningPhase) -> LearningStage | None:
+    """The student-facing stage the UI should highlight for this phase."""
+    return _PHASE_TO_STAGE.get(phase)
+
+
+def _required_action_for_phase(phase: LearningPhase) -> RequiredLearningAction:
+    """The required student action the UI must collect before the phase advances."""
+    return _PHASE_TO_REQUIRED_ACTION.get(phase, RequiredLearningAction.NONE)
+
+
+# PRD V3.3: the single legal transition table for the durable LearningPhase.
+# This is the authoritative enforcement of the brief's non-skipping invariants
+# A-I.  Every mutation of ``durable_phase.phase`` MUST go through
+# ``assert_phase_transition``; an illegal transition raises ``ValueError`` and
+# the turn fails closed (phase unchanged, answer withheld).  The LLM never
+# drives these transitions — only deterministic code with a verified ``cause``.
+#
+# A transition is legal iff (old, new, cause) is in the allowed set below OR
+# (old == new AND cause == 'blocked') — the latter covers "a required action
+# is still pending; the phase does NOT advance this turn".
+_ALLOWED_PHASE_TRANSITIONS: frozenset[tuple[LearningPhase, LearningPhase, str]] = (
+    frozenset(
+        {
+            # A. The commitment gate fires for a reasoning/exercise/prediction
+            # task with no accepted commitment yet.
+            (LearningPhase.OPEN, LearningPhase.COMMITMENT_REQUIRED, "gate_fired"),
+            (LearningPhase.ATTEMPT_RECEIVED, LearningPhase.COMMITMENT_REQUIRED, "gate_fired"),
+            (LearningPhase.INTERVENTION, LearningPhase.COMMITMENT_REQUIRED, "gate_fired"),
+            # B. Commitment accepted this turn, but the phase still needs a
+            # verified attempt to advance.  This is a hold, not a forward step.
+            (
+                LearningPhase.COMMITMENT_REQUIRED,
+                LearningPhase.COMMITMENT_REQUIRED,
+                "commitment_accepted_but_phase_holds",
+            ),
+            # C. A verified learning signal (accepted commitment this turn OR a
+            # scientific PASS correlated with pending_scientific_request OR an
+            # explicit student advance) releases the explanation.  The phase
+            # moves to AWAITING_REVISION so the student must revise/explain.
+            (LearningPhase.OPEN, LearningPhase.AWAITING_REVISION, "verified_attempt"),
+            (
+                LearningPhase.COMMITMENT_REQUIRED,
+                LearningPhase.AWAITING_REVISION,
+                "verified_attempt",
+            ),
+            (
+                LearningPhase.ATTEMPT_RECEIVED,
+                LearningPhase.AWAITING_REVISION,
+                "verified_attempt",
+            ),
+            (
+                LearningPhase.INTERVENTION,
+                LearningPhase.AWAITING_REVISION,
+                "verified_attempt",
+            ),
+            # D. The student submitted a typed Teach-Back (not a bare message).
+            (
+                LearningPhase.AWAITING_REVISION,
+                LearningPhase.RECONSTRUCTION_REQUIRED,
+                "teach_back_requested",
+            ),
+            # E. Teach-Back was deterministically verified.
+            (
+                LearningPhase.RECONSTRUCTION_REQUIRED,
+                LearningPhase.TRANSFER_REQUIRED,
+                "teach_back_verified",
+            ),
+            # F. A transfer task was armed with a persisted verification oracle.
+            (LearningPhase.TRANSFER_REQUIRED, LearningPhase.SOLO_ACTIVE, "transfer_armed"),
+            # G. The solo attempt was numerically verified against the oracle.
+            (LearningPhase.SOLO_ACTIVE, LearningPhase.COMPLETE, "solo_verified"),
+            # H. The student explicitly exited Solo Mode.
+            (LearningPhase.SOLO_ACTIVE, LearningPhase.ABORTED, "student_exit"),
+            # Recovery / re-entry transitions that keep the loop honest.
+            (
+                LearningPhase.TRANSFER_REQUIRED,
+                LearningPhase.TRANSFER_REQUIRED,
+                "transfer_rearmed",
+            ),
+            (
+                LearningPhase.RECONSTRUCTION_REQUIRED,
+                LearningPhase.RECONSTRUCTION_REQUIRED,
+                "teach_back_rejected",
+            ),
+        }
+    )
+)
+
+
+def assert_phase_transition(
+    old: LearningPhase,
+    new: LearningPhase,
+    *,
+    cause: str,
+) -> None:
+    """Validate that ``old -> new`` is a legal durable-phase transition.
+
+    The ONLY legal way to mutate ``durable_phase.phase``.  Raises ``ValueError``
+    on an illegal transition so the caller fails closed (the turn must not
+    persist an unauthorized phase advance).  A same-phase ``blocked`` hold is
+    always legal: it means a required student action is still pending and the
+    phase intentionally does not advance this turn.
+    """
+
+    if old == new and cause == "blocked":
+        return
+    if (old, new, cause) in _ALLOWED_PHASE_TRANSITIONS:
+        return
+    raise ValueError(
+        f"illegal LearningPhase transition: {old.value} -> {new.value} "
+        f"(cause={cause}); the durable phase is unchanged and the turn fails closed"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,17 +401,26 @@ class LearningNativePolicy:
             )
 
         # The student submitted a formal commitment; validate it deterministically.
+        # PRD V3.3 root-cause #4 fix: an accepted commitment is a PREDICTION,
+        # not a verified learning signal.  The gate must STAY armed
+        # (gate_decision = ATTEMPT_REQUIRED, withhold = True) even after the
+        # commitment is accepted, so the full explanation is NOT released on
+        # the same turn.  The phase holds at COMMITMENT_REQUIRED; the student
+        # must submit a *revised* attempt (a follow-up turn with a typed
+        # attempt and no commitment card) to release the explanation.  This
+        # is invariant B: commitment accepted ≠ explanation released.  The
+        # accepted flag is still persisted so downstream nodes know the
+        # prediction was captured, and the Diagnosis Agent can reason about
+        # the candidate_prompt (nodes.py:668 feeds it into student_attempt).
         if submission is not None and submission.attempt_required:
             accepted = self._submission_accepted(submission, submission_confidence)
             resolved = submission.model_copy(
                 update={
                     "accepted": accepted,
                     "confidence": submission_confidence,
-                    "gate_decision": (
-                        CommitmentGateDecision.PROCEED
-                        if accepted
-                        else CommitmentGateDecision.ATTEMPT_REQUIRED
-                    ),
+                    # The gate stays armed: an accepted prediction does not
+                    # release the explanation.  The student must revise.
+                    "gate_decision": CommitmentGateDecision.ATTEMPT_REQUIRED,
                 }
             )
             action = (
@@ -523,14 +673,7 @@ class LearningNativePolicy:
             # observable), so a solo attempt will be recorded as
             # TRANSFER_ATTEMPTED, not TRANSFER_VERIFIED — but Solo Mode is
             # enterable and the Golden Loop progresses.
-            task = TransferTask(
-                transfer_type=TransferType.NEAR,
-                prompt=self.FALLBACK_TRANSFER_PROMPT,
-                source_concept_ids=list(source_concept_ids)[:6],
-                key_parameters=[],
-                expected_observable="",
-                verifiable=False,
-            )
+            task = self.build_transfer_task(None, source_concept_ids)
             armed_solo = SoloMode(
                 status=SoloModeStatus.ACTIVE,
                 active_transfer=task,
@@ -574,17 +717,7 @@ class LearningNativePolicy:
         # mypy: at this point proposal is guaranteed non-None.
         assert proposal is not None
 
-        task = TransferTask(
-            transfer_type=proposal.transfer_type,
-            prompt=proposal.prompt,
-            source_concept_ids=list(source_concept_ids)[:6],
-            key_parameters=list(proposal.key_parameters)[:8],
-            expected_observable=proposal.expected_observable,
-            # The toolbox can verify a transfer task only when it produces a
-            # numeric observable the verifier can check; the model is never
-            # allowed to assert verifiability on its own.
-            verifiable=bool(proposal.expected_observable.strip()),
-        )
+        task = self.build_transfer_task(proposal, source_concept_ids)
         solo = SoloMode(
             status=SoloModeStatus.ACTIVE,
             active_transfer=task,
@@ -624,6 +757,40 @@ class LearningNativePolicy:
             ),
         ]
         return task, solo, evidence
+
+    @staticmethod
+    def build_transfer_task(
+        proposal: TransferProposal | None,
+        source_concept_ids: Sequence[UUID],
+    ) -> TransferTask:
+        """Deterministically construct a transfer task from a model proposal.
+
+        Shared by ``prepare_transfer`` (Solo arming) and the teach-back turn,
+        which previews the upcoming transfer task without arming Solo Mode.
+        A missing proposal degrades to the deterministic near-transfer
+        fallback so the Golden Loop never stalls on model availability.
+        """
+
+        if proposal is None:
+            return TransferTask(
+                transfer_type=TransferType.NEAR,
+                prompt=LearningNativePolicy.FALLBACK_TRANSFER_PROMPT,
+                source_concept_ids=list(source_concept_ids)[:6],
+                key_parameters=[],
+                expected_observable="",
+                verifiable=False,
+            )
+        return TransferTask(
+            transfer_type=proposal.transfer_type,
+            prompt=proposal.prompt,
+            source_concept_ids=list(source_concept_ids)[:6],
+            key_parameters=list(proposal.key_parameters)[:8],
+            expected_observable=proposal.expected_observable,
+            # The toolbox can verify a transfer task only when it produces a
+            # numeric observable the verifier can check; the model is never
+            # allowed to assert verifiability on its own.
+            verifiable=bool(proposal.expected_observable.strip()),
+        )
 
     @staticmethod
     def exit_solo(solo: SoloMode) -> SoloMode:
@@ -874,9 +1041,23 @@ class LearningNativePolicy:
         solo: SoloMode | None,
         cognitive_mirror: CognitiveMirror | None,
         evidence_kinds: Sequence[str],
+        durable_phase: DurableLearningPhase | None,
     ) -> LearningNativeTurnState:
-        """Assemble the per-turn Learning-Native result fragment."""
+        """Assemble the per-turn Learning-Native result fragment.
 
+        The authoritative durable phase (persisted on the conversation row) is
+        propagated onto the per-turn state so the browser can render the
+        *current pedagogical phase* rather than inferring completion from the
+        SSE ``workflow.completed`` lifecycle event (which fires for every
+        bounded turn, including gated zero-claim turns).  The LLM never
+        advances the durable phase; ``assemble_turn_state`` only *reports* it.
+        """
+
+        phase = durable_phase.phase if durable_phase is not None else LearningPhase.OPEN
+        completed_stages = (
+            list(durable_phase.completed_stages) if durable_phase is not None else []
+        )
+        loop_required = durable_phase.loop_required if durable_phase is not None else False
         return LearningNativeTurnState(
             commitment=commitment,
             learning_action=learning_action,
@@ -885,6 +1066,11 @@ class LearningNativePolicy:
             solo=solo,
             cognitive_mirror=cognitive_mirror,
             evidence_persisted=list(evidence_kinds)[:24],
+            phase=phase,
+            current_stage=_current_stage_for_phase(phase),
+            completed_stages=completed_stages,
+            required_action=_required_action_for_phase(phase),
+            loop_required=loop_required,
         )
 
 
