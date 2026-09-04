@@ -270,4 +270,4 @@ A fresh review agent independently probed the fixed loop. Findings and dispositi
 
 ## COMMIT SHA
 
-Filled at commit time.
+`19e8726` (fix(backend): accepted commitment continues the Golden Loop, no orphan state)
