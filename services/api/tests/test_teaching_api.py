@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -29,6 +30,9 @@ from quantum_agent.db_models import (
     CurriculumEditionStatus,
     MembershipStatus,
     SystemRole,
+    TeachingConversation,
+    TeachingConversationStatus,
+    TeachingMode,
     User,
     UserSession,
     UserStatus,
@@ -347,3 +351,167 @@ async def test_hitl_api_inspection_resume_and_role_authorization(
     assert trace_detail.json()["diagnosis"] is not None
     assert trace_detail.json()["release_decision"] is not None
     assert len(trace_detail.json()["hitl_events"]) == 1
+
+
+async def test_conversation_state_restores_durable_phase_after_refresh(
+    teaching_api_database: async_sessionmaker[AsyncSession],
+) -> None:
+    """§13 refresh restoration: the state endpoint returns the last completed
+    turn's persisted result snapshot (with learning_native) plus the durable
+    phase, so a refreshed page re-renders the actionable surface from the
+    backend.  Unknown conversations 404 — never a synthetic default.
+    """
+    async with teaching_api_database() as session:
+        seeded = await _seed(session)
+
+    app = create_app(
+        Settings(
+            _env_file=None,
+            ENVIRONMENT="test",
+            DATABASE_URL="sqlite+aiosqlite:///:memory:",
+            USTC_API=None,
+            NEO4J_PASSWORD=None,
+        )
+    )
+    app.state.teaching_workflow = TutorGraph(
+        evidence_retriever=EmptyRetriever(),
+        model_gateway=None,
+        checkpointer=InMemorySaver(),
+        enable_hitl=False,
+    )
+
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        async with teaching_api_database() as session:
+            yield session
+
+    app.dependency_overrides[session_dependency] = override_session
+    base = f"/api/v1/courses/{seeded.course_id}/editions/{seeded.edition_id}"
+    student_headers = {"Authorization": f"Bearer {seeded.student_token}"}
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        turn = await client.post(
+            f"{base}/teaching/turns",
+            headers=student_headers,
+            json={"mode": "learn_concepts", "message": "解释一个课程概念。"},
+        )
+        assert turn.status_code == 200
+        conversation_id = turn.json()["conversation_id"]
+
+        state = await client.get(
+            f"{base}/teaching/threads/{conversation_id}/state",
+            headers=student_headers,
+        )
+        missing = await client.get(
+            f"{base}/teaching/threads/{uuid4()}/state",
+            headers=student_headers,
+        )
+        unauthenticated = await client.get(
+            f"{base}/teaching/threads/{conversation_id}/state",
+        )
+
+    assert state.status_code == 200
+    state_body = state.json()
+    assert state_body["conversation_id"] == conversation_id
+    assert state_body["mode"] == "learn_concepts"
+    assert state_body["status"] == "active"
+    assert state_body["turn_id"] == turn.json()["turn_id"]
+    # The first turn fires the commitment gate, so the durable phase is
+    # commitment_required (not open) — the refreshed page must re-render
+    # the commitment card, not silently reset to OPEN.
+    assert state_body["durable_phase"]["phase"] == "commitment_required"
+    snapshot = state_body["result"]
+    assert snapshot is not None
+    assert snapshot["learning_native"] is not None
+    assert snapshot["learning_native"]["phase"] == "commitment_required"
+    assert snapshot["conversation_id"] == conversation_id
+    # The restored snapshot must be exactly the persisted last-turn result.
+    assert snapshot["response"] == turn.json()["response"]
+    assert snapshot["policy"] == turn.json()["policy"]
+    assert missing.status_code == 404
+    assert unauthenticated.status_code == 401
+
+
+async def test_conversation_state_redacts_transfer_oracle(
+    teaching_api_database: async_sessionmaker[AsyncSession],
+) -> None:
+    """The state endpoint must never leak the transfer oracle to the student.
+
+    ``durable_phase.transfer_verification.expected_value`` holds the
+    numerically correct transmission coefficient the student must derive
+    themselves during Solo Mode.  A student who reads the raw
+    ``/state`` payload (browser devtools) could copy it into the solo
+    attempt and close the loop with zero physics done.  The redacted
+    payload must show ``transfer_verification: null`` even when the
+    persisted durable phase carries a live oracle.
+    """
+    async with teaching_api_database() as session:
+        seeded = await _seed(session)
+        student_user_id = await session.scalar(
+            select(User.id).where(
+                User.id.in_(
+                    select(CourseMembership.user_id).where(
+                        CourseMembership.course_id == seeded.course_id,
+                        CourseMembership.role == CourseRole.STUDENT,
+                    )
+                )
+            )
+        )
+        conversation = TeachingConversation(
+            id=uuid4(),
+            course_id=seeded.course_id,
+            curriculum_edition_id=seeded.edition_id,
+            student_user_id=student_user_id,
+            status=TeachingConversationStatus.ACTIVE,
+            mode=TeachingMode.REVIEW_DERIVATIONS,
+            title="solo oracle redaction",
+            learning_phase_json={
+                "phase": "solo_active",
+                "loop_required": True,
+                "solo_assistance_locked": True,
+                "transfer_verification": {
+                    "scientific_request": {"metric": "transmission"},
+                    "metric_name": "transmission_coefficient",
+                    "expected_value": 0.0718,
+                    "absolute_tolerance": 0.005,
+                },
+            },
+        )
+        session.add(conversation)
+        await session.commit()
+
+    app = create_app(
+        Settings(
+            _env_file=None,
+            ENVIRONMENT="test",
+            DATABASE_URL="sqlite+aiosqlite:///:memory:",
+            USTC_API=None,
+            NEO4J_PASSWORD=None,
+        )
+    )
+
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        async with teaching_api_database() as session:
+            yield session
+
+    app.dependency_overrides[session_dependency] = override_session
+    base = f"/api/v1/courses/{seeded.course_id}/editions/{seeded.edition_id}"
+    student_headers = {"Authorization": f"Bearer {seeded.student_token}"}
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        state = await client.get(
+            f"{base}/teaching/threads/{conversation.id}/state",
+            headers=student_headers,
+        )
+
+    assert state.status_code == 200
+    durable_phase = state.json()["durable_phase"]
+    assert durable_phase["phase"] == "solo_active"
+    assert durable_phase["solo_assistance_locked"] is True
+    # The oracle answer is the attack: the student-facing payload must not
+    # contain the expected value, its metric contract, or any key of the
+    # verification spec — while every non-oracle field stays intact.
+    assert durable_phase["transfer_verification"] is None
+    assert "expected_value" not in json.dumps(state.json())
+    assert "metric_name" not in json.dumps(state.json())

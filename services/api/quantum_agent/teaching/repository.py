@@ -116,7 +116,6 @@ class TeachingRepository:
                     TeachingConversation.course_id == actor.course_id,
                     TeachingConversation.curriculum_edition_id == curriculum_edition_id,
                     TeachingConversation.student_user_id == actor.user_id,
-                    TeachingConversation.mode == request.mode,
                     TeachingConversation.status == TeachingConversationStatus.ACTIVE,
                 )
                 .with_for_update()
@@ -161,6 +160,13 @@ class TeachingRepository:
                         replay_turn = candidate
                         break
                 if replay_turn is not None:
+                    # Idempotent replay must return the turn in the state it
+                    # was stored: a retry carrying a different mode (the UI
+                    # changed during the lost-response window) must not
+                    # silently rewrite conversation.mode before the replay
+                    # check.  Rollback-only covers the four mapped exceptions;
+                    # returning here commits the mutation — so the mode must
+                    # still be untouched.
                     prior_attempts = await self._attempt_count(
                         conversation.id,
                         excluding_turn_id=replay_turn.id,
@@ -179,6 +185,15 @@ class TeachingRepository:
                             conversation=conversation
                         ),
                     )
+            # Golden Loop §6: the durable phase sequence must run on ONE
+            # conversation_id.  A mode switch mid-loop (e.g. learn_concepts →
+            # run_experiments for a coding turn) continues the same ACTIVE
+            # conversation instead of forcing the student back through the
+            # commitment gate; the durable phase carries over.  The mutation
+            # happens only after the replay check above so a replay can never
+            # commit a mode change.
+            if conversation.mode is not request.mode:
+                conversation.mode = request.mode
             running_turn = await self._session.scalar(
                 select(TeachingTurn)
                 .where(

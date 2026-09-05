@@ -1157,6 +1157,119 @@ class TestGoldenLoopAntiSkip:
             == "reconstruction_required"
         )
 
+    async def test_degenerate_empty_analysis_does_not_deadlock_the_loop(
+        self,
+        golden_loop_database: async_sessionmaker[AsyncSession],
+    ) -> None:
+        # Live E2E observation (2026-09-05): the real USTC model returned an
+        # ENTIRELY empty analysis (covered=0, missing=0, contradictions=0,
+        # unsupported=0) on a substantial reconstruction.  With the old
+        # fallback (only proposal is None) the loop deadlocked at
+        # reconstruction_required: the gate failed closed, no contradictions
+        # were reported, and the student had no way forward.  A substantial
+        # reconstruction plus a degenerate empty analysis must advance
+        # deterministically (same guarantee as the model-unavailable fallback),
+        # while a SHORT reconstruction still holds (length alone never passes).
+        async with golden_loop_database() as session:
+            seed = await _seed_actor(session)
+            conversation_id = await _seed_conversation(
+                session,
+                seed,
+                phase="reconstruction_required",
+                extra_phase={"loop_required": True},
+            )
+
+        gateway = FakeModelGateway(
+            responses={
+                "analyze_teach_back_reconstruction": {
+                    "covered_relations": [],
+                    "missing_relations": [],
+                    "contradictions": [],
+                    "unsupported_claims": [],
+                    "recommended_probe": "",
+                }
+            }
+        )
+        request = TeachingTurnInput(
+            mode=TeachingMode.LEARN_CONCEPTS,
+            message="这是我的重构。",
+            conversation_id=conversation_id,
+            learning_native=LearningNativeSubmission(
+                teach_back=TeachBackSubmission(
+                    reconstruction=(
+                        "E<V0 时波函数在势垒内不是突变为零，而是指数衰减；衰减后的"
+                        "振幅在势垒右侧仍然非零，因此透射概率是一个很小的正数，"
+                        "而不是零。这就是量子隧穿的波动图像。"
+                    )
+                )
+            ),
+        )
+        async with golden_loop_database() as session:
+            result = await _graph(gateway).run(
+                session=session,
+                actor=seed.actor,
+                curriculum_edition_id=seed.edition_id,
+                request=request,
+            )
+            await session.commit()
+        assert result.learning_native is not None
+        assert result.learning_native.phase is LearningPhase.TRANSFER_REQUIRED
+        assert (
+            await _read_phase(golden_loop_database, conversation_id)
+            == "transfer_required"
+        )
+
+    async def test_degenerate_empty_analysis_short_reconstruction_still_holds(
+        self,
+        golden_loop_database: async_sessionmaker[AsyncSession],
+    ) -> None:
+        # The degenerate-analysis fallback requires a substantial
+        # reconstruction (>= 24 chars, the analysis-entry bar).  A trivial one
+        # with an empty analysis must still hold at RECONSTRUCTION_REQUIRED —
+        # length alone never advances the loop.
+        async with golden_loop_database() as session:
+            seed = await _seed_actor(session)
+            conversation_id = await _seed_conversation(
+                session,
+                seed,
+                phase="reconstruction_required",
+                extra_phase={"loop_required": True},
+            )
+
+        gateway = FakeModelGateway(
+            responses={
+                "analyze_teach_back_reconstruction": {
+                    "covered_relations": [],
+                    "missing_relations": [],
+                    "contradictions": [],
+                    "unsupported_claims": [],
+                    "recommended_probe": "",
+                }
+            }
+        )
+        request = TeachingTurnInput(
+            mode=TeachingMode.LEARN_CONCEPTS,
+            message="这是我的重构。",
+            conversation_id=conversation_id,
+            learning_native=LearningNativeSubmission(
+                teach_back=TeachBackSubmission(reconstruction="波函数指数衰减。")
+            ),
+        )
+        async with golden_loop_database() as session:
+            result = await _graph(gateway).run(
+                session=session,
+                actor=seed.actor,
+                curriculum_edition_id=seed.edition_id,
+                request=request,
+            )
+            await session.commit()
+        assert result.learning_native is not None
+        assert result.learning_native.phase is LearningPhase.RECONSTRUCTION_REQUIRED
+        assert (
+            await _read_phase(golden_loop_database, conversation_id)
+            == "reconstruction_required"
+        )
+
     async def test_solo_oracle_results_are_redacted_in_the_response(
         self,
         golden_loop_database: async_sessionmaker[AsyncSession],
@@ -1474,8 +1587,72 @@ class TestGoldenLoopAntiSkip:
             cause="verified_attempt",
         )
 
+    async def test_mode_switch_continues_same_conversation(
+        self,
+        golden_loop_database: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """Golden Loop §6: the durable phase sequence runs on ONE
+        conversation_id.  Switching the UI mode mid-loop (learn_concepts →
+        run_experiments, e.g. for a Coding turn) must CONTINUE the same ACTIVE
+        conversation — not raise a conflict and not re-fire the commitment
+        gate.  The durable phase carries over and the persisted
+        conversation.mode follows the latest turn's request.mode.
+        """
+        from quantum_agent.llm.gateway import FakeModelGateway
 
-# Small adapter so the first test can use a clean entry point.  The real
+        async with golden_loop_database() as session:
+            seed = await _seed_actor(session)
+            conversation_id = await _seed_conversation(
+                session,
+                seed,
+                phase="awaiting_revision",
+                extra_phase={"loop_required": True},
+                mode=TeachingMode.LEARN_CONCEPTS,
+            )
+
+        gateway = FakeModelGateway(
+            {
+                "interpret_teaching_turn": {
+                    "task_kind": "exercise_help",
+                    "relevant_concepts": ["tunnelling"],
+                    "needs_scientific_verification": False,
+                    "confidence": 0.8,
+                },
+            }
+        )
+        request = TeachingTurnInput(
+            mode=TeachingMode.RUN_EXPERIMENTS,
+            message="现在换到实验模式继续这个会话。",
+            conversation_id=conversation_id,
+        )
+        async with golden_loop_database() as session:
+            result = await _graph(gateway=gateway).run(
+                session=session,
+                actor=seed.actor,
+                curriculum_edition_id=seed.edition_id,
+                request=request,
+            )
+            await session.commit()
+        # The conversation continued (no TeachingConversationConflictError);
+        # the commitment gate did NOT re-arm — the phase stayed inside the
+        # commitment-satisfied region instead of jumping back to
+        # commitment_required.
+        assert result.learning_native is not None
+        assert result.learning_native.phase is not LearningPhase.COMMITMENT_REQUIRED
+        assert result.learning_native.required_action.value != "none"
+        phase = await _read_phase(golden_loop_database, conversation_id)
+        assert phase != "commitment_required"
+        assert phase != "open"
+        # The persisted conversation.mode follows the latest turn's request
+        # (teacher trace summaries read conversation.mode).
+        async with golden_loop_database() as session:
+            conv = await session.scalar(
+                select(TeachingConversation).where(
+                    TeachingConversation.id == conversation_id
+                )
+            )
+            assert conv is not None
+            assert conv.mode is TeachingMode.RUN_EXPERIMENTS
 # TutorGraph.run signature requires a session; this helper opens one.
 async def _run_turn(
     graph: TutorGraph,

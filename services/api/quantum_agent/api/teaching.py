@@ -29,7 +29,11 @@ from quantum_agent.db_models import (
     AuditLog,
     AuditResourceType,
     CourseRole,
+    TeachingConversation,
+    TeachingConversationStatus,
     TeachingMode,
+    TeachingTurn,
+    TeachingTurnStatus,
 )
 from quantum_agent.knowledge.retrieval import RetrievalError
 from quantum_agent.llm.gateway import ModelGateway
@@ -52,7 +56,10 @@ from quantum_agent.teaching.models import (
     TeachingTurnResult,
 )
 from quantum_agent.teaching.policy import AnswerPolicyRepository
-from quantum_agent.teaching.repository import TeachingConversationConflictError
+from quantum_agent.teaching.repository import (
+    TeachingConversationConflictError,
+    TeachingRepository,
+)
 
 router = APIRouter(
     prefix="/api/v1/courses/{course_id}/editions/{curriculum_edition_id}/teaching",
@@ -570,6 +577,80 @@ async def resume_teaching_interrupt(
     ) as error:
         await session.rollback()
         _raise_hitl_http(error)
+
+
+@router.get("/threads/{conversation_id}/state", response_model=None)
+async def get_teaching_conversation_state(
+    request: Request,
+    course_id: UUID,
+    curriculum_edition_id: UUID,
+    conversation_id: UUID,
+    session: DatabaseSession,
+) -> dict[str, Any]:
+    """Restore the durable learning state after a page refresh (§13).
+
+    The frontend persists only ``conversation_id`` in localStorage; after a
+    reload it must re-render the actionable surface from the backend, which
+    is authoritative.  Returns the last completed turn's persisted result
+    snapshot (including ``learning_native``), the durable ``LearningPhase``,
+    and the conversation's current mode.  The transfer oracle
+    (``transfer_verification.expected_value`` — the numerically correct
+    answer the student must derive themselves) is redacted from the
+    student-facing payload, exactly as the streaming path never exposes it.
+    404 when the conversation does not exist for this course/edition/student
+    — never a synthetic default that would let a stale client skip forward.
+    """
+
+    actor = await _actor(request, session, course_id)
+    repository = TeachingRepository(session)
+    conversation = await session.scalar(
+        select(TeachingConversation)
+        .where(
+            TeachingConversation.id == conversation_id,
+            TeachingConversation.course_id == actor.course_id,
+            TeachingConversation.curriculum_edition_id == curriculum_edition_id,
+            TeachingConversation.student_user_id == actor.user_id,
+            TeachingConversation.status == TeachingConversationStatus.ACTIVE,
+        )
+    )
+    if conversation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="conversation is unavailable in this course, edition, or account",
+        )
+    durable_phase = await repository.load_durable_learning_phase(
+        conversation=conversation,
+    )
+    student_durable_phase = durable_phase.model_copy(
+        update={"transfer_verification": None}
+    )
+    snapshot: dict[str, Any] | None = None
+    turn_id: UUID | None = None
+    workflow_version: str | None = None
+    turn = await session.scalar(
+        select(TeachingTurn)
+        .where(
+            TeachingTurn.conversation_id == conversation.id,
+            TeachingTurn.status == TeachingTurnStatus.COMPLETED,
+        )
+        .order_by(TeachingTurn.sequence_number.desc())
+        .limit(1)
+    )
+    if turn is not None:
+        raw_snapshot = turn.scientific_results_json.get("__result_snapshot")
+        if isinstance(raw_snapshot, dict):
+            snapshot = raw_snapshot
+            turn_id = turn.id
+            workflow_version = str(raw_snapshot.get("workflow_version", "")) or None
+    return {
+        "conversation_id": str(conversation.id),
+        "mode": conversation.mode.value,
+        "status": conversation.status.value,
+        "durable_phase": student_durable_phase.model_dump(mode="json"),
+        "result": snapshot,
+        "turn_id": str(turn_id) if turn_id is not None else None,
+        "workflow_version": workflow_version,
+    }
 
 
 class AnswerPolicyUpdate(BaseModel):

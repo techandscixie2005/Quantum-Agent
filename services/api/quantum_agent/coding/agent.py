@@ -345,19 +345,47 @@ class CodingAgent:
                     output_type=CodeArtifact,
                 )
             except (GatewayError, ValidationError) as exc:
+                # A model generation failure is transient by nature (USTC
+                # gateway timeouts/5xx); it must consume the repair budget
+                # like every other failure instead of returning immediately —
+                # the next attempt re-asks the gateway through a different
+                # router profile, so a single flaky round-trip cannot kill
+                # the run (two consecutive live runs lost the Stage-7 coding
+                # artifact to exactly this fast-fail).  No safeguard is
+                # weakened: the retried artifact still passes the static
+                # safety gate, the sandbox, and the oracle verification.
                 logger.warning(
                     "coding agent generation failed at attempt %d: %s",
                     attempt_number,
                     type(exc).__name__,
                 )
-                return self._fail_run(
-                    task=task,
-                    artifact=last_artifact,
-                    execution=last_execution,
-                    figure=last_figure,
-                    repairs=repairs,
-                    reason=f"model generation failed: {type(exc).__name__}",
+                if is_final_attempt:
+                    return self._fail_run(
+                        task=task,
+                        artifact=last_artifact,
+                        execution=last_execution,
+                        figure=last_figure,
+                        repairs=repairs,
+                        reason=f"model generation failed: {type(exc).__name__}",
+                    )
+                repairs.append(
+                    CodeRepairAttempt(
+                        attempt_number=attempt_number,
+                        failure_summary=(
+                            f"model generation failed: {type(exc).__name__}"
+                        ),
+                        stderr_excerpt=str(exc)[:1000],
+                    )
                 )
+                last_execution = CodeExecutionResult(
+                    completed=False,
+                    exit_code=None,
+                    stderr_bounded=f"model generation failed: {type(exc).__name__}"[
+                        :4000
+                    ],
+                    duration_seconds=0.0,
+                )
+                continue
 
             last_artifact = artifact
 
@@ -417,6 +445,25 @@ class CodingAgent:
 
             # Execution succeeded; verify against the oracle.
             verification = _verify_against_oracle(task, run.metrics)
+            if (
+                verification.status is CodeVerificationStatus.FAIL
+                and not is_final_attempt
+            ):
+                # The program ran but its metrics failed the deterministic
+                # oracle's physics checks (e.g. a sign bug producing T
+                # outside [0, 1]).  That is exactly what the repair loop
+                # exists for: feed the verifier's failure summary back so
+                # the model can fix the physics.  Fail-closed invariants are
+                # untouched — a FAIL is never relabeled PASS, INCONCLUSIVE
+                # (model/oracle infrastructure gaps a retry cannot fix) is
+                # not retried, and the final attempt still returns the
+                # honest FAIL verdict.
+                record_repair(
+                    f"verification {verification.status.value}: "
+                    + "; ".join(verification.observations[-1:]),
+                    run.result.stderr_bounded[:1000],
+                )
+                continue
             return CodeArtifactRun(
                 artifact=artifact,
                 execution=run.result,

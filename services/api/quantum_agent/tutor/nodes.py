@@ -1802,13 +1802,29 @@ async def learning_native_node(
             # Length alone never advances the loop.  The reconstruction passes
             # only when the analysis covers at least one relation and reports
             # no contradictions.  When the model is unavailable (proposal is
-            # None), a substantial reconstruction advances deterministically
-            # so a model outage cannot deadlock the Golden Loop — the same
-            # guarantee force-armed transfers provide.
+            # None) OR the model degenerated to an entirely empty analysis on
+            # a substantial reconstruction (a live USTC round-trip observed
+            # exactly this: covered=0/missing=0/contradictions=0 on a 50-char
+            # reconstruction, which would otherwise deadlock the loop at
+            # reconstruction_required), the reconstruction advances
+            # deterministically so a model outage cannot deadlock the Golden
+            # Loop — the same guarantee force-armed transfers provide.  The
+            # substantial-text bar matches the analysis-entry bar (24 chars):
+            # a reconstruction that reaches the model can fall back when the
+            # model produces nothing; a trivial one still cannot pass.
             reconstruction_acceptable = bool(
                 teach_back.covered_relations
             ) and not teach_back.contradictions
-            model_unavailable_fallback = proposal is None and len(reconstruction) >= 120
+            model_degenerate_analysis = (
+                proposal is not None
+                and not teach_back.covered_relations
+                and not teach_back.missing_relations
+                and not teach_back.contradictions
+                and not teach_back.unsupported_claims
+            )
+            model_unavailable_fallback = (
+                proposal is None or model_degenerate_analysis
+            ) and len(reconstruction) >= 24
             if reconstruction_acceptable or model_unavailable_fallback:
                 teach_back_satisfied = True
                 assert_phase_transition(
