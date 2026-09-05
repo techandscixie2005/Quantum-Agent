@@ -474,20 +474,19 @@ test.describe.serial("Golden Learning Loop · live deterministic 22-stage closur
     // ── Stage 4.5: Refresh during a durable phase — the durable phase must
     // survive a full page reload (spec section 16: "refresh during durable
     // phase").  The durable LearningPhase is persisted in
-    // teaching_conversations.learning_phase_json.  The frontend does not
-    // re-fetch the latest turn result on reload (it only persists the
-    // conversation_id), so the UI phase marker is absent until a new turn
-    // runs.  We verify persistence indirectly: after reload, the conversation
-    // is still active and the next turn (Stage 6 coding) reads the same
-    // conversation_id from localStorage and continues from awaiting_revision.
-    // The durable phase persistence across a new session is directly asserted
-    // by the backend integration test test_learning_phase_survives_refresh_and_new_request.
-    // ──
+    // teaching_conversations.learning_phase_json.  After refresh the
+    // frontend re-reads the durable state from
+    // GET /api/teaching/threads/{id}/state and re-renders the actionable
+    // surface, so the learning-phase marker must now appear with
+    // phase=awaiting_revision WITHOUT running a new turn. ──
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("agent-experience")).toBeVisible({ timeout: 60_000 });
     // The conversation_id must survive the reload (persisted in localStorage).
     const storedCid = await page.evaluate(() => window.localStorage.getItem("qa_conversation_id"));
     expect(storedCid, "Stage 4.5: conversation_id must survive reload").toBeTruthy();
+    // §13: the durable phase must be restored from the backend after reload —
+    // never reset to OPEN, never skipped forward.
+    await expectPhase(page, "awaiting_revision", 30_000);
 
     // ── Stage 6 + 7 + 8 + 9: Coding Agent + Sandbox + Verification + metrics ──
     await sendRealTunnellingTurn(

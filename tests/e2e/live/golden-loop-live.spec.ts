@@ -451,8 +451,25 @@ test.describe.serial("Golden Learning Loop · live full-stack (quantum tunnellin
       page,
       "波函数在势垒内不是突变为零，而是指数衰减；衰减后的振幅在右侧仍然非零，因此透射概率是一个很小的正数。",
     ), "Teach-Back phase must be present and submitted").toBe(true);
+    // The first reconstruction advances reconstruction_required
+    // (teach_back_requested); the durable phase only reaches transfer_required
+    // when the reconstruction is re-submitted from RECONSTRUCTION_REQUIRED and
+    // the backend verifies it (teach_back_verified).  Re-submit the same
+    // reconstruction — the deterministic spec asserts this two-step contract
+    // at its Stages 11-12.
+    await page.getByTestId("teach-back-card").waitFor({ state: "visible", timeout: 30_000 });
+    expect(await maybeSubmitTeachBack(
+      page,
+      "波函数在势垒内不是突变为零，而是指数衰减；衰减后的振幅在右侧仍然非零，因此透射概率是一个很小的正数。",
+    ), "Reconstruction must be re-submitted from reconstruction_required").toBe(true);
 
     // ── Stage 6: explicit transfer task + Solo Mode transition ──
+    // The transfer button only renders at transfer_required; wait for the
+    // durable phase to reach it (the reconstruction verify is deterministic
+    // but runs a model proposal round-trip first).
+    await page
+      .getByTestId("request-transfer-button")
+      .waitFor({ state: "visible", timeout: 60_000 });
     const transferResponse = page.waitForResponse(
       (response) => new URL(response.url()).pathname === "/api/teaching/turns/stream",
       { timeout: 300_000 },

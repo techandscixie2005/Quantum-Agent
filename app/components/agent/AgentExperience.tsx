@@ -39,6 +39,7 @@ import {
   parseHitlInterruptResponse,
   parseTeachingApiError,
   parseTeachingTurnRequest,
+  parseTeachingTurnResult,
   parseTeachingWorkflowOutcome,
   redactHitlProposedResponse,
   type HitlInterruptResponse,
@@ -745,28 +746,77 @@ export function AgentExperience() {
     if (!scope || !conversationId || interrupt) return;
     if (interruptRecoveryRef.current === conversationId) return;
     interruptRecoveryRef.current = conversationId;
-    const controller = new AbortController();
+    const courseId = scope.courseId;
+    const curriculumEditionId = scope.curriculumEditionId;
     const query = new URLSearchParams({
-      course_id: scope.courseId,
-      curriculum_edition_id: scope.curriculumEditionId,
+      course_id: courseId,
+      curriculum_edition_id: curriculumEditionId,
     });
+    // No AbortController — same rationale as the state restore below:
+    // `scope` changes identity every render and the ref makes re-entry
+    // impossible, so a cleanup abort would only kill a live fetch.
     fetch(`/api/teaching/threads/${conversationId}/interrupt?${query.toString()}`, {
       headers: { Accept: "application/json" },
-      signal: controller.signal,
     })
       .then(async (response) => {
         if (!response.ok) return;
         const pause = redactHitlProposedResponse(
           parseHitlInterruptResponse(await response.json()),
         );
-        assertHitlScope(pause, scope, pause.artifacts.policy.mode);
+        assertHitlScope(pause, { courseId, curriculumEditionId }, pause.artifacts.policy.mode);
         if (pause.conversation_id !== conversationId) return;
         setInterrupt(pause);
         setConfirmedTranscription(interruptTranscription(pause));
       })
       .catch(() => undefined);
-    return () => controller.abort();
   }, [scope, conversationId, interrupt]);
+
+  // §13 refresh restoration: after a reload the persisted conversation_id is
+  // restored above; this re-reads the durable learning state from the
+  // backend so the actionable surface (phase card, learning-native state,
+  // evidence desk) is restored instead of vanishing until the next turn.
+  // The backend is authoritative; a 404 simply means the thread no longer
+  // exists.  Restore happens once per conversation and never overrides a
+  // result already rendered in this session.
+  const stateRestoreRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!scope || !conversationId) return;
+    if (stateRestoreRef.current === conversationId) return;
+    stateRestoreRef.current = conversationId;
+    const courseId = scope.courseId;
+    const curriculumEditionId = scope.curriculumEditionId;
+    const query = new URLSearchParams({
+      course_id: courseId,
+      curriculum_edition_id: curriculumEditionId,
+    });
+    // No AbortController: the once-per-conversation ref above makes re-entry
+    // impossible, and `scope` is a new object identity every render — an
+    // effect cleanup here would abort the in-flight fetch before its
+    // response is ever applied (the restore would silently never happen).
+    fetch(`/api/teaching/threads/${conversationId}/state?${query.toString()}`, {
+      headers: { Accept: "application/json" },
+    })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const parsed = (await response.json()) as {
+          mode?: string;
+          result?: unknown;
+        };
+        if (parsed.mode === "learn_concepts" || parsed.mode === "review_derivations" || parsed.mode === "run_experiments" || parsed.mode === "work_on_projects") {
+          setMode(parsed.mode);
+        }
+        if (parsed.result) {
+          const restored = parseTeachingTurnResult(parsed.result);
+          if (restored.conversation_id === conversationId) {
+            assertTeachingScope(restored, { courseId, curriculumEditionId }, restored.policy.mode);
+            // Functional guard: never overwrite a fresher turn result that
+            // rendered while the fetch was in flight.
+            setResult((current) => current ?? restored);
+          }
+        }
+      })
+      .catch(() => undefined);
+  }, [scope, conversationId]);
 
   useEffect(() => () => {
     for (const previewUrl of previewUrlsRef.current) URL.revokeObjectURL(previewUrl);
@@ -1164,7 +1214,6 @@ export function AgentExperience() {
               data-active={mode === item.id ? "true" : "false"}
               onClick={() => {
                 setMode(item.id);
-                setConversationId(null);
                 setResult(null);
                 setInterrupt(null);
                 setConfirmedTranscription("");
@@ -1626,7 +1675,6 @@ export function AgentExperience() {
                       data-active={mode === item.id ? "true" : "false"}
                       onClick={() => {
                         setMode(item.id);
-                        setConversationId(null);
                         setResult(null);
                         setInterrupt(null);
                         setConfirmedTranscription("");

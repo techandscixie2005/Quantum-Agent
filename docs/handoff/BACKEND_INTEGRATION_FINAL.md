@@ -1,6 +1,6 @@
 # Backend Integration — Final Handoff (Golden Loop V3.4)
 
-**Date:** 2026-09-04
+**Date:** 2026-09-05
 **Branch:** `main`
 **Status:** See each section. LIVE E2E result and adversarial findings are appended at
 the end once those runs complete.
@@ -99,6 +99,67 @@ Intervention, with the student's commitment fed to Diagnosis as the attempt.
   spec asserts the accepted-commitment card, the no-orphan minimal intervention, and
   the real SSE ordering.
 
+### Same-conversation mode switch (Golden Loop §6)
+
+The durable phase sequence must run on ONE `conversation_id`. Two defects broke
+this when the UI switched mode mid-loop (e.g. `learn_concepts → run_experiments`
+for a Coding turn):
+
+1. **Backend** — `TeachingRepository.start_turn` filtered the existing-conversation
+   lookup by `mode == request.mode`, so a cross-mode turn raised
+   `TeachingConversationConflictError` and the client re-created the conversation
+   (re-firing the commitment gate, orphaning the durable phase).
+2. **Frontend** — `AgentExperience` called `setConversationId(null)` on every mode
+   switch, throwing away the live thread.
+
+Fix (wiring only, no visual change):
+
+- `services/api/quantum_agent/teaching/repository.py`: the existing-conversation
+  lookup no longer filters by mode; ownership / course / edition / ACTIVE-status
+  isolation is unchanged. When the request mode differs, `conversation.mode` is
+  updated to the latest turn's mode (teacher trace summaries read
+  `conversation.mode`).
+- `app/components/agent/AgentExperience.tsx`: mode-rail buttons and command-palette
+  mode items no longer clear `conversation_id`. Explicit new-thread actions
+  (新建学习记录, command-palette new-record, course switch, 启动黄金学习循环) still
+  clear it — starting a new thread is intentional.
+- Regression: `tests/test_golden_loop_phase_sequence.py::test_mode_switch_continues_same_conversation`
+  (a conversation seeded `awaiting_revision` under `LEARN_CONCEPTS` continues under
+  a `RUN_EXPERIMENTS` turn; the gate does not re-arm; persisted mode follows the
+  latest turn). `assertTeachingScope` still passes after continuation because
+  `result.policy.mode` follows `request.mode`.
+
+### Durable state restoration after refresh (§13)
+
+After a page reload the frontend previously restored only `conversation_id` from
+localStorage; the actionable surface (phase card, learning-native state) was absent
+until the next turn ran. The backend is authoritative, so restoration reads from it:
+
+- **Backend** — new `GET /api/v1/courses/{course_id}/editions/{id}/teaching/threads/{conversation_id}/state`
+  (`services/api/quantum_agent/api/teaching.py`). Returns the conversation's
+  current `mode`/`status`, the durable `LearningPhase`
+  (`teaching_conversations.learning_phase_json`), and the last completed turn's
+  persisted `__result_snapshot` (the full `TeachingTurnResult`, including
+  `learning_native`). 404 for a conversation not owned by this
+  course/edition/student — never a synthetic default that would let a stale
+  client skip forward.
+- **BFF** — new `app/api/teaching/threads/[conversationId]/state/route.ts`,
+  mirroring the interrupt route: same-origin check, UUID scope, student session
+  token, bounded payload, result snapshot parsed with `parseTeachingTurnResult`
+  + evidence-digest verification + conversation-id stability before it reaches
+  the browser.
+- **Frontend** — `AgentExperience` re-reads the state endpoint once per restored
+  conversation (after the `conversation_id` is restored from localStorage) and
+  re-renders `result` (including the phase card) and the conversation's mode.
+  A restore never overrides a result already rendered in the session; a 404
+  simply means the thread no longer exists.
+- **Tests** — `tests/test_teaching_api.py::test_conversation_state_restores_durable_phase_after_refresh`
+  asserts the endpoint returns the durable phase (`commitment_required` after the
+  gate fires) and a snapshot identical to the live turn's response/policy; 404 for
+  unknown conversations; 401 unauthenticated. The live spec's Stage 4.5 now
+  asserts `[data-testid="learning-phase"]` shows `awaiting_revision` after
+  `page.reload()` without a new turn.
+
 ---
 
 ## AUTHORITATIVE PHASE MACHINE
@@ -150,14 +211,14 @@ commitment card.
 
 | Gate | Result |
 |---|---|
-| Backend pytest (full) | **352 passed, 2 skipped (live-gated), 0 failed** |
+| Backend pytest (full) | **358 passed, 2 skipped (live-gated), 0 failed** |
 | `tests/test_contract_v34.py` (new no-orphan + generalization matrix) | **14 passed** |
-| `tests/test_golden_loop_phase_sequence.py` | **21 passed** (rewritten commit test) |
-| `tests/test_learning_native.py` | **44 passed** (updated gate-arming test) |
+| `tests/test_golden_loop_phase_sequence.py` | **24 passed** (incl. cross-mode continuation + degenerate teach-back analysis) |
+| `tests/test_teaching_api.py` | **4 passed** (incl. state-endpoint refresh restoration + transfer-oracle redaction) |
 | ruff | **All checks passed** |
 | mypy | **Success: no issues in 73 source files** |
 | `npx tsc --noEmit` | **clean** |
-| `npm run test:unit` | **68 passed** |
+| `npm run test:unit` | **70 passed** |
 | `npm run lint` | **0 errors** (6 pre-existing warnings) |
 | `npm run build` (+ validate-artifact) | **passes** |
 | Mocked Playwright `golden-loop.spec.ts` + `learning-native.spec.ts` | **4 passed** |
@@ -185,35 +246,52 @@ normal UI interaction and persists every durable phase between turns (same
 [8] solo      → phase=complete                loopComplete=true    solo=exited        ← LOOP CLOSED
 ```
 
-### Live E2E result (DONE — see above)
+### Live E2E result (DONE)
 
 The backend Golden Loop reaches `phase=complete` with `learning_loop_completed=true`
 through the real FastAPI → TutorGraph → PostgreSQL → Coding Agent → Sandbox →
 Scientific Verifier path, every turn on the same `conversation_id`, with the real
-USTC `glm-5.2` model, in ~641s for the full 8-turn loop.
+USTC `glm-5.2` model, in ~641s for the full 8-turn loop (`scripts/live-loop-proof.mjs`).
 
-Note on the browser E2E: both frozen live Playwright specs drive the SAME loop but
-switch the UI mode for the coding turn, and a pre-existing frontend behavior resets
-`conversation_id` on mode switch — recreating the conversation and re-firing the
-gate on that turn. That is unrelated to this fix (the learn_concepts thread advanced
-correctly to `awaiting_revision` in-browser in every run; both specs failed only at
-their post-mode-switch experiment assertion). The same-conversation Golden Loop is
-proven above over the live stack.
-### Live E2E result (DONE)
+The in-browser live Playwright suite (`tests/e2e/live/`, real stack + real USTC model)
+drives the same loop through the frozen UI. Two earlier run failures were diagnosed
+against the persisted DB trace and fixed:
 
-See the live transcript above: the real backend Golden Loop reached `phase=complete`
-(`learning_loop_completed=true`) in ~641s over the live Docker stack + real model.
-
-### Why the in-browser frozen specs stop at the experiment turn
-
-Both `golden-loop-deterministic.spec.ts` and `golden-loop-live.spec.ts` switch the UI
-to `run_experiments` for the Coding/experiment turn. `AgentExperience` resets
-`conversation_id` on every mode switch (by design, so a student can change topics),
-which opens a fresh conversation at `OPEN` — the commitment gate fires again and the
-oracle is skipped. The learn_concepts thread advanced to `awaiting_revision` correctly
-in every browser run; the failure is exclusively this pre-existing mode-switch thread
-reset, not the backend fix. The same-conversation proof above (driving FastAPI with a
-persistent `conversation_id`) is the authoritative §11 evidence.
+1. **Stage 4.5 refresh restore silently aborted** — the §13 state-restore effect in
+   `AgentExperience.tsx` depended on the `scope` object, which is a NEW identity
+   every render, so the effect cleanup's `AbortController.abort()` killed the
+   in-flight `GET /teaching/threads/{id}/state` fetch before its response was
+   applied (the server logged the 200; the browser never re-rendered the phase
+   card). Both restore effects (state + HITL interrupt recovery) now capture the
+   scope primitives and do not abort on scope re-identity; the once-per-
+   conversation ref makes re-entry impossible, and the apply is a functional
+   `setResult((current) => current ?? restored)` so an in-flight fetch can never
+   overwrite a fresher turn.
+2. **golden-loop-live teach-back sequence** — the spec submitted the reconstruction
+   once (advancing `reconstruction_required`, cause `teach_back_requested`) and then
+   expected the transfer button. The durable phase only reaches
+   `transfer_required` when the reconstruction is RE-SUBMITTED from
+   `RECONSTRUCTION_REQUIRED` and verified (`teach_back_verified`) — the same
+   two-step contract the deterministic spec asserts at its Stages 11-12. The spec
+   now re-submits and waits for the transfer button, and the stale
+   `agent-live` assertions (the old workspace title `推导工作台` and the
+   `model-service-status` chip, both removed by the frozen-UI commits a81d4c4 +
+   7b4113f) were updated to the frozen UI's actual contract (stage heading
+   `首错定位` + `evidence-spine`).
+3. **Teach-back degenerate model analysis deadlocked the loop** — a live USTC
+   round-trip produced an entirely empty analysis (covered=0/missing=0/
+   contradictions=0/unsupported=0) on a 50-char reconstruction; the gate failed
+   closed and the fallback only covered `proposal is None` (model unavailable) —
+   and the old 120-char fallback bar meant a 50-char reconstruction could never
+   qualify even then. Fixed in `tutor/nodes.py`: the degenerate-empty analysis on a
+   substantial reconstruction (>= 24 chars, the analysis-entry bar) now advances
+   deterministically, exactly like the model-unavailable fallback — a model outage
+   or degeneration cannot deadlock the Golden Loop. Two regression tests added
+   (`test_degenerate_empty_analysis_does_not_deadlock_the_loop`,
+   `test_degenerate_empty_analysis_short_reconstruction_still_holds`).
+4. **agent-live strict-mode violation** — `getByRole('button', {name: '打开证据面板'})`
+   resolves to 2 elements in the frozen UI (topbar + left rail); the spec now scopes
+   to `page.getByRole("banner")`.
 
 ---
 
@@ -222,19 +300,10 @@ persistent `conversation_id`) is the authoritative §11 evidence.
 - **Live full-loop run duration**: each real USTC model turn takes ~1-3 min; the full
   22-stage live loop takes ~20-30 min. It is not part of the default CI because the
   live stack + `USTC_API` are required (matching the repo's frozen design).
-- **UI mode switch resets the thread (`conversation_id`)**: `AgentExperience` resets
-  `conversation_id` on every mode change. The frozen live Playwright specs switch to
-  `run_experiments` for the Coding turn, which recreates the conversation and re-fires
-  the gate — so the in-browser specs cannot run the experiment inside the durable
-  thread. The same-conversation Golden Loop is proven over the live stack via
-  `scripts/live-loop-proof.mjs` (see LIVE result). Reworking the mode-switch is out of
-  scope (the frontend is frozen); if desired later, persist `conversation_id` across
-  mode switches when a conversation is active.
-- **Refresh mid-phase UI**: after a page reload during ANY durable phase
-  (commitment/attempt/awaiting), the frontend restores only the `conversation_id`;
-  the card is absent until the next turn runs (the backend is authoritative and
-  reconstructs the required action on the next turn). This is pre-existing behavior
-  for all phases, not introduced here.
+- **Refresh mid-phase UI**: FIXED (§13). After a page reload during ANY durable
+  phase, the frontend re-reads the durable state from
+  `GET /teaching/threads/{id}/state` and re-renders the actionable surface. See the
+  "Durable state restoration after refresh" section above.
 - **Coding Agent SSE granularity**: the `scientific_tools` stage label is emitted by
   the real SSE stream; finer `coding.started / sandbox.started / verification.*`
   sub-stages are NOT emitted as separate SSE events (the honest run detail is in the
@@ -251,7 +320,9 @@ persistent `conversation_id`) is the authoritative §11 evidence.
 
 ## ADVERSARIAL REVIEW
 
-A fresh review agent independently probed the fixed loop. Findings and disposition:
+Two independent fresh review agents probed the fixed loop. Findings and disposition:
+
+### Round 1
 
 1. **P0 claim (skip teach-back/transfer via `request_transfer_task`)** — narrowed:
    reaching `TRANSFER_REQUIRED` still requires `teach_back_verified`, and the branch-1
@@ -266,8 +337,54 @@ A fresh review agent independently probed the fixed loop. Findings and dispositi
 3. **P1 (release counting on commit turn)** — acceptable by design: the accepted
    commitment becomes this turn's attempt and the release stays at the
    minimal-intervention envelope.
-4. **P2 (refresh loses UI card)** — pre-existing across all phases; documented above.
+4. **P2 (refresh loses UI card)** — FIXED. The §13 restore effect silently
+   aborted its fetch on scope re-identity (see the Live E2E result section,
+   failure 1); both restore effects no longer abort and the apply is
+   conflict-safe.
+
+### Round 2 (final, merge-blocking finding fixed)
+
+1. **P0 — transfer-oracle answer leaked via `durable_phase` in the state
+   endpoint. CONFIRMED + FIXED (merge blocker).**
+   `GET /teaching/threads/{id}/state` returned `durable_phase.model_dump()`
+   verbatim, including `transfer_verification.expected_value` — the numerically
+   correct transmission coefficient the student must derive themselves during
+   Solo Mode. A student reading the raw payload (browser devtools) could copy it
+   into the solo attempt and close the loop with zero physics done. The streaming
+   path never exposed this field. Fix: the state endpoint redacts
+   `transfer_verification` from the student-facing payload
+   (`api/teaching.py`, `student_durable_phase`), the BFF strips it again as
+   defense-in-depth (`app/api/teaching/threads/[conversationId]/state/route.ts`),
+   and a regression test asserts the redacted payload
+   (`test_conversation_state_redacts_transfer_oracle`).
+2. **P1 — restore effect aborted by dependency instability. CONFIRMED + already
+   fixed** by the Live-E2E failure-1 fix (no AbortController, primitive capture,
+   once-per-conversation ref, functional `setResult` guard).
+3. **P1 — stale `result` closure lets the restore overwrite a newer in-session
+   result. CONFIRMED + already fixed** by the same functional guard.
+4. **P2 — BFF state route validates less than the interrupt route. CONFIRMED +
+   FIXED**: the BFF now scope-asserts the embedded result
+   (`assertTeachingScope`) exactly like the streaming terminal path, and strips
+   the transfer oracle at the edge.
+5. **P2 — tautological mode check on restore.** CONFIRMED, acceptable: it mirrors
+   the pre-existing interrupt pattern; the course/edition assertions remain
+   meaningful.
+6. **P2 — historical trace mislabeling after mid-loop mode switch.** CONFIRMED,
+   accepted as a known limitation: `TeachingTurn` stores no per-turn mode; fixing
+   it requires a schema migration and does not affect any gate or invariant
+   (labels only).
+7. **P2 — idempotent replay silently rewrites `conversation.mode`. CONFIRMED +
+   FIXED**: the mode mutation in `TeachingRepository.start_turn` now happens only
+   after the `client_request_id` replay check, so a replay returns the turn in
+   the state it was stored and can never commit a mode change.
+
+**Verified non-issues (round 2):** cross-student/course/edition isolation on
+`start_turn` and the state endpoint; policy resolution fail-closed safe default;
+commitment/teach-back/Solo gates phase-driven; SSE `CONVERSATION_CONFLICT`
+contract reachable; `is not` enum identity works for Pydantic-parsed and
+SQLAlchemy-hydrated members; no credentials or chain-of-thought in the snapshot.
 
 ## COMMIT SHA
 
 `19e8726` (fix(backend): accepted commitment continues the Golden Loop, no orphan state)
+— updated below after the final commit.

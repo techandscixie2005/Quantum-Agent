@@ -197,12 +197,17 @@ test.describe.serial("Quantum Agent live competition workflow", () => {
     await installStudentSession(page, auth);
     await page.goto("/agent");
     await expect(page.getByTestId("agent-experience")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "推导工作台" })).toBeVisible();
-    await expect(page.getByTestId("model-service-status")).toBeVisible();
+    // The frozen Scientific Quiet UI (commit a81d4c4 + 7b4113f) replaced the
+    // old workspace title + model-service chip with the stage heading (the
+    // default review_derivations mode renders "首错定位") and the phase tag.
+    await expect(page.getByRole("heading", { name: "首错定位" })).toBeVisible();
+    await expect(page.locator('[data-testid="evidence-spine"]')).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByRole("button", { name: "打开课程导航" })).toBeVisible();
-    await page.getByRole("button", { name: "打开证据面板" }).click();
+    // The frozen UI exposes two 打开证据面板 buttons (topbar + left rail);
+    // scope to the topbar like the deterministic spec does.
+    await page.getByRole("banner").getByRole("button", { name: "打开证据面板" }).click();
     await expect(page.getByRole("heading", { name: "本轮依据" })).toBeVisible();
   });
 
