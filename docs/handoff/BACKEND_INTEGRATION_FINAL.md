@@ -251,7 +251,7 @@ normal UI interaction and persists every durable phase between turns (same
 The backend Golden Loop reaches `phase=complete` with `learning_loop_completed=true`
 through the real FastAPI → TutorGraph → PostgreSQL → Coding Agent → Sandbox →
 Scientific Verifier path, every turn on the same `conversation_id`, with the real
-USTC `glm-5.2` model, in ~641s for the full 8-turn loop (`scripts/live-loop-proof.mjs`).
+USTC `deepseek-v4-flash` model, in ~641s for the full 8-turn loop (`scripts/live-loop-proof.mjs`).
 
 The in-browser live Playwright suite (`tests/e2e/live/`, real stack + real USTC model)
 drives the same loop through the frozen UI. Two earlier run failures were diagnosed

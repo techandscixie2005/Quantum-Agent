@@ -164,8 +164,8 @@ class ModelCapabilityRegistry:
         lightweight_model: str = "deepseek-v4-flash-ascend1",
         second_pass_model: str = "qwen3.8-reasoner",
         vision_model: str = "qwen3.8-chat",
-        long_context_model: str = "glm-5.2",
-        code_model: str = "glm-5.2",
+        long_context_model: str = "deepseek-v4-flash",
+        code_model: str = "deepseek-v4-flash",
         embedding_model: str = "qwen3-embedding",
         rerank_model: str = "qwen3-reranker",
         document_parser_model: str = "mineru",
@@ -232,7 +232,7 @@ class ModelCapabilityRegistry:
             ),
             _profile(
                 "long_context_secondary",
-                "glm-5.2-107",
+                "deepseek-v4-flash",
                 ModelTransport.CHAT_COMPLETIONS,
                 *_TEXT_STRUCTURED,
                 ModelCapability.REASONING,
@@ -342,7 +342,7 @@ class ModelCapabilityRegistry:
                 required=_TEXT_STRUCTURED | {ModelCapability.REASONING},
                 # PRD V3.2 Demo Closure: deepseek-v4-pro returns a permanent 400
                 # for the Coding Agent's structured-output (CodeArtifact) request.
-                # When glm-5.2 (code_primary) fails transiently, fall to
+                # When deepseek-v4-flash (code_primary) fails transiently, fall to
                 # qwen3.8-reasoner (reasoning_second_pass) which supports the
                 # CodeArtifact schema, before deepseek-v4-pro as a last resort.
                 profile_ids=(

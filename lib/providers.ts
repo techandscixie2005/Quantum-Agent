@@ -14,7 +14,7 @@ export const capabilityCatalog: Array<{
   { id: "deep", label: "深度讲解", shortLabel: "深度", description: "适合复杂推导、跨章节联系与严谨分析。", modelEnv: "USTC_MODEL_DEEP", defaultModel: "deepseek-v4-pro", acceptsImages: false, maxTokens: 3600 },
   { id: "vision", label: "图片识别", shortLabel: "识图", description: "读取题目截图、手写推导和实验图像。", modelEnv: "USTC_MODEL_VISION", defaultModel: "qwen3.6-chat", acceptsImages: true, maxTokens: 2400 },
   { id: "vision-reasoner", label: "图片深度推理", shortLabel: "图像推理", description: "对复杂图表、多步手写推导进行更深入分析。", modelEnv: "USTC_MODEL_VISION_REASONER", defaultModel: "qwen3.6-reasoner", acceptsImages: true, maxTokens: 3600 },
-  { id: "code", label: "编程实验", shortLabel: "编程", description: "解释、调试和完善量子物理数值代码。", modelEnv: "USTC_MODEL_CODE", defaultModel: "glm-5.2", acceptsImages: false, maxTokens: 3200 },
+  { id: "code", label: "编程实验", shortLabel: "编程", description: "解释、调试和完善量子物理数值代码。", modelEnv: "USTC_MODEL_CODE", defaultModel: "deepseek-v4-flash", acceptsImages: false, maxTokens: 3200 },
 ];
 
 type GenerateInput = { system: string; user: string; config: ProviderConfig; attachments?: TutorAttachment[] };

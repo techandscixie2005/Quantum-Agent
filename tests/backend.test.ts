@@ -61,7 +61,7 @@ test("server capability routing uses USTC defaults without exposing a client mod
   const code = providerConfigForCapability("code", { USTC_API: "test-key" });
   assert.equal(quick.provider, "ustc");
   assert.equal(quick.model, "deepseek-v4-flash-ascend1");
-  assert.equal(code.model, "glm-5.2");
+  assert.equal(code.model, "deepseek-v4-flash");
 });
 
 test("image validation rejects unsupported attachment types", () => {

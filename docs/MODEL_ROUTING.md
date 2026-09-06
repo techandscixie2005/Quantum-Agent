@@ -29,7 +29,7 @@ The defaults below are backend configuration, not a student-facing catalog.
 | `diagnosis` | `USTC_MODEL=deepseek-v4-pro` | `USTC_MODEL_VISION_REASONER`, `qwen-reasoner` | chat completions | Diagnosis Agent |
 | `lightweight` | `USTC_MODEL_QUICK=deepseek-v4-flash-ascend1` | `deepseek-v4-flash` | chat completions | Intent/routing and small structured tasks |
 | `vision` | `USTC_VISION_MODEL=qwen3.8-chat` | `qwen-chat` | chat completions with image input | Screenshots, handwriting, figures, and plots |
-| `document_reasoning` | `USTC_MODEL=deepseek-v4-pro` | `USTC_MODEL_CODE`, `glm-5.2-107` | chat completions | Long-context course/project extraction |
+| `document_reasoning` | `USTC_MODEL=deepseek-v4-pro` | `USTC_MODEL_CODE`, `deepseek-v4-flash` | chat completions | Long-context course/project extraction |
 | `embedding` | `USTC_MODEL_EMBEDDING=qwen3-embedding` | none | embeddings | Registry declaration; see independent gateway below |
 | `rerank` | `USTC_MODEL_RERANK=qwen3-reranker` | none | rerank | Registry declaration; no unprobed adapter call |
 | `document_parsing` | `USTC_MODEL_MINERU=mineru` | `USTC_MODEL_OCR=unlimited-ocr` | document parser | Registry declaration; requires an injected, probed file transport |

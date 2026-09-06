@@ -79,7 +79,7 @@ class Settings(BaseSettings):
         validation_alias="USTC_MODEL_VISION_REASONER",
     )
     ustc_long_context_model: str = Field(
-        default="glm-5.2",
+        default="deepseek-v4-flash",
         validation_alias="USTC_MODEL_CODE",
     )
     # PRD V3.1 §6: the Coding Agent routes its code-generation calls to this
@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     # compose.yaml; override with ``USTC_MODEL_CODE`` if a dedicated coding
     # model becomes available.
     ustc_code_model: str = Field(
-        default="glm-5.2",
+        default="deepseek-v4-flash",
         validation_alias="USTC_MODEL_CODE_AGENT",
     )
     # PRD V3.1 §3.3: server-side session vault for user-supplied API keys.

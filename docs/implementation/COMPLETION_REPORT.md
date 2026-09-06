@@ -53,7 +53,7 @@ Conditional branches: refuseRequest, escalateToTeacher, refuseOutOfScope, runToo
 | deep | deepseek-v4-pro | USTC_API env var |
 | vision | qwen3.6-chat | USTC_API env var |
 | vision-reasoner | qwen3.6-reasoner | USTC_API env var |
-| code | glm-5.2 | USTC_API env var |
+| code | deepseek-v4-flash | USTC_API env var |
 
 Primary credential: `USTC_API` (single variable, no `USTC_API_KEY`).
 
