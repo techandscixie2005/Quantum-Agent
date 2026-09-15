@@ -77,6 +77,7 @@ from quantum_agent.teaching.models import (
     WorkflowStepStatus,
 )
 from quantum_agent.teaching.state_machine import TeachingStateMachine
+from tests.real_course_support import TEXTBOOK_FILENAME, publish_test_textbook
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 API_ROOT = Path(__file__).resolve().parents[1]
@@ -131,16 +132,14 @@ async def _authenticated_actor(
     )
 
 
-def _taxonomy_citation(packet: EvidencePacket) -> EvidenceItem:
+def _textbook_citation(packet: EvidencePacket) -> EvidenceItem:
     citation = next(
         item
         for item in packet.evidence
-        if item.source_file_name == TAXONOMY_FILENAME
-        and item.locator.locator_type is LocatorType.XLSX_ROW
-        and item.locator.sheet_name == "Sheet3"
-        and item.locator.row_start == 41
+        if item.source_file_name == TEXTBOOK_FILENAME
+        and item.locator.locator_type is LocatorType.PDF_PAGE
     )
-    assert CONCEPT_LABEL in citation.evidence_snippet
+    assert citation.locator.physical_page is not None
     assert citation.evidence_snippet in citation.source_chunk
     assert citation.source_chunk_sha256 == hashlib.sha256(
         citation.source_chunk.encode("utf-8")
@@ -148,7 +147,7 @@ def _taxonomy_citation(packet: EvidencePacket) -> EvidenceItem:
     assert citation.evidence_sha256 == hashlib.sha256(
         citation.evidence_snippet.encode("utf-8")
     ).hexdigest()
-    taxonomy_path = REPOSITORY_ROOT / "knowledge" / TAXONOMY_FILENAME
+    taxonomy_path = REPOSITORY_ROOT / "knowledge" / TEXTBOOK_FILENAME
     assert citation.source_file_sha256 == hashlib.sha256(taxonomy_path.read_bytes()).hexdigest()
     return citation
 
@@ -236,9 +235,11 @@ async def test_real_course_evidence_drives_attempt_gated_teaching_workflow(
                 candidate_id=candidate.id,
                 rationale="The concept label is an exact claim on Sheet3 row 41.",
             )
+            textbook_document_id, textbook_version_id = await publish_test_textbook(
+                session, teacher, taxonomy_edition_id,
+            )
             await session.commit()
             candidate_id = candidate.id
-            taxonomy_document_id = taxonomy_document.id
             taxonomy_version_id = taxonomy_version.id
             student_actor = student
 
@@ -270,7 +271,7 @@ async def test_real_course_evidence_drives_attempt_gated_teaching_workflow(
                     # PRD V3.0 P0-1: a concept question with no factual-lookup
                     # marker requires a commitment.  Submit a student attempt
                     # so the gate is satisfied and the concept-explanation
-                    # path (FULL_EXPLANATION with the taxonomy citation) is
+                    # path (FULL_EXPLANATION with a textbook citation) is
                     # exercised, matching the test's intent.
                     student_attempt="我预测波函数的统计解释与概率密度有关。",
                 ),
@@ -339,10 +340,10 @@ async def test_real_course_evidence_drives_attempt_gated_teaching_workflow(
                 ).all()
             )
 
-        concept_citation = _taxonomy_citation(concept_turn.evidence_packet)
-        exercise_citation = _taxonomy_citation(exercise_turn.evidence_packet)
-        assert concept_citation.document_id == taxonomy_document_id
-        assert exercise_citation.document_id == taxonomy_document_id
+        concept_citation = _textbook_citation(concept_turn.evidence_packet)
+        exercise_citation = _textbook_citation(exercise_turn.evidence_packet)
+        assert concept_citation.document_id == textbook_document_id
+        assert exercise_citation.document_id == textbook_document_id
         assert concept_citation.curriculum_edition_id == taxonomy_edition_id
         assert exercise_citation.curriculum_edition_id == taxonomy_edition_id
         assert RetrievalChannel.SEMANTIC in concept_turn.evidence_packet.degraded_channels
@@ -398,7 +399,7 @@ async def test_real_course_evidence_drives_attempt_gated_teaching_workflow(
         assert approved_candidate.status is CandidateStatus.APPROVED
         assert cited_chunks and len(cited_chunks) == len(cited_chunk_ids)
         assert all(
-            chunk.document_version_id == taxonomy_version_id
+            chunk.document_version_id == textbook_version_id
             and chunk.extraction_status is ChunkExtractionStatus.APPROVED
             for chunk in cited_chunks
         )

@@ -22,7 +22,8 @@ PATTERNS=(
   "deepseek-v[0-9]"
   "qwen([0-9.]+)?-(chat|reasoner|embedding|reranker)"
   "glm-[0-9]"
-  "sk-[A-Za-z0-9_-]{16,}"
+  # A key starts at a token boundary; bundled flask-* icon filenames are not keys.
+  "(^|[^A-Za-z0-9_])sk-[A-Za-z0-9_-]{16,}"
   "[Bb]earer[[:space:]]+[A-Za-z0-9._~-]{16,}"
   "TEACHER_PASSWORD"
   "SESSION_SECRET"

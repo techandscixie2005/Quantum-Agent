@@ -15,13 +15,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from docx import Document
-from sqlalchemy import select
+from sqlalchemy import select, true
 
 from quantum_agent.auth import hash_session_token, issue_opaque_session_token
 from quantum_agent.config import Settings
 from quantum_agent.credential_vault import build_credential_vault
 from quantum_agent.database import create_database_engine, create_session_factory
 from quantum_agent.db_models import (
+    AgentTrace,
     Course,
     CourseMembership,
     CourseRole,
@@ -66,6 +67,10 @@ async def _seed_live_scope() -> LiveScope:
                     select(Course, CurriculumEdition)
                     .join(CurriculumEdition, CurriculumEdition.course_id == Course.id)
                     .where(CurriculumEdition.status == CurriculumEditionStatus.PUBLISHED)
+                    .where(
+                        CurriculumEdition.id == UUID(os.environ["QA_LIVE_EDITION_ID"])
+                        if os.environ.get("QA_LIVE_EDITION_ID") else true()
+                    )
                     .order_by(
                         CurriculumEdition.published_at.desc(),
                         CurriculumEdition.id.asc(),
@@ -354,6 +359,10 @@ async def test_real_multimodal_derivation_document_plot_hitl_and_trace() -> None
         )
         assert derivation_upload.status_code in {200, 201}, derivation_upload.text[:1000]
         derivation = cast(JsonObject, derivation_upload.json())
+        assert derivation["extraction"]["status"] != "failed", (
+            "Live vision extraction failed: "
+            f"{derivation['extraction'].get('failure_code')}"
+        )
         derivation_evidence = derivation["extraction"]["evidence"]
         assert derivation_evidence["derivation_steps"]
         assert derivation_evidence["original_file_reference"] == f"attachment:{derivation['id']}"
@@ -444,8 +453,27 @@ async def test_real_multimodal_derivation_document_plot_hitl_and_trace() -> None
                 scope=scope,
                 conversation_id=str(document_result["conversation_id"]),
             )
-        assert document_result["interpretation"]["relevant_concepts"]
+        # Interpretation concepts are optional retrieval hints. Verify the
+        # actual document-to-diagnosis boundary instead of model wording.
+        audit_engine = create_database_engine(Settings())
+        try:
+            async with create_session_factory(audit_engine)() as audit_session:
+                persisted = await audit_session.scalar(select(AgentTrace).where(
+                    AgentTrace.teaching_turn_id == UUID(document_result["turn_id"]),
+                ))
+                assert persisted is not None
+                document_trace = persisted.steps_json["perception_trace"]
+        finally:
+            await audit_engine.dispose()
+        assert any(
+            item["attachment_id"] == document_attachment["id"]
+            and item["admitted_to_diagnosis"]
+            and item["exact_context_characters"] > 0
+            for item in document_trace
+        )
+        assert document_result["diagnosis"]["target_concepts"]
         assert document_result["evidence_packet"]["evidence"]
+        assert document_result["validation"]["passed"] is True
 
         plot_upload = await client.post(
             attachment_base,

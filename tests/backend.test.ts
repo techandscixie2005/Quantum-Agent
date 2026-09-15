@@ -11,6 +11,13 @@ import { projectDefinitions } from "../lib/projects";
 import { inspectSandboxCode } from "../lib/sandbox";
 import { runTutorWorkflow } from "../lib/tutor-engine";
 import { verifyHermiticity, verifyProbabilityConservation } from "../lib/verifiers";
+import { retiredLegacyEndpoint } from "../app/api/legacy";
+
+test("parallel legacy teaching endpoints no longer execute teaching or verification", async () => {
+  const response = retiredLegacyEndpoint();
+  assert.equal(response.status, 410);
+  assert.equal((await response.json()).error, "legacy_teaching_endpoint_retired");
+});
 
 test("courseware index contains all seven PDFs and hundreds of page chunks", () => {
   assert.equal(coursewareManifest.length, 7);

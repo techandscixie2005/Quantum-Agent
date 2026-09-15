@@ -6,10 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from quantum_agent.coding import CodeVerificationStatus, CodingAgent, SubprocessSandbox
 from quantum_agent.coding.models import CodeArtifact, CodeLanguage
+from quantum_agent.db_models import TeachingMode
 from quantum_agent.llm.gateway import FakeModelGateway
 from quantum_agent.science.models import RectangularBarrierRequest
 from quantum_agent.teaching.models import (
-    TeachingMode,
     TeachingTurnInput,
     TeachingTurnResult,
     WorkflowStepName,

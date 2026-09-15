@@ -41,6 +41,7 @@ class Settings(BaseSettings):
         default=384,
         validation_alias="EMBEDDING_DIMENSION",
     )
+
     embedding_provider: Literal["disabled", "local_hashing", "openai_compatible"] = Field(
         default="local_hashing",
         validation_alias="EMBEDDING_PROVIDER",
@@ -190,6 +191,13 @@ class Settings(BaseSettings):
         le=1000,
         validation_alias="ATTACHMENT_MAX_ARCHIVE_COMPRESSION_RATIO",
     )
+
+    @field_validator("embedding_dimension", mode="before")
+    @classmethod
+    def parse_embedding_dimension(cls, value: object) -> object:
+        # Environment variables are strings; retain the fixed database vector
+        # dimension while accepting its normal environment representation.
+        return 384 if value == "384" else value
 
     @field_validator("database_url")
     @classmethod

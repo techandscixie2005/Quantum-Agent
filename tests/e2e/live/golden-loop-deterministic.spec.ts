@@ -58,7 +58,7 @@ import {
  * scientific tool result PASSed this turn — so Stage 16 must submit the
  * correct numeric T for the transfer task's barrier width.
  *
- * Run via scripts/run-live-e2e.sh (seeds auth, starts the Compose stack).
+ * Run via scripts/run-live-e2e.sh (seeds auth; requires the running Compose stack).
  * The deterministic CI suite does NOT run this test; it only runs when the
  * Compose stack + USTC_API are available.
  */
@@ -68,6 +68,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 type LiveAuth = Readonly<{
   course_id: string;
   curriculum_edition_id: string;
+  curriculum_edition_title?: string;
   ta_user_id?: string;
   ta_token: string;
 }>;
@@ -111,6 +112,13 @@ async function loginThroughProduct(page: Page): Promise<void> {
   await page.getByLabel("USTC API Key").fill(liveApiKey());
   await page.getByRole("button", { name: "连接并进入学习空间" }).click();
   await expect(page.getByTestId("agent-experience")).toBeVisible({ timeout: 60_000 });
+  const title = liveAuth().curriculum_edition_title;
+  if (title) {
+    await page.getByRole("button", { name: "打开命令面板", exact: true }).click();
+    await page.getByRole("dialog", { name: "命令面板" }).getByRole("button")
+      .filter({ has: page.locator("strong", { hasText: title }) }).click({ timeout: 15_000 });
+    await expect(page.getByRole("banner")).toContainText(title);
+  }
 }
 
 async function waitForWorkflowTerminal(page: Page): Promise<"completed" | "interrupted"> {
@@ -120,7 +128,7 @@ async function waitForWorkflowTerminal(page: Page): Promise<"completed" | "inter
   // Phase 1 proves the turn actually STARTED (the send button flips to the
   // disabled "执行工作流" label while the workflow streams); phase 2 then
   // settles on the terminal — the HITL card mounts, or the send button returns
-  // to its enabled "发送 / 运行" label after the terminal SSE event has been
+  // to its "发送 / 运行" label after the terminal SSE event has been
   // fully consumed and state updated.
   await expect(
     page.getByRole("button", { name: /执行工作流|先完成上方复核/ }),
@@ -130,7 +138,8 @@ async function waitForWorkflowTerminal(page: Page): Promise<"completed" | "inter
     .poll(
       async () => {
         if (await page.getByTestId("hitl-interrupt").isVisible()) return "interrupted";
-        if (await page.getByRole("button", { name: "发送 / 运行" }).isEnabled()) return "completed";
+        // A card can submit after refresh while the empty composer stays disabled.
+        if (await page.getByRole("button", { name: "发送 / 运行", exact: true }).isVisible()) return "completed";
         return "pending";
       },
       { timeout: 600_000, intervals: [2_000, 5_000, 10_000] },
@@ -402,6 +411,18 @@ async function fetchAgentTraceDetail(
   }
 }
 
+const TUNNELLING_RECONSTRUCTION = [
+  "考虑质量 m 恒定、无吸收的一维非相对论定态散射：0<x<a 内势能为 V0，两侧为零，0<E<V0。",
+  "外部波数 k=√(2mE)/ℏ，内部 κ=√(2m(V0−E))/ℏ；内部解为两个指数项的线性组合，不能在有限宽势垒内任意丢掉增长项。",
+  "由定态薛定谔方程，在 x=0 和 x=a 处匹配波函数及其一阶导数，右侧只保留向右传播的透射波。",
+  "概率密度是 |ψ|²，概率流为 j=(ℏ/m)Im(ψ*∂xψ)。T=j透射/j入射，R=|j反射|/j入射；两侧波数相同，所以等于相应振幅比的模方。",
+  "匹配给出 T=[1+α sinh²(κa)]⁻¹，α=V0²/[4E(V0−E)]；实势的流守恒给出 R=1−T，所以 R+T=1，不是通过违反能量守恒越过势垒。",
+  "当 κa≫1 时 sinh²(κa)≈exp(2κa)/4，故 T≈16E(V0−E)/V0² × exp(−2κa)，指数之外还有能量相关的前因子。",
+  "当 κa≪1 时 T≈[1+α(κa)²]⁻¹；只有 α(κa)² 也很小时才可进一步说 T≈1。",
+  "E→V0⁻、a 固定时 κa→0，此时厚势垒指数近似失效，应取完整表达式的极限 T→[1+mV0a²/(2ℏ²)]⁻¹，不能只将指数近似里的前因子取零。",
+  "固定 E、V0 时 a→0 有 T→1，a→∞ 有 T→0；有限 a 下 T 非零。势垒加宽会降低 T，但仅有 E<V0 不能判断它一定极小。数值计算必须另外检查有限性、0≤T,R≤1 和 R+T≈1。",
+].join("");
+
 test.describe.serial("Golden Learning Loop · live deterministic 22-stage closure", () => {
   test("reaches every required LearningPhase in order with real persistence and no skippable stages", async ({ page }) => {
     test.setTimeout(1_800_000); // 30 minutes for the full live loop
@@ -497,7 +518,10 @@ test.describe.serial("Golden Learning Loop · live deterministic 22-stage closur
     // spine must light from a REAL progress event before the terminal).
     await expect(page.getByTestId("coding-artifact"), "Stage 6: coding-artifact panel must render").toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("coding-generated-code"), "Stage 7: generated code must contain METRICS_JSON").toContainText(/METRICS_JSON/, { timeout: 10_000 });
-    await expect(page.getByTestId("coding-verification-status"), "Stage 8: coding verifier must report PASS").toContainText(/PASS/, { timeout: 10_000 });
+    await expect(
+      page.getByTestId("coding-verification-status"),
+      `Stage 8: coding verifier must report PASS\n${await page.getByTestId("coding-artifact").innerText()}`,
+    ).toContainText(/PASS/, { timeout: 10_000 });
 
     // ── Stage 7.5: Static safety check + isolated sandbox execution are
     // distinct stages (spec section 12, stages 10-11).  The Coding Agent
@@ -540,19 +564,20 @@ test.describe.serial("Golden Learning Loop · live deterministic 22-stage closur
     await expect(page.getByTestId("teach-back-card"), "Stage 11: teach-back-card must render after request").toBeVisible({ timeout: 30_000 });
     await submitTeachBackReconstruction(
       page,
-      "波函数在势垒内不是突变为零，而是指数衰减；衰减后的振幅在右侧仍然非零，因此透射概率是一个很小的正数。",
+      TUNNELLING_RECONSTRUCTION,
     );
     await expectPhase(page, "reconstruction_required");
 
     // ── Stage 12: Re-submit the reconstruction from reconstruction_required
     // → transfer_required (invariant E, cause teach_back_verified).  The
-    // backend verifies the typed reconstruction and arms the transfer task.
+    // backend verifies the typed reconstruction and exposes the action that
+    // requests a transfer task; the task itself is assigned in Stage 13.
     await submitTeachBackReconstruction(
       page,
-      "波函数在势垒内不是突变为零，而是指数衰减；衰减后的振幅在右侧仍然非零，因此透射概率是一个很小的正数。",
+      TUNNELLING_RECONSTRUCTION,
     );
     await expectPhase(page, "transfer_required");
-    await expect(page.getByTestId("transfer-card"), "Stage 12: transfer-card must render").toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("request-transfer-button"), "Stage 12: transfer must be actionable").toBeVisible({ timeout: 30_000 });
 
     // ── Stage 13: Request Transfer → Solo armed (solo_active) ──
     await clickRequestTransfer(page);
@@ -564,6 +589,9 @@ test.describe.serial("Golden Learning Loop · live deterministic 22-stage closur
       page.getByText("AI 辅助暂时不可用", { exact: false }),
       "Stage 14: Solo lock notice must be visible",
     ).toBeVisible({ timeout: 10_000 });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expectPhase(page, "solo_active");
+    await expect(page.getByText("AI 辅助暂时不可用", { exact: false })).toBeVisible();
 
     // ── Stage 15: WRONG solo attempt — phase stays solo_active (NOT complete) ──
     await submitSoloAttempt(page, "透射系数 T = 0.999（几乎全透）");
@@ -573,6 +601,13 @@ test.describe.serial("Golden Learning Loop · live deterministic 22-stage closur
       page.getByTestId("transfer-card"),
       "Stage 15: transfer-card must remain visible after a wrong solo attempt",
     ).toBeVisible({ timeout: 10_000 });
+
+    const beforeCorrectSoloStats = await fetchLearningStatistics(auth);
+    const beforeCorrectSoloKinds = (beforeCorrectSoloStats.events_by_kind ?? {}) as Record<string, { event_count?: number }>;
+    expect(
+      Number(beforeCorrectSoloKinds.transfer_verified?.event_count ?? 0),
+      "Stage 22: this episode must not create TRANSFER_VERIFIED before a correct solo attempt",
+    ).toBe(beforeTransferVerified);
 
     // ── Stage 16: CORRECT solo attempt → complete + loop-completed ──
     // The transfer task uses a barrier width of 1.5× the original (1e-10m →
@@ -619,11 +654,8 @@ test.describe.serial("Golden Learning Loop · live deterministic 22-stage closur
       "Stage 21: TRANSFER_VERIFIED evidence must exist after the verified solo attempt",
     ).toBeGreaterThan(beforeTransferVerified);
 
-    // ── Stage 22: No TRANSFER_VERIFIED evidence existed before stage 16 ──
-    expect(
-      beforeTransferVerified,
-      "Stage 22: no TRANSFER_VERIFIED evidence should have existed before the verified solo attempt",
-    ).toBe(0);
+    // Stage 22 was checked immediately before Stage 16 against the baseline.
+    // Existing completed episodes may already have transfer evidence.
 
     // Every required Learning-Native phase must have new durable evidence.
     for (const kind of ["commitment", "teach_back", "transfer_assigned", "solo_assigned"] as const) {
@@ -657,5 +689,6 @@ test.describe.serial("Golden Learning Loop · live deterministic 22-stage closur
     expect(stepNames, "Stage 20: trace must include classify_task").toContain("classify_task");
     expect(stepNames, "Stage 20: trace must include retrieve_evidence").toContain("retrieve_evidence");
     expect(stepNames, "Stage 20: trace must include run_scientific_tools").toContain("run_scientific_tools");
+    await page.screenshot({ path: test.info().outputPath("completed-loop.png"), fullPage: true });
   });
 });

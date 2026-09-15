@@ -17,6 +17,7 @@ from quantum_agent.db_models import (
 )
 from quantum_agent.knowledge.evidence_packets import EvidencePacket
 from quantum_agent.science import ScientificVerificationRequest, ScientificVerificationResult
+from quantum_agent.teaching.derivation import DerivationBridge
 
 
 class WorkflowStepName(StrEnum):
@@ -235,6 +236,7 @@ class DraftTeachingResponse(BaseModel):
     orientation: str = Field(min_length=1, max_length=1200)
     claims: list[TeachingClaim] = Field(default_factory=list, max_length=8)
     next_question: str = Field(min_length=1, max_length=1000)
+    derivation_bridge: DerivationBridge | None = None
 
 
 class TeachingResponse(DraftTeachingResponse):

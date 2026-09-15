@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, TypeVar
 from uuid import UUID, uuid4
 
 import pytest
@@ -29,6 +30,7 @@ from quantum_agent.auth import CourseActor
 from quantum_agent.coding import CodingAgent, SubprocessSandbox
 from quantum_agent.db_models import (
     AnswerPolicy,
+    AnswerReleaseLevel,
     Course,
     CourseMembership,
     CourseRole,
@@ -56,7 +58,7 @@ from quantum_agent.knowledge.evidence_packets import (
     RetrievalCoverage,
 )
 from quantum_agent.knowledge.retrieval import RetrievalScope
-from quantum_agent.llm.gateway import FakeModelGateway
+from quantum_agent.llm.gateway import FakeModelGateway, Message, ModelTier
 from quantum_agent.science.models import (
     ScientificVerificationKind,
     ScientificVerificationMethod,
@@ -68,7 +70,6 @@ from quantum_agent.teaching.learning_native import (
     assert_phase_transition,
 )
 from quantum_agent.teaching.models import (
-    AnswerReleaseLevel,
     CognitiveCommitment,
     CommitmentGateDecision,
     CommitmentKind,
@@ -79,9 +80,12 @@ from quantum_agent.teaching.models import (
     SoloModeStatus,
     TeachBackSubmission,
     TeachingTurnInput,
+    TeachingTurnResult,
     TransferVerificationSpec,
 )
 from quantum_agent.tutor.graph import TutorGraph
+
+T = TypeVar("T")
 
 API_ROOT = Path(__file__).resolve().parents[1]
 
@@ -287,7 +291,9 @@ async def _read_phase(
         )
         assert conv is not None
         assert conv.learning_phase_json is not None
-        return conv.learning_phase_json["phase"]
+        phase = conv.learning_phase_json["phase"]
+        assert isinstance(phase, str)
+        return phase
 
 
 class _NotFoundRetriever:
@@ -325,8 +331,9 @@ class TestGoldenLoopAntiSkip:
         async with golden_loop_database() as session:
             seed = await _seed_actor(session)
 
-        result = await _graph().run_turn_via_fixture(
-            session_factory=golden_loop_database,
+        result = await _run_turn(
+            _graph(),
+            database=golden_loop_database,
             seed=seed,
             message="为什么无限深势阱基态的平均动量为零？",
         )
@@ -379,11 +386,15 @@ class TestGoldenLoopAntiSkip:
                 )
                 self.compose_calls = 0
 
-            async def structured_generate(self, *args: object, **kwargs: object) -> object:
-                task = kwargs.get("task") or (args[0] if args else "")
+            async def structured_generate(
+                self, *, task: str, messages: Sequence[Message], output_type: type[T],
+                model_tier: ModelTier = ModelTier.DEFAULT,
+            ) -> T:
                 if task == "compose_grounded_teaching_response":
                     self.compose_calls += 1
-                return await super().structured_generate(*args, **kwargs)
+                return await super().structured_generate(
+                    task=task, messages=messages, output_type=output_type, model_tier=model_tier
+                )
 
         gateway = _ProbeGateway()
         submission = LearningNativeSubmission(
@@ -410,6 +421,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         # The episode is NOT complete; but it is NOT an orphan either.
         assert result.learning_loop_completed is False
@@ -428,7 +440,6 @@ class TestGoldenLoopAntiSkip:
         # Invariant B: the phase does NOT jump to AWAITING_REVISION and the
         # full explanation is NOT auto-released on the commitment turn.  The
         # release stays at the minimal-intervention envelope (SCAFFOLD max).
-        assert result.learning_native.phase is not LearningPhase.AWAITING_REVISION
         assert result.release.release_level.value in {
             AnswerReleaseLevel.QUESTION_ONLY.value,
             AnswerReleaseLevel.HINT.value,
@@ -493,6 +504,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         mirror = result.learning_native.cognitive_mirror
@@ -501,9 +513,12 @@ class TestGoldenLoopAntiSkip:
                 assert state.label is not ConceptStateLabel.DEMONSTRATED
                 assert state.label is not ConceptStateLabel.TRANSFER_READY
 
+    @pytest.mark.parametrize("verification_status", list(ScientificVerificationStatus))
     async def test_experiment_turn_after_commitment_runs_scientific_tools(
         self,
         golden_loop_database: async_sessionmaker[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+        verification_status: ScientificVerificationStatus,
     ) -> None:
         # PRD V3.3 Golden Loop closure: once the durable phase has advanced to
         # AWAITING_REVISION the commitment gate must NOT re-arm on a later
@@ -512,7 +527,21 @@ class TestGoldenLoopAntiSkip:
         # student attempt; re-arming the gate would withhold the release and
         # skip the scientific tools, blocking the Coding Agent stage.
         from quantum_agent.llm.gateway import FakeModelGateway
-        from quantum_agent.science.models import RectangularBarrierRequest
+        from quantum_agent.science import ScientificToolbox
+        from quantum_agent.science.models import (
+            RectangularBarrierRequest,
+            ScientificVerificationRequest,
+        )
+
+        original_verify = ScientificToolbox.verify
+
+        def verify_with_status(
+            toolbox: ScientificToolbox, request: ScientificVerificationRequest
+        ) -> ScientificVerificationResult:
+            result = original_verify(toolbox, request)
+            return result.model_copy(update={"status": verification_status})
+
+        monkeypatch.setattr(ScientificToolbox, "verify", verify_with_status)
 
         gateway = FakeModelGateway(
             {
@@ -566,6 +595,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         # The release must NOT be commitment-gated question_only, and the
         # scientific toolbox must have run (SCAFFOLD or higher releases the
@@ -576,8 +606,20 @@ class TestGoldenLoopAntiSkip:
             AnswerReleaseLevel.FULL_SOLUTION.value,
         }
         assert result.scientific_results, "the deterministic oracle must run"
-        assert result.scientific_results[-1].status is ScientificVerificationStatus.PASS
+        assert result.scientific_results[-1].status is verification_status
         assert "T" in result.scientific_results[-1].metrics
+        assert result.learning_native is not None
+        assert result.learning_native.phase is LearningPhase.AWAITING_REVISION
+        expected_verified = verification_status is ScientificVerificationStatus.PASS
+        assert ("verify" in result.learning_native.completed_stages) is expected_verified
+        assert result.learning_loop_completed is False
+        async with golden_loop_database() as session:
+            conversation = await session.get(TeachingConversation, conversation_id)
+            assert conversation is not None
+            assert conversation.learning_phase_json is not None
+            completed_stages = conversation.learning_phase_json["completed_stages"]
+            assert isinstance(completed_stages, list)
+            assert ("verify" in completed_stages) is expected_verified
 
     async def test_teach_back_required_for_configured_concept(
         self,
@@ -606,6 +648,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         phase = await _read_phase(golden_loop_database, conversation_id)
         assert phase == "awaiting_revision"
@@ -643,6 +686,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         phase = await _read_phase(golden_loop_database, conversation_id)
         assert phase == "transfer_required"
@@ -684,15 +728,19 @@ class TestGoldenLoopAntiSkip:
             )
 
         class _CallTrackingGateway(FakeModelGateway):
-            def __init__(self, *args: object, **kwargs: object) -> None:
-                super().__init__(*args, **kwargs)
+            def __init__(self, responses: Mapping[str, Any] | None = None) -> None:
+                super().__init__(responses)
                 self.compose_calls = 0
 
-            async def structured_generate(self, *args: object, **kwargs: object) -> object:
-                task = kwargs.get("task") or (args[0] if args else "")
+            async def structured_generate(
+                self, *, task: str, messages: Sequence[Message], output_type: type[T],
+                model_tier: ModelTier = ModelTier.DEFAULT,
+            ) -> T:
                 if task == "compose_grounded_teaching_response":
                     self.compose_calls += 1
-                return await super().structured_generate(*args, **kwargs)
+                return await super().structured_generate(
+                    task=task, messages=messages, output_type=output_type, model_tier=model_tier
+                )
 
         gateway = _CallTrackingGateway()
         graph = _graph(gateway)
@@ -708,6 +756,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert gateway.compose_calls == 0
         assert result.response.claims == []
@@ -752,6 +801,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.solo is not None
@@ -801,6 +851,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         phase = await _read_phase(golden_loop_database, conversation_id)
         assert phase == "solo_active"
@@ -832,8 +883,9 @@ class TestGoldenLoopAntiSkip:
             limitations=["deterministic oracle"],
         )
         from quantum_agent.tutor.nodes import _attempt_verified
+        from quantum_agent.tutor.state import TutorState
 
-        state_with_pass = {"scientific_results": [passing_result]}
+        state_with_pass: TutorState = {"scientific_results": [passing_result]}
         assert _attempt_verified(state_with_pass, "T ≈ 0.001", verification) is True
         assert _attempt_verified(state_with_pass, "随便写的答案", verification) is False
         # Without the oracle, fail closed.
@@ -918,6 +970,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=wrong,
             )
+            assert isinstance(wrong_result, TeachingTurnResult)
             await session.commit()
         assert await _read_phase(golden_loop_database, conversation_id) == "solo_active"
         assert wrong_result.learning_loop_completed is False
@@ -940,6 +993,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=correct,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.phase is LearningPhase.COMPLETE
@@ -1007,6 +1061,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.phase is LearningPhase.COMPLETE
@@ -1080,6 +1135,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.phase is LearningPhase.TRANSFER_REQUIRED
@@ -1145,6 +1201,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert (
@@ -1211,6 +1268,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.phase is LearningPhase.TRANSFER_REQUIRED
@@ -1262,6 +1320,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.phase is LearningPhase.RECONSTRUCTION_REQUIRED
@@ -1328,6 +1387,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.phase is LearningPhase.SOLO_ACTIVE
@@ -1416,6 +1476,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.phase is LearningPhase.SOLO_ACTIVE
@@ -1489,6 +1550,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         phase = await _read_phase(golden_loop_database, conversation_id)
         assert phase == "commitment_required"
@@ -1528,6 +1590,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         phase = await _read_phase(golden_loop_database, conversation_id)
         assert phase == "commitment_required"
@@ -1632,6 +1695,7 @@ class TestGoldenLoopAntiSkip:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         # The conversation continued (no TeachingConversationConflictError);
         # the commitment gate did NOT re-arm — the phase stayed inside the
@@ -1662,7 +1726,7 @@ async def _run_turn(
     message: str,
     conversation_id: UUID | None = None,
     learning_native: LearningNativeSubmission | None = None,
-):
+) -> TeachingTurnResult:
     request = TeachingTurnInput(
         mode=TeachingMode.LEARN_CONCEPTS,
         message=message,
@@ -1676,27 +1740,6 @@ async def _run_turn(
             curriculum_edition_id=seed.edition_id,
             request=request,
         )
+        assert isinstance(result, TeachingTurnResult)
         await session.commit()
     return result
-
-
-# Patch TutorGraph with a fixture-friendly entry point for the first test.
-def _install_run_turn_via_fixture() -> None:
-    async def run_turn_via_fixture(
-        self: TutorGraph,
-        *,
-        session_factory: async_sessionmaker[AsyncSession],
-        seed: _Seed,
-        message: str,
-    ) -> object:
-        return await _run_turn(
-            self,
-            session_factory,
-            seed,
-            message=message,
-        )
-
-    TutorGraph.run_turn_via_fixture = run_turn_via_fixture  # type: ignore[attr-defined]
-
-
-_install_run_turn_via_fixture()

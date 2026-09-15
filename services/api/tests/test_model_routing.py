@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable, Sequence
 from typing import TypeVar, cast
@@ -461,7 +462,7 @@ async def test_router_fallback_budget_caps_total_cross_profile_latency() -> None
             outcome = {"value": 7}
         else:
             outcome = GatewayError("route unavailable")
-        return _ClockAdvancingGateway(outcome, advance=1.0)  # type: ignore[return-value]
+        return _ClockAdvancingGateway(outcome, advance=1.0)
 
     router = ModelRouter(
         registry=registry,
@@ -483,3 +484,32 @@ async def test_router_fallback_budget_caps_total_cross_profile_latency() -> None
     # before the second attempt started (the first call advanced the
     # clock from 0.0 to 1.0, crossing the 0.5s deadline).
     assert constructed == ["reasoning_primary"]
+
+
+async def test_router_cancels_a_profile_that_hangs_past_the_shared_budget() -> None:
+    cancelled = asyncio.Event()
+
+    class HangingGateway(StubGateway):
+        async def structured_generate(
+            self, *, task: str, messages: Sequence[Message], output_type: type[T],
+            model_tier: ModelTier = ModelTier.DEFAULT,
+        ) -> T:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+            raise AssertionError("unreachable")
+
+    gateway = HangingGateway({"value": 1})
+    router = ModelRouter(
+        registry=ModelCapabilityRegistry.ustc_default(),
+        gateway_factory=lambda profile: gateway,
+        fallback_budget_seconds=1.0,
+    )
+    with pytest.raises(GatewayError):
+        await asyncio.wait_for(router.structured_generate(
+            task="diagnose_student_progress",
+            messages=[Message(role="user", content="student attempt")],
+            output_type=StrictOutput,
+        ), timeout=3.0)
+    assert cancelled.is_set()

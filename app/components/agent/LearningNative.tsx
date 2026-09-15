@@ -517,6 +517,7 @@ export function LearningNativeSurface({
   onSubmit: (submission: LearningNativeSubmission) => void;
 }) {
   const soloActive = state.solo?.status === "active";
+  if (state.phase === "complete" || state.phase === "aborted") return null;
   // Solo Mode disables the other cards: the student must submit a transfer
   // attempt or exit Solo before the tutor resumes.
   if (soloActive && state.solo?.active_transfer) {

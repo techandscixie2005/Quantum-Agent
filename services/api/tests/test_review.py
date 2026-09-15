@@ -278,6 +278,56 @@ async def test_node_approval_is_grounded_audited_and_outboxed(
     assert approved_view_count == 1
 
 
+async def test_pedagogical_import_preserves_teacher_decisions_and_exact_support(
+    review_database: async_sessionmaker[AsyncSession],
+) -> None:
+    from quantum_agent.db_models import ExtractionRun, ExtractionRunStatus
+    from quantum_agent.knowledge.extraction import RawChunkExtraction
+    from quantum_agent.knowledge.pedagogical_import import persist_extraction
+    from quantum_agent.knowledge.retrieval import RetrievalScope
+
+    async with review_database() as session:
+        seeded = await _seed_review(session)
+        chunk = await session.get(DocumentChunk, seeded.chunk_id)
+        assert chunk is not None
+        run = ExtractionRun(
+            document_version_id=seeded.version_id, pipeline_name="pedagogical-test",
+            pipeline_version="2", ontology_version="1.1", configuration_sha256="a" * 64,
+            status=ExtractionRunStatus.SUCCEEDED,
+            started_at=datetime.now(UTC), completed_at=datetime.now(UTC),
+        )
+        session.add(run)
+        await session.flush()
+        raw = RawChunkExtraction.model_validate({"nodes": [{
+            "local_id": "step", "node_type": "DerivationStep", "canonical_key": "step",
+            "label": "Step from course", "evidence_quote": chunk.content,
+            "confidence": 0.9,
+        }]})
+        scope = RetrievalScope(
+            course_id=seeded.actor.course_id, curriculum_edition_id=seeded.edition_id,
+        )
+        await persist_extraction(session, scope=scope, chunk=chunk, raw=raw, run=run)
+        candidate = await session.scalar(select(GraphNodeCandidate).where(
+            GraphNodeCandidate.extraction_run_id == run.id,
+        ))
+        assert candidate is not None and candidate.status == CandidateStatus.REVIEW_REQUIRED
+        assert await session.scalar(select(func.count()).select_from(GraphSyncOutbox)) == 0
+        await ReviewService(session).approve_node(
+            actor=seeded.actor, curriculum_edition_id=seeded.edition_id,
+            candidate_id=candidate.id, rationale="Reviewed the source-grounded test step.",
+        )
+        await persist_extraction(session, scope=scope, chunk=chunk, raw=raw, run=run)
+        await session.refresh(candidate)
+        assert str(candidate.status) == "approved"
+        assert await session.scalar(select(func.count()).select_from(GraphSyncOutbox)) == 1
+        support = await session.scalar(select(NodeCandidateEvidenceSupport).where(
+            NodeCandidateEvidenceSupport.node_candidate_id == candidate.id,
+        ))
+        assert support is not None
+        evidence = await session.get(Evidence, support.evidence_id)
+        assert evidence is not None and evidence.evidence_snippet == chunk.content
+
+
 async def test_stale_evidence_fails_closed(
     review_database: async_sessionmaker[AsyncSession],
 ) -> None:

@@ -553,11 +553,14 @@ class ModelRouter:
             if self._clock() >= deadline:
                 break
             try:
-                output = await self._gateway(profile).structured_generate(
-                    task=task,
-                    messages=messages,
-                    output_type=output_type,
-                    model_tier=ModelTier.DEFAULT,
+                output = await asyncio.wait_for(
+                    self._gateway(profile).structured_generate(
+                        task=task,
+                        messages=messages,
+                        output_type=output_type,
+                        model_tier=ModelTier.DEFAULT,
+                    ),
+                    timeout=max(0.0, deadline - self._clock()),
                 )
                 # Defense in depth: a custom gateway implementation cannot bypass
                 # the structured-output contract enforced by the router boundary.
@@ -572,7 +575,7 @@ class ModelRouter:
                 last_exc = exc
                 await self._health.failed(profile.profile_id)
                 break
-            except (GatewayError, ValidationError) as exc:
+            except (GatewayError, ValidationError, TimeoutError) as exc:
                 failures += 1
                 last_exc = exc
                 await self._health.failed(profile.profile_id)

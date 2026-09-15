@@ -8,6 +8,7 @@
  */
 
 import { UUID_PATTERN, type EvidenceLocator } from "../knowledge/contracts";
+import { derivationBridgeSchema, type DerivationBridge } from "./derivation";
 
 export const TEACHING_MODES = [
   "learn_concepts",
@@ -569,6 +570,7 @@ export type TeachingTurnResult = Readonly<{
   }>;
   evidence_packet: EvidencePacket;
   response: Readonly<{
+    derivation_bridge?: DerivationBridge | null;
     orientation: string;
     claims: readonly Readonly<{
       text: string;
@@ -2160,6 +2162,19 @@ export function parseTeachingTurnResult(value: unknown): TeachingTurnResult {
     };
   });
   const evidencePacket = parseEvidencePacket(input.evidence_packet, "turnResult.evidence_packet");
+  const bridge = responseInput.derivation_bridge == null ? null : derivationBridgeSchema.parse(responseInput.derivation_bridge);
+  if (bridge) {
+    if (releaseInput.release_level === "question_only" || releaseInput.release_level === "hint") {
+      fail("turnResult.response.derivation_bridge", "a release level permitting worked steps");
+    }
+    if (releaseInput.release_level === "scaffold" && (!bridge.partial || bridge.missing_steps.length > 1)) {
+      fail("turnResult.response.derivation_bridge", "at most one partial worked step");
+    }
+    const refs = [...bridge.source_refs, ...bridge.missing_steps.flatMap((step) => step.source_refs)];
+    if (refs.some((ref) => !evidencePacket.evidence.some((item) => item.evidence_id === ref.evidence_id && item.evidence_snippet.includes(ref.quote)))) {
+      fail("turnResult.response.derivation_bridge", "exact published evidence spans");
+    }
+  }
   const evidenceIds = new Set(evidencePacket.evidence.map((item) => item.evidence_id));
   const scientificResults = array(input.scientific_results, "turnResult.scientific_results").map((item, index) =>
     parseScientificResult(item, `turnResult.scientific_results[${index}]`),
@@ -2344,6 +2359,7 @@ export function parseTeachingTurnResult(value: unknown): TeachingTurnResult {
     },
     evidence_packet: evidencePacket,
     response: {
+      derivation_bridge: bridge,
       orientation: text(responseInput.orientation, "turnResult.response.orientation", 1_200),
       claims,
       next_question: text(responseInput.next_question, "turnResult.response.next_question", 1_000),

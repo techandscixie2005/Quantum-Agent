@@ -232,7 +232,7 @@ class AttachmentRuntime:
                     MultimodalExtraction.pipeline_version == pipeline_version,
                 )
             )
-            if extraction is None:
+            if extraction is None or extraction.status == MultimodalExtractionStatus.FAILED:
                 extraction = await self.process(session, attachment=attachment)
         else:
             extraction = await self.latest_extraction(session, attachment_id=attachment.id)
@@ -315,6 +315,10 @@ class AttachmentRuntime:
         *,
         attachment: UserAttachment,
     ) -> MultimodalExtraction:
+        # Serialize same-file uploads through the database, including failed retries.
+        await session.execute(
+            select(UserAttachment.id).where(UserAttachment.id == attachment.id).with_for_update()
+        )
         if attachment.status != AttachmentStatus.READY or not attachment.storage_key:
             raise AttachmentConflictError("Attachment is not ready for perception")
         path = self.storage.resolve(attachment.storage_key, require_file=True)
@@ -330,8 +334,16 @@ class AttachmentRuntime:
                 MultimodalExtraction.pipeline_version == pipeline_version,
             )
         )
-        if existing is not None:
+        if existing is not None and existing.status != MultimodalExtractionStatus.FAILED:
             return existing
+
+        if existing is not None:
+            existing.status = MultimodalExtractionStatus.RUNNING
+            existing.failure_code = None
+            await session.flush()
+            if is_image:
+                return await self._process_image(session, attachment, existing, path)
+            return await self._process_document(session, attachment, existing, path)
 
         extraction = MultimodalExtraction(
             attachment_id=attachment.id,

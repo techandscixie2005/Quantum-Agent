@@ -1,4 +1,5 @@
-.agentShell {
+.agentShell,
+.cmdPalette {
   --paper: #f6f5f0;
   --surface: #fffefb;
   --ink: #15201c;
@@ -16,6 +17,9 @@
   --rail-collapsed: 60px;
   --rail-expanded-right: 420px;
   --stage-max: 880px;
+}
+
+.agentShell {
   min-height: 100vh;
   color: var(--ink);
   background: var(--paper);
@@ -623,7 +627,7 @@
 
 /* ── Command Palette (⌘K / Ctrl+K) ─────────────────────────────────── */
 .cmdOverlay { position: fixed; z-index: 90; inset: 0; display: grid; place-items: start center; padding-top: 12vh; background: rgba(11, 20, 17, .5); backdrop-filter: blur(6px); }
-.cmdPalette { width: min(560px, 92vw); overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: 0 30px 90px rgba(0,0,0,.32); }
+.cmdPalette { position: fixed; z-index: 91; top: 12vh; left: 50%; transform: translateX(-50%); width: min(560px, 92vw); overflow: hidden; border: 1px solid var(--line); border-radius: 14px; color: var(--ink); background: var(--surface); box-shadow: 0 30px 90px rgba(0,0,0,.32); }
 .cmdPalette > header { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .cmdPalette > header svg { width: 18px; color: var(--muted); }
 .cmdPalette > header input { flex: 1; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 16px; }
@@ -1025,4 +1029,33 @@
 .goldenLoopToggle:hover { background: color-mix(in srgb, var(--mint) 34%, transparent); }
 
 .goldenLoopToggle svg { width: 15px; }
+.bridgeSheet {
+  display: grid;
+  gap: 16px;
+  line-height: 1.7;
+}
 
+.bridgeSheet details {
+  padding: 12px 16px;
+  border-left: 2px solid #c4d7d0;
+  background: #f6f8f5;
+}
+
+.bridgeSheet summary { cursor: pointer; }
+.bridgeSheet blockquote { margin: 12px 0 0; font-size: 14px; }
+.bridgeSheet blockquote footer { color: #566b63; font-size: 12px; }
+.bridgeSheet ul { padding-left: 20px; }
+
+.bridgeInputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.bridgeInputs label { display: grid; gap: 6px; font-size: 12px; }
+.bridgeInputs textarea { width: 100%; padding: 8px; border: 1px solid #c4d7d0; border-radius: 6px; }
+
+@media (max-width: 600px) {
+  .bridgeInputs { grid-template-columns: 1fr; }
+}

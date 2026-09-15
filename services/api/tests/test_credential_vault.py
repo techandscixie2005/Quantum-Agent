@@ -92,7 +92,7 @@ async def test_vault_treats_corrupt_ciphertext_as_absent() -> None:
     )
     session_id = uuid4()
     # Store garbage bytes directly via the backend to simulate corruption.
-    await vault._backend.store_raw(  # type: ignore[attr-defined]
+    await vault._backend.store_raw(
         f"vault:session:{session_id}:ustc_api", b"not-valid-fernet", ttl_seconds=60
     )
     assert await vault.load(session_id) is None
@@ -106,7 +106,7 @@ def test_build_credential_vault_disabled_when_no_key() -> None:
 def test_build_credential_vault_uses_memory_when_no_redis() -> None:
     vault = build_credential_vault(fernet_key=_fernet_key(), redis_url=None)
     assert vault is not None
-    assert isinstance(vault._backend, MemoryCredentialVaultBackend)  # type: ignore[attr-defined]
+    assert isinstance(vault._backend, MemoryCredentialVaultBackend)
 
 
 def test_digest_api_key_is_stable_and_does_not_leak() -> None:
@@ -198,7 +198,7 @@ async def test_vision_and_ocr_gateway_uses_logged_in_session_credential() -> Non
     gateway = await factory.vision_gateway_for_session(session_id)
 
     assert gateway is not None
-    assert gateway._api_key.get_secret_value() == session_key  # type: ignore[attr-defined]
+    assert gateway._api_key.get_secret_value() == session_key
     assert await factory.vision_gateway_for_session(uuid4()) is None
 
 

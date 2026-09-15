@@ -40,6 +40,7 @@ from quantum_agent.knowledge.retrieval import (
 )
 from quantum_agent.knowledge.review import ReviewService
 from quantum_agent.llm.embeddings import HashingEmbeddingGateway
+from tests.real_course_support import TEXTBOOK_FILENAME, publish_test_textbook
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 API_ROOT = Path(__file__).resolve().parents[1]
@@ -55,7 +56,7 @@ async def test_real_material_reaches_review_graph_and_hybrid_evidence_packet(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Phase-1 smoke: real XLSX -> review -> graph -> cited retrieval."""
+    """Real taxonomy navigation plus reviewed textbook prose -> cited retrieval."""
 
     _require_real_materials()
     database_path = tmp_path / "phase1-real.sqlite3"
@@ -153,6 +154,7 @@ async def test_real_material_reaches_review_graph_and_hybrid_evidence_packet(
                 candidate_id=candidate.id,
                 rationale="The concept label is an exact worksheet row claim.",
             )
+            await publish_test_textbook(session, actor, taxonomy_edition_id)
             await session.commit()
             candidate_id = candidate.id
 
@@ -195,12 +197,11 @@ async def test_real_material_reaches_review_graph_and_hybrid_evidence_packet(
         assert packet.curriculum_edition_id == taxonomy_edition_id
         assert packet.evidence
         citation = packet.evidence[0]
-        assert citation.source_file_name == "量子物理-知识图谱(1).xlsx"
-        assert "波函数的统计解释" in citation.evidence_snippet
+        assert citation.source_file_name == TEXTBOOK_FILENAME
         assert citation.evidence_snippet in citation.source_chunk
-        assert citation.locator.locator_type is LocatorType.XLSX_ROW
-        assert citation.locator.sheet_name == "Sheet3"
-        assert citation.locator.row_start == 41
+        assert citation.locator.locator_type is LocatorType.PDF_PAGE
+        assert citation.locator.physical_page is not None
+        assert all(item.source_file_name != "量子物理-知识图谱(1).xlsx" for item in packet.evidence)
         assert any(node.id == candidate_id for node in packet.graph_nodes)
         assert RetrievalChannel.SEMANTIC in packet.degraded_channels
     finally:

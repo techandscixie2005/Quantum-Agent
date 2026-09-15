@@ -57,6 +57,7 @@ import {
   type AgentAttachment,
 } from "./contracts";
 import { AgentEquation } from "./AgentEquation";
+import { DerivationBridgePanel } from "./DerivationBridgePanel";
 import {
   CognitiveMirrorPanel,
   LearningNativeSurface,
@@ -645,6 +646,9 @@ export function AgentExperience() {
   });
   const [courseKey, setCourseKey] = useState<string | null>(null);
   const [mode, setMode] = useState<TeachingMode>("review_derivations");
+  const [bridgeSource, setBridgeSource] = useState("");
+  const [bridgeTarget, setBridgeTarget] = useState("");
+  const bridgeDetailsRef = useRef<HTMLDetailsElement>(null);
   const [message, setMessage] = useState("");
   const [attempt, setAttempt] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -690,9 +694,20 @@ export function AgentExperience() {
   const courses = useMemo(() => contextQuery.data?.courses ?? [], [contextQuery.data?.courses]);
   useEffect(() => {
     if (!courseKey && courses[0]) {
-      setCourseKey(`${courses[0].course_id}:${courses[0].curriculum_edition_id}`);
+      let stored: string | null = null;
+      try { stored = window.localStorage.getItem("qa_course_key"); } catch { /* unavailable */ }
+      const restored = courses.find(
+        (course) => `${course.course_id}:${course.curriculum_edition_id}` === stored,
+      );
+      const selected = restored ?? courses[0];
+      setCourseKey(`${selected.course_id}:${selected.curriculum_edition_id}`);
+      if (stored && !restored) setConversationId(null);
     }
   }, [courseKey, courses]);
+  useEffect(() => {
+    if (!courseKey) return;
+    try { window.localStorage.setItem("qa_course_key", courseKey); } catch { /* unavailable */ }
+  }, [courseKey]);
   // PRD V3.0 P0-2: persist the conversation ID across refresh / new tab so
   // Solo Mode and the durable Learning Phase survive a page reload.  The
   // backend is the source of truth; this only restores the thread identity.
@@ -735,7 +750,7 @@ export function AgentExperience() {
   const activeCourse =
     courses.find(
       (course) => `${course.course_id}:${course.curriculum_edition_id}` === courseKey,
-    ) ?? courses[0] ?? null;
+    ) ?? null;
   const scope = activeCourse ? scopeFromCourse(activeCourse) : null;
 
   // Release-review P1 fix: recover a pending HITL pause after a refresh.
@@ -1019,6 +1034,7 @@ export function AgentExperience() {
 
   function submit() {
     if (!scope || interrupt || turnMutation.isPending || resumeMutation.isPending) return;
+    if (bridgeDetailsRef.current) bridgeDetailsRef.current.open = false;
     const ready = uploads.filter((item) => item.remote && item.state === "ready");
     const codeAttempt = mode === "work_on_projects" ? `\n\n[当前代码]\n${projectCode}` : "";
     const combinedAttempt = [attempt.trim(), codeAttempt]
@@ -1059,7 +1075,9 @@ export function AgentExperience() {
       scope,
       mode,
       conversationId,
-      message: message.trim() || fallbackMessage,
+      message: mode === "review_derivations" && bridgeSource.trim() && bridgeTarget.trim()
+        ? `${message.trim() || "请补全这两行之间的推导桥。"}\n原式：${bridgeSource.trim()}\n目标式：${bridgeTarget.trim()}`.slice(0, 4000)
+        : message.trim() || fallbackMessage,
       attempt: combinedAttempt,
       attachmentIds: ready.flatMap((item) => (item.remote ? [item.remote.id] : [])),
       scientificRequest,
@@ -1212,11 +1230,10 @@ export function AgentExperience() {
               key={item.id}
               className={styles.railIconButton}
               data-active={mode === item.id ? "true" : "false"}
+              disabled={Boolean(interrupt) || turnMutation.isPending || resumeMutation.isPending}
               onClick={() => {
+                // Modes share one episode, including pending review and learning phase.
                 setMode(item.id);
-                setResult(null);
-                setInterrupt(null);
-                setConfirmedTranscription("");
                 setLeftOpen(false);
               }}
               aria-label={`${item.label}模式 · ${item.short}`}
@@ -1359,6 +1376,10 @@ export function AgentExperience() {
 
           {mode === "work_on_projects" ? (
             <section className={styles.codePanel}><header><div><p className={styles.kicker}>MILESTONE ARTIFACT</p><h2>当前可运行片段</h2></div><span>Python</span></header><AgentCodeEditor value={projectCode} onChange={setProjectCode} /></section>
+          ) : null}
+
+          {result?.response.derivation_bridge && nativeState?.solo?.status !== "active" && !loopDone ? (
+            <DerivationBridgePanel bridge={result.response.derivation_bridge} evidence={result.evidence_packet} />
           ) : null}
 
           {result?.code_artifact ? (
@@ -1562,6 +1583,15 @@ export function AgentExperience() {
               aria-label="给 Quantum Agent 的问题"
               disabled={Boolean(interrupt)}
             />
+            {mode === "review_derivations" ? (
+              <details ref={bridgeDetailsRef}>
+                <summary>补全课件跳步：指定推导的起止式</summary>
+                <div className={styles.bridgeInputs}>
+                <label>原式<textarea value={bridgeSource} onChange={(event) => setBridgeSource(event.target.value)} maxLength={1000} rows={2} aria-label="推导桥原式" disabled={Boolean(interrupt)} /></label>
+                <label>目标式<textarea value={bridgeTarget} onChange={(event) => setBridgeTarget(event.target.value)} maxLength={1000} rows={2} aria-label="推导桥目标式" disabled={Boolean(interrupt)} /></label>
+                </div>
+              </details>
+            ) : null}
             {showAttempt && (mode === "review_derivations" || mode === "learn_concepts") ? <textarea className={styles.attemptInput} value={attempt} onChange={(event) => setAttempt(event.target.value)} placeholder="可选：粘贴当前尝试或 LaTeX 推导" rows={2} maxLength={12_000} aria-label="学生当前尝试" disabled={Boolean(interrupt)} /> : null}
             <footer>
               <div>
@@ -1576,7 +1606,7 @@ export function AgentExperience() {
               <button
                 className={styles.sendButton}
                 onClick={submit}
-                disabled={Boolean(interrupt) || turnMutation.isPending || resumeMutation.isPending || uploading || (!message.trim() && uploads.length === 0)}
+                disabled={Boolean(interrupt) || turnMutation.isPending || resumeMutation.isPending || uploading || (!message.trim() && uploads.length === 0 && !(mode === "review_derivations" && bridgeSource.trim() && bridgeTarget.trim()))}
               >
                 {turnMutation.isPending || resumeMutation.isPending ? <LoaderCircle className={styles.spin} /> : <Send />}
                 <span>{interrupt ? "先完成上方复核" : turnMutation.isPending ? "执行工作流" : "发送 / 运行"}</span>
@@ -1673,11 +1703,10 @@ export function AgentExperience() {
                       key={item.id}
                       className={styles.cmdItem}
                       data-active={mode === item.id ? "true" : "false"}
+                      disabled={Boolean(interrupt) || turnMutation.isPending || resumeMutation.isPending}
                       onClick={() => {
+                        // Modes share one episode, including pending review and learning phase.
                         setMode(item.id);
-                        setResult(null);
-                        setInterrupt(null);
-                        setConfirmedTranscription("");
                         setCmdOpen(false);
                         setCmdQuery("");
                       }}

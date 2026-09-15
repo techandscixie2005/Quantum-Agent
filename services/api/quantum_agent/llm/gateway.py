@@ -195,7 +195,7 @@ class ModelGateway(Protocol):
     async def probe(self) -> GatewayCapabilities: ...
 
 
-class FakeModelGateway[T]:
+class FakeModelGateway:
     """Deterministic test double; unit tests never spend model tokens."""
 
     def __init__(self, responses: Mapping[str, Any] | None = None) -> None:

@@ -93,12 +93,25 @@ class MultimodalPerceptionService:
             mime_type=mime_type,
             instruction=self._instruction(),
         )
+        # Some compatible providers wrap otherwise valid JSON in a single code
+        # fence. Strip only that envelope; never repair symbols or JSON values.
+        raw = raw.strip()
+        if raw.startswith("```json\n") and raw.endswith("\n```"):
+            raw = raw[8:-4].strip()
         try:
             model_evidence = VisualModelEvidence.model_validate_json(raw)
         except (ValidationError, ValueError) as error:
             raise PerceptionValidationError(
                 "vision output failed the structured evidence contract"
             ) from error
+
+        if not (
+            model_evidence.detected_text.strip() or model_evidence.equations
+            or model_evidence.derivation_steps or model_evidence.diagram_interpretation
+            or model_evidence.plot_interpretation or model_evidence.figure_description
+            or model_evidence.ambiguities
+        ):
+            raise PerceptionValidationError("vision output contains no observable evidence")
 
         low_confidence_item = any(
             equation.confidence < self._confirmation_threshold

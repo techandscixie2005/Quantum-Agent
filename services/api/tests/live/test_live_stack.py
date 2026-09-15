@@ -59,7 +59,7 @@ async def test_compose_dependencies_are_real_healthy_and_migrated() -> None:
                 await connection.scalar(text("SELECT count(*) FROM student_visible_chunks")) or 0
             )
         assert vector_version is not None
-        assert migration == "0007"
+        assert migration == "0008"
         assert checkpoint_tables == {
             "checkpoints",
             "checkpoint_blobs",
@@ -67,8 +67,13 @@ async def test_compose_dependencies_are_real_healthy_and_migrated() -> None:
             "checkpoint_migrations",
         }
         if os.environ.get("QA_LIVE_REQUIRE_CORPUS") == "1":
-            assert published_sources == 5
-            assert visible_chunks == 1971
+            assert published_sources > 0
+            assert visible_chunks > 0
+            # Chunk counts change with reviewed document versions and parser
+            # revisions. A deployment may pin a snapshot explicitly.
+            expected_chunks = os.environ.get("QA_LIVE_EXPECTED_VISIBLE_CHUNKS")
+            if expected_chunks is not None:
+                assert visible_chunks == int(expected_chunks)
     finally:
         await engine.dispose()
 

@@ -1,5 +1,8 @@
 # Quantum Agent — Implementation Completion Report
 
+> Historical TypeScript implementation report. For the current Python backend
+> and `QuantumAgent_收敛核心方案.md`, use [the core-plan acceptance record](CORE_PLAN_ACCEPTANCE.md).
+
 **Date**: 2026-07-12
 **Baseline commit**: 9f3b5e349aa286e701b74abd1f21aa9ad6a9b267
 **Final branch**: main (working tree, uncommitted)

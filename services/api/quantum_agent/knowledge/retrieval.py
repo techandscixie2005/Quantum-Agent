@@ -122,6 +122,9 @@ GRAPH_SEARCH_NODE_TYPES: Final[tuple[NodeType, ...]] = (
     NodeType.APPROXIMATION,
     NodeType.FORMULA,
     NodeType.DERIVATION,
+    NodeType.DERIVATION_STEP,
+    NodeType.ASSUMPTION,
+    NodeType.VALIDITY_CONDITION,
 )
 CHANNEL_ORDER: Final[tuple[RetrievalChannel, ...]] = (
     RetrievalChannel.FULL_TEXT,
@@ -279,11 +282,14 @@ def build_postgres_full_text_statement(term_count: int) -> Select[Any]:
     fallback_match = or_(*fallback_matches)
     score = (
         func.coalesce(func.ts_rank_cd(STUDENT_VISIBLE_CHUNKS.c.search_vector, ts_query), 0.0)
-        + case((fallback_match, 0.05), else_=0.0)
+        + sum(case((match, 0.05), else_=0.0) for match in fallback_matches)
     ).label("raw_score")
     return (
         select(STUDENT_VISIBLE_CHUNKS.c.id.label("chunk_id"), score)
-        .where(*_visibility_predicates(), or_(vector_match, fallback_match))
+        .where(
+            *_visibility_predicates(), or_(vector_match, fallback_match),
+            STUDENT_VISIBLE_CHUNKS.c.source_role.not_in(("knowledge_export", "syllabus")),
+        )
         .order_by(score.desc(), STUDENT_VISIBLE_CHUNKS.c.id.asc())
         .limit(bindparam("limit", type_=Integer()))
     )
@@ -305,7 +311,10 @@ def build_sqlite_lexical_statement(term_count: int) -> Select[Any]:
             STUDENT_VISIBLE_CHUNKS.c.id.label("chunk_id"),
             literal(1.0, type_=Float()).label("raw_score"),
         )
-        .where(*_visibility_predicates(), or_(*matches))
+        .where(
+            *_visibility_predicates(), or_(*matches),
+            STUDENT_VISIBLE_CHUNKS.c.source_role.not_in(("knowledge_export", "syllabus")),
+        )
         .order_by(
             STUDENT_VISIBLE_CHUNKS.c.publication_priority.desc(),
             STUDENT_VISIBLE_CHUNKS.c.authority_priority.desc(),
@@ -326,6 +335,7 @@ def build_postgres_semantic_statement() -> Select[Any]:
         .where(
             *_visibility_predicates(),
             STUDENT_VISIBLE_CHUNKS.c.embedding.is_not(None),
+            STUDENT_VISIBLE_CHUNKS.c.source_role.not_in(("knowledge_export", "syllabus")),
             STUDENT_VISIBLE_CHUNKS.c.embedding_dimension == EMBEDDING_DIMENSION,
             STUDENT_VISIBLE_CHUNKS.c.embedding_model
             == bindparam("embedding_model", type_=String()),
@@ -403,7 +413,37 @@ def build_hydration_statement() -> Select[Any]:
 
 _QUERY_PUNCTUATION = re.compile(r"^\W+$", re.UNICODE)
 _QUERY_STOP_WORDS: Final[frozenset[str]] = frozenset(
-    {"什么", "为何", "为什么", "如何", "怎么", "是否", "一个", "这个", "那个", "请问", "的", "是"}
+    {"什么", "为何", "为什么", "如何", "怎么", "是否", "一个", "这个", "那个", "请问", "的", "是",
+     "继续", "学习", "循环", "提交", "迁移", "尝试", "作答", "solo", "mode", "learning", "native",
+     "the", "a", "an", "of", "in", "is", "to", "and", "for", "it", "as", "at", "by", "or", "be"}
+)
+
+# Course questions are commonly Chinese while the two main textbooks are
+# English. These bounded terminology aliases apply to all lexical channels;
+# they do not translate or rewrite authoritative source text.
+_COURSE_TERMS: Final[tuple[tuple[str, ...], ...]] = (
+    ("隧穿", "势垒", "tunnel", "barrier", "tunneling", "tunnelling"),
+    ("波函数", "wave function", "wavefunction"),
+    ("完备", "completeness", "complete basis"),
+    ("正交", "orthogonal", "orthonormal"),
+    ("厄米", "hermitian"),
+    ("对易", "commutator", "commutation"),
+    ("谐振子", "harmonic oscillator"),
+    ("微扰", "perturbation", "perturbative"),
+    ("变分", "variational"),
+    ("角动量", "angular momentum"),
+    ("自旋", "spin"),
+    ("表象", "representation"),
+    ("不确定", "uncertainty"),
+    ("分子", "molecular", "molecule"),
+    ("光谱", "spectra", "spectroscopy"),
+    ("选择定则", "selection rule"),
+    ("势阱", "势箱", "potential well", "particle in a box"),
+    ("归一化", "normalization", "normalized"),
+    ("动能", "kinetic energy"),
+    ("本征值", "eigenvalue"),
+    ("概率", "probability"),
+    ("拉比", "rabi"),
 )
 
 
@@ -413,14 +453,17 @@ def lexical_query_terms(query: str, *, limit: int = 8) -> tuple[str, ...]:
     normalized = " ".join(query.strip().split())
     if not normalized:
         raise ValueError("query must not be blank")
-    terms: list[str] = []
+    aliases = [term for group in _COURSE_TERMS
+               if any(term in normalized.casefold() for term in group) for term in group]
+    terms: list[str] = list(dict.fromkeys(aliases))
     for token in jieba.lcut_for_search(normalized, HMM=False):
         value = token.strip().casefold()
         if (
             not value
             or value in _QUERY_STOP_WORDS
             or _QUERY_PUNCTUATION.fullmatch(value)
-            or (len(value) == 1 and not value.isascii())
+            or len(value) == 1
+            or value.replace(".", "", 1).isdigit()
         ):
             continue
         if value not in terms:
@@ -432,6 +475,39 @@ def lexical_query_terms(query: str, *, limit: int = 8) -> tuple[str, ...]:
 
 def _escape_like(term: str) -> str:
     return "%" + term.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+
+
+def passage_matches_query(passage: str, terms: Sequence[str]) -> bool:
+    """Match the actual quoted span; units must not match inside prose words."""
+
+    lowered = passage.casefold()
+    return any(
+        bool(re.search(r"(?<![a-z])" + re.escape(term) + r"s?(?![a-z])", lowered))
+        if term.isascii() and any(char.isalpha() for char in term)
+        else term in lowered
+        for term in terms
+    )
+
+
+def is_instructional_passage(text: str) -> bool:
+    """Exclude navigation/bibliography pages, not immutable source storage."""
+
+    compact = " ".join(text.casefold().split())
+    if text.lstrip().startswith("知识点\t"):
+        return False
+    if len(re.findall(r"(?:\.\s*){4,}", text)) >= 3:
+        return False
+    if re.match(
+        r"^(?:(?:[ivxlcdm]+|\d+)\s+)?"
+        r"(目录|目次|contents|table of contents|参考书目|参考教材|参考文献)\b",
+        compact,
+    ):
+        return False
+    entries = re.findall(r"(?:第[一二三四五六七八九十\d]+[章节]|chapter\s+\d+)", compact)
+    # Course reading lists name many chapters but do not establish physics.
+    return not (len(entries) >= 3 and any(word in compact for word in (
+        "参考", "教材", "目录", "contents", "reading list",
+    )))
 
 
 def _as_uuid(value: object, field_name: str) -> UUID:
@@ -1061,13 +1137,32 @@ class HybridEvidenceRetriever:
         if unresolved_graph_chunks:
             degraded.add(RetrievalChannel.GRAPH)
             warnings.append("neo4j_graph_omitted:exact_relational_evidence_not_found")
+        terms = lexical_query_terms(query, limit=16)
+        relevant_ids = {
+            chunk_id for chunk_id in visible_chunk_ids
+            if any(
+                is_instructional_passage(record.source_chunk)
+                and passage_matches_query(record.evidence_snippet, terms)
+                for record in hydrated[chunk_id]
+            )
+        }
+        if relevant_ids != visible_chunk_ids:
+            warnings.append("course_evidence_omitted:non_instructional_or_no_query_overlap")
+        visible_chunk_ids = relevant_ids
+        hydrated = {
+            chunk_id: tuple(record for record in records if (
+                is_instructional_passage(record.source_chunk)
+                and passage_matches_query(record.evidence_snippet, terms)
+            ))
+            for chunk_id, records in hydrated.items() if chunk_id in visible_chunk_ids
+        }
         rankings = {
             run.channel: [
                 hit
                 for hit in run.rankings
                 if hit.chunk_id
                 in (
-                    verified_graph_chunk_ids
+                    verified_graph_chunk_ids & visible_chunk_ids
                     if run.channel is RetrievalChannel.GRAPH
                     else visible_chunk_ids
                 )

@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, TypeVar
 from uuid import UUID, uuid4
 
 import pytest
@@ -57,7 +58,13 @@ from quantum_agent.knowledge.evidence_packets import (
     RetrievalCoverage,
 )
 from quantum_agent.knowledge.retrieval import RetrievalScope
-from quantum_agent.llm.gateway import FakeModelGateway, GatewayError, ModelTier
+from quantum_agent.llm.gateway import (
+    FakeModelGateway,
+    GatewayCapabilities,
+    GatewayError,
+    Message,
+    ModelTier,
+)
 from quantum_agent.teaching.learning_native import (
     CommitmentProposal,
     LearningNativePolicy,
@@ -78,11 +85,14 @@ from quantum_agent.teaching.models import (
     SoloModeStatus,
     TeachBackSubmission,
     TeachingTurnInput,
+    TeachingTurnResult,
     TransferType,
     WorkflowStepName,
     WorkflowStepStatus,
 )
 from quantum_agent.tutor.graph import TutorGraph
+
+T = TypeVar("T")
 
 API_ROOT = Path(__file__).resolve().parents[1]
 
@@ -768,11 +778,12 @@ class TestAsyncProposals:
     async def test_propose_commitment_returns_none_on_gateway_error(self) -> None:
         class FailingGateway:
             async def structured_generate(
-                self, *, task: str, messages, output_type, model_tier=ModelTier.DEFAULT
-            ):
+                self, *, task: str, messages: Sequence[Message], output_type: type[T],
+                model_tier: ModelTier = ModelTier.DEFAULT,
+            ) -> T:
                 raise GatewayError("boom")
 
-            async def probe(self):
+            async def probe(self) -> GatewayCapabilities:
                 from quantum_agent.llm.gateway import GatewayCapabilities
 
                 return GatewayCapabilities()
@@ -835,6 +846,7 @@ class TestTutorGraphLearningNative:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         # PRD V3.0 Axiom 1 (fail-closed): with no model gateway, the
@@ -898,6 +910,7 @@ class TestTutorGraphLearningNative:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
             rows = list(
                 (
@@ -912,13 +925,6 @@ class TestTutorGraphLearningNative:
         assert result.learning_native.commitment is not None
         assert result.learning_native.commitment.accepted is True
         assert any(item.kind is LearningEvidenceKind.COMMITMENT for item in rows)
-        assert any(
-            item.kind is LearningEvidenceKind.CONFIDENCE
-            for item in (
-                result.learning_native.evidence_persisted  # type: ignore[attr-defined]
-            )
-            if False
-        ) or True  # evidence_persisted is a list of kind strings
         assert "commitment" in result.learning_native.evidence_persisted
         assert "confidence" in result.learning_native.evidence_persisted
 
@@ -985,6 +991,7 @@ class TestTutorGraphLearningNative:
                 curriculum_edition_id=seed.edition_id,
                 request=request2,
             )
+            assert isinstance(result2, TeachingTurnResult)
             await session.commit()
             attempt_rows = list(
                 (
@@ -1075,6 +1082,7 @@ class TestTutorGraphLearningNative:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         mirror = result.learning_native.cognitive_mirror
@@ -1289,15 +1297,19 @@ class TestCognitiveMirrorEvidenceSemantics:
             seed = await _seed_actor(session)
 
         class _CallTrackingGateway(FakeModelGateway):
-            def __init__(self, *args: object, **kwargs: object) -> None:
-                super().__init__(*args, **kwargs)
+            def __init__(self, responses: Mapping[str, Any] | None = None) -> None:
+                super().__init__(responses)
                 self.compose_calls = 0
 
-            async def structured_generate(self, *args: object, **kwargs: object) -> object:
-                task = kwargs.get("task") or (args[0] if args else "")
+            async def structured_generate(
+                self, *, task: str, messages: Sequence[Message], output_type: type[T],
+                model_tier: ModelTier = ModelTier.DEFAULT,
+            ) -> T:
                 if task == "compose_grounded_teaching_response":
                     self.compose_calls += 1
-                return await super().structured_generate(*args, **kwargs)
+                return await super().structured_generate(
+                    task=task, messages=messages, output_type=output_type, model_tier=model_tier
+                )
 
         gateway = _CallTrackingGateway(
             responses={
@@ -1329,6 +1341,7 @@ class TestCognitiveMirrorEvidenceSemantics:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.commitment is not None
@@ -1386,11 +1399,15 @@ class TestCognitiveMirrorEvidenceSemantics:
                 )
                 self.retriever = retriever
 
-            async def structured_generate(self, *args: object, **kwargs: object) -> object:
-                task = kwargs.get("task") or (args[0] if args else "")
+            async def structured_generate(
+                self, *, task: str, messages: Sequence[Message], output_type: type[T],
+                model_tier: ModelTier = ModelTier.DEFAULT,
+            ) -> T:
                 if task == "propose_cognitive_commitment":
                     assert not self.retriever.retrieved
-                return await super().structured_generate(*args, **kwargs)
+                return await super().structured_generate(
+                    task=task, messages=messages, output_type=output_type, model_tier=model_tier
+                )
 
         async with learning_native_database() as session:
             seed = await _seed_actor(session)
@@ -1412,6 +1429,7 @@ class TestCognitiveMirrorEvidenceSemantics:
                     message="为什么 E<V0 时仍可能透射？",
                 ),
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         # The gate fired, so retrieval was never called.
         assert retriever.retrieved is False, (
@@ -1478,15 +1496,19 @@ class TestDurableLearningPhaseSoloLock:
             await session.commit()
 
         class _CallTrackingGateway(FakeModelGateway):
-            def __init__(self, *args: object, **kwargs: object) -> None:
-                super().__init__(*args, **kwargs)
+            def __init__(self, responses: Mapping[str, Any] | None = None) -> None:
+                super().__init__(responses)
                 self.compose_calls = 0
 
-            async def structured_generate(self, *args: object, **kwargs: object) -> object:
-                task = kwargs.get("task") or (args[0] if args else "")
+            async def structured_generate(
+                self, *, task: str, messages: Sequence[Message], output_type: type[T],
+                model_tier: ModelTier = ModelTier.DEFAULT,
+            ) -> T:
                 if task == "compose_grounded_teaching_response":
                     self.compose_calls += 1
-                return await super().structured_generate(*args, **kwargs)
+                return await super().structured_generate(
+                    task=task, messages=messages, output_type=output_type, model_tier=model_tier
+                )
 
         gateway = _CallTrackingGateway()
         graph = TutorGraph(
@@ -1509,6 +1531,7 @@ class TestDurableLearningPhaseSoloLock:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         # The LLM was NOT called — Solo blocked it before generation.
         assert gateway.compose_calls == 0, (
@@ -1566,6 +1589,7 @@ class TestDurableLearningPhaseSoloLock:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         # Solo is still active — the durable phase was restored.
         assert result.learning_native is not None
@@ -1626,6 +1650,7 @@ class TestDurableLearningPhaseSoloLock:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         # Solo stays ACTIVE because the attempt was not verified.
         assert result.learning_native is not None
@@ -1679,6 +1704,7 @@ class TestDurableLearningPhaseSoloLock:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.solo is not None
@@ -1732,6 +1758,7 @@ class TestDurableLearningPhaseSoloLock:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.solo is not None
@@ -1788,6 +1815,7 @@ class TestTeachBackAndTransferUIInitiation:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         # The Teach-Back card is rendered (teach_back is non-null) and the
         # durable phase advanced from AWAITING_REVISION to
@@ -1843,6 +1871,7 @@ class TestTeachBackAndTransferUIInitiation:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.transfer is not None
@@ -1904,6 +1933,7 @@ class TestTeachBackAndTransferUIInitiation:
                 curriculum_edition_id=seed.edition_id,
                 request=request,
             )
+            assert isinstance(result, TeachingTurnResult)
             await session.commit()
         # Solo Mode is armed deterministically even without a model proposal.
         assert result.learning_native is not None
@@ -1932,3 +1962,39 @@ class TestTeachBackAndTransferUIInitiation:
             assert phase["active_transfer_task_prompt"] == (
                 LearningNativePolicy.FALLBACK_TRANSFER_PROMPT
             )
+
+
+def test_teach_back_absence_placeholder_does_not_become_a_contradiction() -> None:
+    from quantum_agent.teaching.models import TeachBackFinding, TeachBackRelation
+
+    real_issue = "The student claims that nonzero amplitude implies probability greater than one."
+    proposal = TeachBackProposal(
+        covered_relations=[
+            TeachBackFinding(
+                relation=TeachBackRelation.COVERED, description="Tunnelling is nonzero."
+            )
+        ],
+        contradictions=[
+            TeachBackFinding(
+                relation=TeachBackRelation.CONTRADICTORY,
+                description=(
+                    "No explicit contradiction was found; the student's statements "
+                    "are consistent with each other."
+                ),
+            ),
+            TeachBackFinding(relation=TeachBackRelation.CONTRADICTORY, description=real_issue),
+            TeachBackFinding(
+                relation=TeachBackRelation.CONTRADICTORY,
+                description="No contradictions found in step one, but step two violates R+T=1.",
+            ),
+        ],
+    )
+    analysis, evidence = LearningNativePolicy().analyze_teach_back(
+        submission_text="The finite barrier admits a nonzero transmitted wave.", proposal=proposal
+    )
+    assert len(analysis.covered_relations) == 1
+    assert [item.description for item in analysis.contradictions] == [
+        real_issue,
+        "No contradictions found in step one, but step two violates R+T=1.",
+    ]
+    assert evidence[0].evidence_json["contradictions"] == 2

@@ -209,7 +209,19 @@ async def retrieve_evidence_node(
     actor = runtime.context.actor
     curriculum_edition_id = runtime.context.curriculum_edition_id
 
-    retrieval_query = " ".join([request.message, *interpretation.relevant_concepts])[:5000]
+    # A UI continuation such as "continue Learning-Native" is not a physics
+    # topic. Carry the scoped, persisted task into retrieval, especially in
+    # Solo where model-generated concept hints are intentionally unavailable.
+    task_context = ""
+    if request.learning_native is not None:
+        durable = runtime.context.started_turn.durable_phase
+        kind = durable.pending_scientific_request.get("kind", "")
+        task_context = " ".join([
+            durable.active_transfer_task_prompt,
+            str(kind).replace("_", " "),
+        ]).strip()
+    contextual_query = " ".join([task_context, request.message]).strip()[:5000]
+    retrieval_query = " ".join([contextual_query, *interpretation.relevant_concepts])[:5000]
     scope = RetrievalScope(
         course_id=actor.course_id,
         curriculum_edition_id=curriculum_edition_id,
@@ -217,7 +229,7 @@ async def retrieve_evidence_node(
     if runtime.context.use_specialist_agents:
         bundle = await EvidenceAgent(retriever).gather(
             scope=scope,
-            query=request.message,
+            query=contextual_query,
             concept_hints=interpretation.relevant_concepts,
         )
         packet = bundle.to_evidence_packet()
@@ -530,7 +542,7 @@ async def scientific_tools_node(
             result.model_copy(
                 update={
                     "observations": [
-                        "Solo 验证已执行；在独立验证通过前，数值结果不予显示。"
+                        "科学校验已执行；此处保留验证状态，不展开数值解答。"
                     ],
                     "metrics": {},
                     "visualization": None,
@@ -1879,6 +1891,26 @@ async def learning_native_node(
         result.status is ScientificVerificationStatus.PASS
         for result in state.get("scientific_results", [])
     )
+    # A scientific action may happen after the student's revision. Record its
+    # verified artifact without advancing or bypassing the pedagogical phase.
+    # Solo results have their own unaided-evidence transition below.
+    if (
+        passed_verification
+        and request.scientific_request is not None
+        and not state.get("answer_withheld_by_gate")
+        and phase_at_start in {
+            LearningPhase.AWAITING_REVISION,
+            LearningPhase.RECONSTRUCTION_REQUIRED,
+            LearningPhase.TRANSFER_REQUIRED,
+        }
+    ):
+        durable_phase = durable_phase.model_copy(
+            update={
+                "completed_stages": _append_learning_stages(
+                    durable_phase.completed_stages, LearningStage.VERIFY
+                ),
+            }
+        )
     # PRD V3.3 root-cause #3 fix: a bare non-empty student_attempt must NOT
     # advance the phase to AWAITING_REVISION.  Invariant C requires a positive
     # learning signal: a scientific PASS correlated with the persisted

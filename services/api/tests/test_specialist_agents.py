@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -227,7 +226,7 @@ async def test_retrieval_warning_is_not_fabricated_as_evidence_conflict() -> Non
 
 
 async def test_diagnosis_skips_model_without_student_attempt() -> None:
-    gateway: FakeModelGateway[Any] = FakeModelGateway()
+    gateway: FakeModelGateway = FakeModelGateway()
     diagnosis_input = DiagnosisInput(
         request=TeachingTurnInput(
             mode=TeachingMode.LEARN_CONCEPTS,
@@ -250,7 +249,7 @@ async def test_diagnosis_skips_model_without_student_attempt() -> None:
 
 
 async def test_invalid_specialist_output_uses_validated_directed_fallback() -> None:
-    gateway: FakeModelGateway[Any] = FakeModelGateway(
+    gateway: FakeModelGateway = FakeModelGateway(
         {
             "diagnose_student_progress_structured": {
                 "status": "observed",
@@ -285,7 +284,7 @@ async def test_invalid_specialist_output_uses_validated_directed_fallback() -> N
 
 
 async def test_specialist_confidence_reason_and_verification_request_are_preserved() -> None:
-    gateway: FakeModelGateway[Any] = FakeModelGateway(
+    gateway: FakeModelGateway = FakeModelGateway(
         {
             "diagnose_student_progress_structured": {
                 "status": "model_inference",
@@ -329,7 +328,7 @@ async def test_specialist_confidence_reason_and_verification_request_are_preserv
 
 
 async def test_typed_scientific_request_cannot_be_downgraded_by_model() -> None:
-    gateway: FakeModelGateway[Any] = FakeModelGateway(
+    gateway: FakeModelGateway = FakeModelGateway(
         {
             "diagnose_student_progress_structured": {
                 "status": "observed",
