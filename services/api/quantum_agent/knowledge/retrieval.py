@@ -55,6 +55,11 @@ from quantum_agent.db_models import (
     EvidenceStatus,
     SourceDocumentVersion,
 )
+from quantum_agent.knowledge.barrier_scope import (
+    BarrierSourceReview,
+    has_subbarrier_scope,
+    is_barrier_case,
+)
 from quantum_agent.knowledge.evidence_packets import (
     EvidenceItem,
     EvidenceKind,
@@ -160,6 +165,8 @@ class RetrievalScope(BaseModel):
 
 class HybridRetrievalConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    barrier_source_reviews: tuple[BarrierSourceReview, ...] = ()
 
     channel_limit: int = Field(default=20, ge=1, le=100)
     max_evidence: int = Field(default=6, ge=1, le=6)
@@ -1137,6 +1144,26 @@ class HybridEvidenceRetriever:
         if unresolved_graph_chunks:
             degraded.add(RetrievalChannel.GRAPH)
             warnings.append("neo4j_graph_omitted:exact_relational_evidence_not_found")
+        if is_barrier_case(query):
+            # Comparison/background material must never enter the direct citation
+            # packet. Reuse the published, scoped, hash-checked records above.
+            binding_fields = (
+                "course_id", "curriculum_edition_id", "document_version_id", "evidence_id",
+                "source_file_sha256", "source_chunk_sha256", "evidence_sha256",
+            )
+            accepted = {
+                chunk_id: tuple(record for record in hydrated[chunk_id] if any(
+                    all(getattr(record, key) == getattr(review, key) for key in binding_fields)
+                    for review in self._config.barrier_source_reviews if has_subbarrier_scope(query)
+                ))
+                for chunk_id in visible_chunk_ids
+            }
+            if any(len(accepted[key]) != len(hydrated[key]) for key in accepted):
+                warnings.append("barrier_comparison_or_unreviewed_sources_excluded")
+            hydrated = {key: records for key, records in accepted.items() if records}
+            visible_chunk_ids = set(hydrated)
+            if not visible_chunk_ids:
+                warnings.append("source_insufficient:barrier_applicability_review_missing")
         terms = lexical_query_terms(query, limit=16)
         relevant_ids = {
             chunk_id for chunk_id in visible_chunk_ids
@@ -1200,7 +1227,7 @@ class HybridEvidenceRetriever:
             evidence_items.append(records[0].to_evidence_item(contributions))
 
         graph_nodes, graph_edges, graph_omitted = self._graph_context(
-            graph_run, verified_graph_chunk_ids
+            graph_run, verified_graph_chunk_ids & visible_chunk_ids
         )
         if graph_omitted:
             warnings.append("neo4j_graph_omitted:unresolved_relational_provenance")

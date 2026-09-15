@@ -220,6 +220,18 @@ async def retrieve_evidence_node(
             durable.active_transfer_task_prompt,
             str(kind).replace("_", " "),
         ]).strip()
+    scientific = (
+        request.scientific_request.model_dump(mode="json")
+        if request.scientific_request is not None
+        else runtime.context.started_turn.durable_phase.pending_scientific_request
+    )
+    if scientific.get("kind") == "rectangular_barrier_tunnelling":
+        task_context += " finite rectangular barrier"
+        energy = scientific.get("energy_eV")
+        height = scientific.get("barrier_height_eV")
+        if isinstance(energy, (int, float)) and isinstance(height, (int, float)):
+            if 0 < energy < height:
+                task_context += " 0<E<V0"
     contextual_query = " ".join([task_context, request.message]).strip()[:5000]
     retrieval_query = " ".join([contextual_query, *interpretation.relevant_concepts])[:5000]
     scope = RetrievalScope(

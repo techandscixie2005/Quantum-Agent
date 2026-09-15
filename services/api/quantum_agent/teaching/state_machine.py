@@ -18,6 +18,7 @@ from quantum_agent.knowledge.evidence_packets import (
 )
 from quantum_agent.knowledge.retrieval import RetrievalScope
 from quantum_agent.llm.gateway import GatewayError, Message, ModelGateway, ModelTier
+from quantum_agent.llm.observability import event, failure_category
 from quantum_agent.science import (
     ScientificToolbox,
     ScientificVerificationMethod,
@@ -237,7 +238,8 @@ async def interpret_turn(
             output_type=InterpretationOutput,
             model_tier=ModelTier.SMALL,
         )
-    except (GatewayError, ValueError):
+    except (GatewayError, ValueError) as exc:
+        event("teaching_interpret_or_diagnose", failure_category(exc))
         return fallback, True
     if interpreted.task_kind not in _allowed_task_kinds(request.mode):
         interpreted.task_kind = fallback.task_kind
@@ -252,6 +254,7 @@ async def diagnose_turn(
     model_gateway: ModelGateway | None,
 ) -> tuple[DiagnosisOutput, bool]:
     if not request.student_attempt:
+        event("diagnosis", "expected_skip:no_student_attempt")
         return (
             DiagnosisOutput(
                 status=DiagnosisStatus.INSUFFICIENT_EVIDENCE,
@@ -293,7 +296,8 @@ async def diagnose_turn(
             model_tier=ModelTier.DEFAULT,
         )
         return diagnosis, False
-    except (GatewayError, ValueError):
+    except (GatewayError, ValueError) as exc:
+        event("teaching_interpret_or_diagnose", failure_category(exc))
         return fallback, True
 
 
@@ -310,6 +314,7 @@ async def draft_response(
         _scientific_result_id(item) for item in scientific_results
     )
     if packet.coverage is RetrievalCoverage.NOT_FOUND:
+        event("compose_grounded_teaching_response", "source_insufficient")
         validation = ValidationReport(
             passed=True,
             citation_ids_valid=True,
@@ -353,6 +358,8 @@ async def draft_response(
         ],
     )
     if course_claim_limit == 0 or model_gateway is None:
+        event("compose_grounded_teaching_response",
+              "expected_skip:release_limit" if course_claim_limit == 0 else "upstream_unconfigured")
         return fallback_response, fallback_validation, model_gateway is None
 
     try:
@@ -396,17 +403,24 @@ async def draft_response(
             output_type=DraftTeachingResponse,
             model_tier=ModelTier.DEFAULT,
         )
-    except (GatewayError, ValueError):
+    except (GatewayError, ValueError) as exc:
+        reason = failure_category(exc)
+        event("compose_grounded_teaching_response", reason)
+        fallback_validation.warnings.append(reason)
         return fallback_response, fallback_validation, True
 
     claims = [*draft.claims[:course_claim_limit], *tool_claims]
     try:
         bridge = constrain_bridge(draft.derivation_bridge, packet, release_level)
     except ValueError:
+        event("compose_grounded_teaching_response", "citation_contract")
+        fallback_validation.warnings.append("citation_contract")
         return fallback_response, fallback_validation, True
     validation = _validate_claims(claims, packet, scientific_result_ids)
     if not validation.passed:
         if bridge is None:
+            event("compose_grounded_teaching_response", "citation_contract")
+            fallback_validation.warnings.append("citation_contract")
             return fallback_response, fallback_validation, True
         # A source-linked bridge can remain useful even when a companion
         # paragraph is mislabeled as a literal quotation. Omit that paragraph;

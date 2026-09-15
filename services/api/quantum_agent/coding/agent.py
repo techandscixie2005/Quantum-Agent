@@ -377,7 +377,7 @@ class CodingAgent:
                         failure_summary=(
                             f"model generation failed: {type(exc).__name__}"
                         ),
-                        stderr_excerpt=str(exc)[:1000],
+                        stderr_excerpt=type(exc).__name__,
                     )
                 )
                 last_execution = CodeExecutionResult(

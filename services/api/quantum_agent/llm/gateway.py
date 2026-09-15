@@ -14,6 +14,14 @@ import httpx
 import httpx2
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, TypeAdapter, ValidationError
 
+from quantum_agent.llm.observability import (
+    event,
+    failure_category,
+    provider_request,
+    provider_response,
+    traced_call,
+)
+
 T = TypeVar("T")
 
 
@@ -122,17 +130,20 @@ async def _retry_transient(
             # the deadline keeps its legacy meaning: it bounds the backoff
             # sleeps, not the attempts themselves.
             budget = min(budget, max(deadline - clock(), 0.0))
+        event(label, "transport_group_started", attempt=attempt)
         try:
             if budget is None:
                 return await operation()
             return await asyncio.wait_for(operation(), timeout=budget)
         except TimeoutError as exc:
+            event(label, "timeout", attempt=attempt)
             last_exc = exc
             if attempt == max_attempts:
                 raise GatewayError(
                     f"{label} exceeded its bounded wall-time budget"
                 ) from exc
         except BaseException as exc:
+            event(label, failure_category(exc), attempt=attempt)
             last_exc = exc
             if not _is_transient_exception(exc) or attempt == max_attempts:
                 raise
@@ -281,6 +292,7 @@ class PydanticAIModelGateway:
     def _model_name(self, tier: ModelTier) -> str:
         return self._small_model if tier is ModelTier.SMALL else self._default_model
 
+    @traced_call
     async def structured_generate(
         self,
         *,
@@ -303,6 +315,10 @@ class PydanticAIModelGateway:
 
         owned_client = self._model_http_client is None
         client = self._model_http_client or httpx2.AsyncClient(timeout=self._timeout_seconds)
+        for hook_name, hook in (("request", provider_request), ("response", provider_response)):
+            hooks = client.event_hooks.setdefault(hook_name, [])
+            if hook not in hooks:
+                hooks.append(hook)
         try:
             provider = OpenAIProvider(
                 base_url=self._base_url,

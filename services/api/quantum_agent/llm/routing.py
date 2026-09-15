@@ -25,6 +25,7 @@ from quantum_agent.llm.gateway import (
     ModelTier,
     PermanentGatewayError,
 )
+from quantum_agent.llm.observability import event, failure_category, traced_call
 
 T = TypeVar("T")
 
@@ -518,6 +519,7 @@ class ModelRouter:
             self._gateways[profile.profile_id] = gateway
         return gateway
 
+    @traced_call
     async def structured_generate(
         self,
         *,
@@ -543,8 +545,10 @@ class ModelRouter:
         failures = 0
         cooling = 0
         last_exc: BaseException | None = None
-        for profile in profiles:
+        for route_attempt, profile in enumerate(profiles, 1):
+            event(task, "route_attempt", attempt=route_attempt)
             if not await self._health.acquire(profile.profile_id):
+                event(task, "expected_skip:cooldown", attempt=route_attempt)
                 cooling += 1
                 continue
             # If the budget is already exhausted, fail fast instead of
@@ -576,6 +580,7 @@ class ModelRouter:
                 await self._health.failed(profile.profile_id)
                 break
             except (GatewayError, ValidationError, TimeoutError) as exc:
+                event(task, failure_category(exc), attempt=route_attempt)
                 failures += 1
                 last_exc = exc
                 await self._health.failed(profile.profile_id)

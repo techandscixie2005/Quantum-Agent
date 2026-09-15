@@ -1,7 +1,6 @@
 "use client";
 
 import { Braces, Check, CircleAlert, LoaderCircle, ShieldCheck } from "lucide-react";
-import Image from "next/image";
 import type { CodeArtifactRun, CodingProgress } from "../teaching/contracts";
 
 const PROGRESS_STEPS: ReadonlyArray<{ key: CodingProgress; label: string }> = [
@@ -56,7 +55,7 @@ export default function CodingArtifactPanel({ run }: { run: CodeArtifactRun }) {
         <Braces />
         <div>
           <strong>Coding Agent</strong>
-          <small>{run.artifact.purpose}</small>
+          <small>已执行程序的指标核验</small>
         </div>
         <VerificationBadge status={run.verification.status} />
       </header>
@@ -79,33 +78,12 @@ export default function CodingArtifactPanel({ run }: { run: CodeArtifactRun }) {
         </p>
       ) : null}
 
-      <details className="qa-coding-code" open>
-        <summary>生成的 Python（由 Coding Agent 现场编写）</summary>
-        <pre data-testid="coding-generated-code">
-          <code>{run.artifact.code}</code>
-        </pre>
-      </details>
-
-      {run.execution.stdout_bounded ? (
-        <details className="qa-coding-stdout">
-          <summary>程序输出（截断）</summary>
-          <pre data-testid="coding-stdout">
-            <code>{run.execution.stdout_bounded}</code>
-          </pre>
-        </details>
-      ) : null}
-
-      {run.figure_png_base64 ? (
-        <figure className="qa-coding-figure" data-testid="coding-figure">
-          <Image
-            src={`data:image/png;base64,${run.figure_png_base64}`}
-            alt="Coding Agent 生成的图"
-            width={420}
-            height={260}
-            unoptimized
-          />
-        </figure>
-      ) : null}
+      <p data-testid="coding-verification-scope">
+        PASS 仅表示本次执行的结构化数值在容差内匹配指定核验器。
+        不认证解释、引文、推导、生成计划或代码注释；这些未核验内容暂停展示。
+        T/R 是透射/反射概率；r/t 是复振幅，不能用 r=1-t。
+        精确判分不采用厚势垒近似。
+      </p>
 
       <dl className="qa-coding-metrics" data-testid="coding-metrics">
         {agentT !== undefined ? (

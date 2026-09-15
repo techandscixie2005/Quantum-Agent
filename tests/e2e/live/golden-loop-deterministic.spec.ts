@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { parseTeachingTurnResult, type TeachingTurnResult } from "../../../app/components/teaching/contracts";
 
 import {
   expect,
@@ -293,7 +294,7 @@ async function submitSoloAttempt(page: Page, response: string): Promise<void> {
   await waitForWorkflowTerminal(page);
 }
 
-async function sendRealTunnellingTurn(page: Page, message: string): Promise<void> {
+async function sendRealTunnellingTurn(page: Page, message: string): Promise<TeachingTurnResult> {
   const experimentsButton = page.getByRole("button", { name: /^实验/ });
   await expect(experimentsButton).toBeVisible();
   await experimentsButton.click();
@@ -316,6 +317,12 @@ async function sendRealTunnellingTurn(page: Page, message: string): Promise<void
   const response = await streamResponse;
   expect(response.ok()).toBe(true);
   await waitForWorkflowTerminal(page);
+  const frames = (await response.text()).replace(/\r\n/g, "\n").split("\n\n");
+  const terminal = frames.find((frame) => frame.startsWith("event: workflow.completed\n"));
+  expect(terminal, "The actual SSE response must contain a completed result").toBeTruthy();
+  const data = terminal!.split("\n").filter((line) => line.startsWith("data: "))
+    .map((line) => line.slice(6)).join("\n");
+  return parseTeachingTurnResult(JSON.parse(data));
 }
 
 /**
@@ -510,14 +517,23 @@ test.describe.serial("Golden Learning Loop · live deterministic 22-stage closur
     await expectPhase(page, "awaiting_revision", 30_000);
 
     // ── Stage 6 + 7 + 8 + 9: Coding Agent + Sandbox + Verification + metrics ──
-    await sendRealTunnellingTurn(
+    const codingTurn = await sendRealTunnellingTurn(
       page,
       "请用矩势垒散射工具计算 E=5eV, V0=10eV, a=1e-10m 的透射概率 T 和反射概率 R，并验证 R+T=1。",
     );
-    // §12 SSE ordering is asserted inside sendRealTunnellingTurn (the evidence
-    // spine must light from a REAL progress event before the terminal).
+    // Inspect the actual terminal SSE payload; this does not certify all event ordering.
     await expect(page.getByTestId("coding-artifact"), "Stage 6: coding-artifact panel must render").toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("coding-generated-code"), "Stage 7: generated code must contain METRICS_JSON").toContainText(/METRICS_JSON/, { timeout: 10_000 });
+    const codingRun = codingTurn.code_artifact;
+    expect(codingRun, "Stage 7: actual backend coding artifact required").toBeTruthy();
+    expect(codingRun!.execution.completed).toBe(true);
+    expect(codingRun!.execution.exit_code).toBe(0);
+    expect(codingRun!.execution.stdout_bounded).toContain("METRICS_JSON");
+    expect(codingRun!.verification.status).toBe("pass");
+    expect(Number(codingRun!.verification.agent_metrics.T)).toBeCloseTo(
+      Number(codingRun!.verification.oracle_metrics.T), 6,
+    );
+    await expect(page.getByTestId("coding-verification-scope")).toContainText("PASS 仅表示");
+    await expect(page.getByTestId("coding-generated-code")).toHaveCount(0);
     await expect(
       page.getByTestId("coding-verification-status"),
       `Stage 8: coding verifier must report PASS\n${await page.getByTestId("coding-artifact").innerText()}`,
@@ -535,10 +551,8 @@ test.describe.serial("Golden Learning Loop · live deterministic 22-stage closur
       page.locator('[data-testid="coding-progress-running"][data-state="done"]'),
       "Stage 7.5a: isolated sandbox execution (coding-progress-running) must reach done",
     ).toBeVisible({ timeout: 10_000 });
-    await expect(
-      page.getByTestId("coding-stdout"),
-      "Stage 7.5b: sandbox stdout must be present (static safety check admitted the code)",
-    ).toContainText(/METRICS_JSON/, { timeout: 10_000 });
+    // Raw stdout/prose remain in the backend artifact, outside the certified display.
+    await expect(page.getByTestId("coding-stdout")).toHaveCount(0);
     await expect(page.getByTestId("tunnelling-metrics"), "Stage 9: tunnelling-metrics must render").toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("tunnelling-regime")).toContainText(/tunnelling/);
     const metricsText = await page.getByTestId("tunnelling-metrics").textContent();

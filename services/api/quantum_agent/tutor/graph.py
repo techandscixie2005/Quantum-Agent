@@ -24,6 +24,7 @@ from quantum_agent.auth import TEACHING_STAFF_ROLES, CourseActor
 from quantum_agent.coding import CodingAgent, RemoteSandbox, SandboxDisabled, SubprocessSandbox
 from quantum_agent.db_models import CourseRole, TeachingTurnStatus
 from quantum_agent.llm.gateway import ModelGateway
+from quantum_agent.llm.observability import event, turn_scope
 from quantum_agent.multimodal.teaching import (
     UnconfirmedPerceptionError,
     resolve_teaching_attachments,
@@ -123,6 +124,7 @@ def _route_after_learning_native_pre(
     workflow.
     """
     if state.get("answer_withheld_by_gate"):
+        event("retrieval_diagnosis_science_generation", "expected_skip:commitment_or_solo_gate")
         return "prepare_commitment_gate"
     return "retrieve_evidence"
 
@@ -311,13 +313,14 @@ class TutorGraph:
         )
         config = self._config(started.conversation.id)
 
-        final_state = await self._execute_graph(
-            initial_state,
-            config,
-            context,
-            on_stage=on_stage,
-            started_at=start_time_monotonic(),
-        )
+        with turn_scope(started.conversation.id, started.turn.id):
+            final_state = await self._execute_graph(
+                initial_state,
+                config,
+                context,
+                on_stage=on_stage,
+                started_at=start_time_monotonic(),
+            )
         if final_state.get("result") is not None:
             return TeachingTurnResult.model_validate(final_state["result"])
         return await self._inspect_interrupt(
