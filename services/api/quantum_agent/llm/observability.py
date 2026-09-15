@@ -20,8 +20,12 @@ if not _LOG.handlers:
 
 
 def failure_category(exc: BaseException) -> str:
+    from quantum_agent.llm.recording_budget import RecordingBudgetError
+
     chain: BaseException | None = exc
     while chain is not None:
+        if isinstance(chain, RecordingBudgetError):
+            return "recording_budget_exhausted"
         if isinstance(chain, TimeoutError) or "timeout" in type(chain).__name__.lower():
             return "timeout"
         if isinstance(chain, ValueError) or type(chain).__name__ in {
@@ -34,6 +38,7 @@ def failure_category(exc: BaseException) -> str:
 
 def event(capability: str, reason: str, *, attempt: int = 0, elapsed: float = 0) -> None:
     # Never accept exception text, prompts, output, credentials, or URLs.
+    _LOG.disabled = False  # Remain observable after application dictConfig setup.
     _LOG.info(json.dumps({
         **(_SCOPE.get() or {}), "capability": capability, "reason": reason,
         "attempt": attempt, "elapsed_seconds": round(elapsed, 6),
@@ -79,6 +84,11 @@ def traced_call[**P, T](
 
 async def provider_request(request: Any) -> None:
     """Runs for every HTTP request, including SDK-internal output retries."""
+    from quantum_agent.llm.recording_budget import active_budget
+
+    budget = active_budget()
+    if budget is not None:
+        budget.reserve(request.content)
     request_id = str(uuid4())
     request.extensions["qa_request_id"] = request_id
     token = _SCOPE.set({**(_SCOPE.get() or {}), "request_id": request_id})

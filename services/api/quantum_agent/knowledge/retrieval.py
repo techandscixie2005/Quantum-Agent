@@ -57,8 +57,11 @@ from quantum_agent.db_models import (
 )
 from quantum_agent.knowledge.barrier_scope import (
     BarrierSourceReview,
+    configured_reviews,
     has_subbarrier_scope,
     is_barrier_case,
+    task_is_barrier,
+    task_matches,
 )
 from quantum_agent.knowledge.evidence_packets import (
     EvidenceItem,
@@ -824,7 +827,7 @@ class HybridEvidenceRetriever:
         self._repository = repository
         self._embedding_gateway = embedding_gateway
         self._graph_store = graph_store
-        self._config = config or HybridRetrievalConfig()
+        self._config = config or HybridRetrievalConfig(barrier_source_reviews=configured_reviews())
 
     async def _run_full_text(self, scope: RetrievalScope, query: str) -> _ChannelRun:
         try:
@@ -1144,7 +1147,7 @@ class HybridEvidenceRetriever:
         if unresolved_graph_chunks:
             degraded.add(RetrievalChannel.GRAPH)
             warnings.append("neo4j_graph_omitted:exact_relational_evidence_not_found")
-        if is_barrier_case(query):
+        if is_barrier_case(query) or task_is_barrier():
             # Comparison/background material must never enter the direct citation
             # packet. Reuse the published, scoped, hash-checked records above.
             binding_fields = (
@@ -1154,7 +1157,8 @@ class HybridEvidenceRetriever:
             accepted = {
                 chunk_id: tuple(record for record in hydrated[chunk_id] if any(
                     all(getattr(record, key) == getattr(review, key) for key in binding_fields)
-                    for review in self._config.barrier_source_reviews if has_subbarrier_scope(query)
+                    for review in self._config.barrier_source_reviews
+                    if has_subbarrier_scope(query) and task_matches(review)
                 ))
                 for chunk_id in visible_chunk_ids
             }
@@ -1227,7 +1231,9 @@ class HybridEvidenceRetriever:
             evidence_items.append(records[0].to_evidence_item(contributions))
 
         graph_nodes, graph_edges, graph_omitted = self._graph_context(
-            graph_run, verified_graph_chunk_ids & visible_chunk_ids
+            graph_run, (verified_graph_chunk_ids & visible_chunk_ids
+                        if is_barrier_case(query) or task_is_barrier()
+                        else verified_graph_chunk_ids)
         )
         if graph_omitted:
             warnings.append("neo4j_graph_omitted:unresolved_relational_provenance")

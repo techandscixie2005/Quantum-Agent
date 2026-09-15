@@ -21,6 +21,7 @@ from quantum_agent.db_models import (
     LearningEvidenceKind,
     TeachingAction,
 )
+from quantum_agent.knowledge.barrier_scope import source_task
 from quantum_agent.knowledge.evidence_packets import EvidencePacket, RetrievalCoverage
 from quantum_agent.knowledge.retrieval import RetrievalScope
 from quantum_agent.multimodal.contracts import ConfirmedEvidence
@@ -223,7 +224,8 @@ async def retrieve_evidence_node(
     scientific = (
         request.scientific_request.model_dump(mode="json")
         if request.scientific_request is not None
-        else runtime.context.started_turn.durable_phase.pending_scientific_request
+        else (runtime.context.started_turn.durable_phase.pending_scientific_request
+              if request.learning_native is not None else {})
     )
     if scientific.get("kind") == "rectangular_barrier_tunnelling":
         task_context += " finite rectangular barrier"
@@ -238,16 +240,17 @@ async def retrieve_evidence_node(
         course_id=actor.course_id,
         curriculum_edition_id=curriculum_edition_id,
     )
-    if runtime.context.use_specialist_agents:
-        bundle = await EvidenceAgent(retriever).gather(
-            scope=scope,
-            query=contextual_query,
-            concept_hints=interpretation.relevant_concepts,
-        )
-        packet = bundle.to_evidence_packet()
-    else:
-        packet = await retriever.retrieve(scope, retrieval_query)
-        bundle = None
+    with source_task(scientific or None):
+        if runtime.context.use_specialist_agents:
+            bundle = await EvidenceAgent(retriever).gather(
+                scope=scope,
+                query=contextual_query,
+                concept_hints=interpretation.relevant_concepts,
+            )
+            packet = bundle.to_evidence_packet()
+        else:
+            packet = await retriever.retrieve(scope, retrieval_query)
+            bundle = None
     trace = list(state.get("trace", []))
     trace.append(
         WorkflowStep(

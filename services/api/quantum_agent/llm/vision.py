@@ -66,6 +66,10 @@ class VisionGateway:
     ) -> str:
         """Return the vision model's transcription of one rendered page image."""
 
+        from quantum_agent.llm.recording_budget import RecordingBudgetError, active_budget
+
+        if active_budget() is not None:
+            raise RecordingBudgetError("capability disabled during recording")
         if not image_bytes:
             raise ValueError("image_bytes must be non-empty")
 

@@ -11,7 +11,7 @@ import pytest
 from quantum_agent.coding.agent import CodingAgent
 from quantum_agent.coding.models import CodeVerificationStatus
 from quantum_agent.coding.sandbox import SubprocessSandbox
-from quantum_agent.knowledge.barrier_scope import BarrierSourceReview
+from quantum_agent.knowledge.barrier_scope import BarrierSourceReview, source_task
 from quantum_agent.knowledge.evidence_packets import EvidencePacket, RetrievalCoverage
 from quantum_agent.knowledge.retrieval import (
     HybridEvidenceRetriever,
@@ -42,6 +42,7 @@ async def barrier_packet(text: str, *, reviewed: bool = False, changed: bool = F
                 "source_file_sha256", "source_chunk_sha256", "evidence_sha256",
             )},
             review_reference="TEST DOUBLE ONLY: no teacher approval",
+            approved_widths_m=(1e-10, 1.5e-10),
             potential="V0 inside [0,a]; zero outside", energy="0<E<V0",
             boundaries="constant mass; psi and derivative continuous; left incidence",
             formula="exact flux T,R; not thick-barrier approximation",
@@ -50,10 +51,13 @@ async def barrier_packet(text: str, *, reviewed: bool = False, changed: bool = F
         source = source.model_copy(update={"document_version_id": uuid4()})
     repository = StaticRepository()
     repository.records = {CHUNK_ONE: (source,)}
-    return await HybridEvidenceRetriever(
-        repository=repository, embedding_gateway=None, graph_store=None,
-        config=HybridRetrievalConfig(barrier_source_reviews=reviews),
-    ).retrieve(RetrievalScope(course_id=COURSE, curriculum_edition_id=EDITION), query)
+    with source_task(dict(kind="rectangular_barrier_tunnelling", energy_eV=5.0,
+                          barrier_height_eV=10.0, barrier_width_m=1e-10,
+                          particle_mass_kg=9.1093837015e-31)):
+        return await HybridEvidenceRetriever(
+            repository=repository, embedding_gateway=None, graph_store=None,
+            config=HybridRetrievalConfig(barrier_source_reviews=reviews),
+        ).retrieve(RetrievalScope(course_id=COURSE, curriculum_edition_id=EDITION), query)
 
 
 @pytest.mark.parametrize("text", [

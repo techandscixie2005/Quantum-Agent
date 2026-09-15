@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "test_double": false,
+  "reviews": [
+    {
+      "course_id": "FILL_COURSE_UUID",
+      "curriculum_edition_id": "64077260-0470-5742-8424-c73697d9f399",
+      "document_version_id": "FILL_DOCUMENT_VERSION_UUID",
+      "evidence_id": "FILL_EVIDENCE_UUID",
+      "source_file_sha256": "FILL_64_HEX",
+      "source_chunk_sha256": "FILL_64_HEX",
+      "evidence_sha256": "FILL_64_HEX",
+      "review_reference": "FILL_TEACHER_RECORD_REFERENCE",
+      "approved_widths_m": [
+        1e-10,
+        1.5e-10
+      ],
+      "potential": "V0 inside [0,a]; zero outside",
+      "energy": "0<E<V0",
+      "boundaries": "constant mass; psi and derivative continuous; left incidence",
+      "formula": "exact flux T,R; not thick-barrier approximation"
+    }
+  ]
+}
