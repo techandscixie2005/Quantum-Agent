@@ -1,0 +1,32 @@
+{
+  "complete": false,
+  "error": "Error: Coding verification did not pass",
+  "episode": "63618708-d5aa-47c5-8a13-cd1bff92d758",
+  "timings": [
+    {
+      "name": "01-commitment",
+      "milliseconds": 67370,
+      "status": 200
+    },
+    {
+      "name": "02-diagnosis",
+      "milliseconds": 76593,
+      "status": 200
+    },
+    {
+      "name": "04-revision",
+      "milliseconds": 77867,
+      "status": 200
+    },
+    {
+      "name": "04b-bridge",
+      "milliseconds": 10039,
+      "status": 200
+    },
+    {
+      "name": "05-computation",
+      "milliseconds": 62617,
+      "status": 200
+    }
+  ]
+}

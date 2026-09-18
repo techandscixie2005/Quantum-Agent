@@ -1,0 +1,82 @@
+{
+  "checkedAt": "2026-09-18T12:36:27.082310+00:00",
+  "episode": "63618708-d5aa-47c5-8a13-cd1bff92d758",
+  "turn": "44aeb926-d4de-434c-8d79-65f92a4b57aa",
+  "phase": "awaiting_revision",
+  "learningLoopCompleted": false,
+  "coding": {
+    "artifact": {
+      "language": "python",
+      "purpose": "coding agent failed before producing a program",
+      "code": "# no program generated",
+      "expected_outputs": [
+        "T",
+        "R",
+        "conservation_error"
+      ],
+      "verification_plan": "model generation failed: GatewayError"
+    },
+    "execution": {
+      "completed": false,
+      "exit_code": null,
+      "timed_out": false,
+      "truncated": false,
+      "stdout_bounded": "",
+      "stderr_bounded": "model generation failed: GatewayError",
+      "duration_seconds": 0
+    },
+    "verification": {
+      "status": "inconclusive",
+      "oracle_kind": "rectangular_barrier_tunnelling",
+      "agent_metrics": {},
+      "oracle_metrics": {},
+      "observations": [
+        "Coding Agent did not produce a verified result: model generation failed: GatewayError."
+      ],
+      "tolerance": 1e-06
+    },
+    "repairs": [
+      {
+        "attempt_number": 1,
+        "failure_summary": "model generation failed: GatewayError",
+        "stderr_excerpt": "GatewayError"
+      },
+      {
+        "attempt_number": 2,
+        "failure_summary": "model generation failed: GatewayError",
+        "stderr_excerpt": "GatewayError"
+      }
+    ],
+    "progress": "result",
+    "figure_png_base64": null
+  },
+  "providerFailure": "generate_coding_artifact timeout; repair skipped by existing route cooldown",
+  "modelBudget": {
+    "limit": 41,
+    "requestsUsed": 14,
+    "seconds": 600,
+    "removedFromNormalRuntime": true
+  },
+  "tests": {
+    "focusedPytest": 73,
+    "node": 82,
+    "layoutLive": 2,
+    "typecheck": "passed",
+    "lint": "passed",
+    "build": "passed",
+    "clientSecretScan": "passed"
+  },
+  "recovery": {
+    "phase": "awaiting_revision",
+    "evidenceCount": 5,
+    "concurrentReplaysBeforeRestart": 2,
+    "concurrentReplaysAfterRestart": 2,
+    "fullStateEqualAfterApiRestart": true,
+    "restoreAfterMs": 1727.9673670000002,
+    "prematureProbeBeforeReady": "failed; repeated only after API readiness"
+  },
+  "limitations": [
+    "Fresh full journey failed at code generation; no claim that this repeat passed",
+    "Earlier accepted full journey remains historical evidence, not current model uptime proof"
+  ]
+}

@@ -1472,7 +1472,7 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
             </section>
           ) : null}
 
-          {!loopDone && !answerWithheldByGate && !independentWorkspace && !focusedReconstruction && !interrupt && mode === "run_experiments" ? (
+          {!loopDone && !answerWithheldByGate && !independentWorkspace && !focusedReconstruction && !interrupt && mode === "run_experiments" && (!goldenTunnelling || result) ? (
             <section className={styles.experimentGrid}>
               <div className={styles.parameterPanel}>
                 <p className={styles.kicker}>NUMERICAL INPUT</p>
