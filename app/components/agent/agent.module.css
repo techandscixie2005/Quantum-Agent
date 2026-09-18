@@ -1030,9 +1030,11 @@
 .goldenLoopToggle svg { width: 15px; }
 .bridgeSheet {
   display: grid;
-  gap: 16px;
+  gap: 10px;
   line-height: 1.7;
 }
+.bridgeSheet > p,
+.bridgeSheet > h2 { margin: 0; }
 
 .bridgeSheet details {
   padding: 12px 16px;
@@ -1125,3 +1127,27 @@
 .plotPanel [role="group"] button[aria-pressed="true"] { color: white; background: var(--green); }
 .plotPanel table { width: 100%; border-collapse: collapse; font: 12px var(--font-geist-mono), monospace; }
 .plotPanel th, .plotPanel td { padding: 7px 12px; border-bottom: 1px solid var(--line); text-align: right; }
+.degradedNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 auto 20px;
+  padding: 16px 20px;
+  max-width: 1440px;
+  border: 1px solid #d8bc87;
+  border-radius: 10px;
+  background: #fff7e8;
+  color: #70542c;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.degradedNotice svg { flex-shrink: 0; margin-top: 3px; }
+.degradedNotice p { margin: 4px 0 0; }
+
+.fallbackExcerpt { min-width: 0; line-height: 1.7; }
+.fallbackExcerpt summary { cursor: pointer; color: #17634d; }
+.fallbackExcerpt summary:focus-visible { outline: 2px solid #17634d; outline-offset: 4px; }
+.fallbackExcerpt p { max-height: 28vh; overflow-y: auto; }
+
+:global(.qa-coding-progress li[data-state="failed"]) { color: #8b5436; }

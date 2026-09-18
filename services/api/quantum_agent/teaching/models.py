@@ -146,8 +146,8 @@ class FirstErrorLocalization(BaseModel):
     description: str = Field(default="", max_length=400)
 
 
-class DiagnosisOutput(BaseModel):
-    """A light-weight diagnosis, explicitly not a scientific or mastery fact."""
+class DiagnosisProposal(BaseModel):
+    """Model-proposed content; provenance labels require server assembly."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -181,6 +181,10 @@ class DiagnosisOutput(BaseModel):
         if not normalized:
             raise ValueError("diagnosis reason must not be blank")
         return normalized
+
+
+class DiagnosisOutput(DiagnosisProposal):
+    """Validated public diagnosis, explicitly not a scientific or mastery fact."""
 
     @model_validator(mode="after")
     def inference_is_labeled(self) -> DiagnosisOutput:

@@ -1,0 +1,21 @@
+{
+  "nodeTests": 82,
+  "renderedHtmlTests": 1,
+  "mockBrowserTests": 10,
+  "freshLiveJourneyTests": 1,
+  "pytest": {
+    "passed": 455,
+    "skipped": 2,
+    "seconds": 263.26
+  },
+  "ruff": "pass",
+  "mypy": "pass",
+  "typescript": "pass",
+  "build": "pass",
+  "lint": {
+    "errors": 0,
+    "existingWarnings": 5
+  },
+  "clientSecretScan": "pass",
+  "note": "Mock browser checks and real live checks are distinct. An earlier symbolic timeout was preserved as inconclusive; unchanged retry passed under idle load."
+}

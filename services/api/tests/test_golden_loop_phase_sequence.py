@@ -1859,6 +1859,23 @@ async def test_aided_transfer_is_verified_before_new_solo_task(
     assert armed.learning_native.transfer.task_id != task_id
     assert "0.12 nm 增至 0.18 nm" in armed.learning_native.transfer.prompt
     assert "不要求精确数值" in armed.learning_native.transfer.prompt
+    assert armed.response.claims == []
+    assert armed.response.derivation_bridge is None
+    assert armed.evidence_packet.evidence == []
+    assert armed.evidence_packet.graph_nodes == []
+    assert armed.scientific_results == []
+    assert armed.code_artifact is None
+    assert armed.learning_native.cognitive_mirror is None
+    from quantum_agent.teaching.solo_visibility import solo_visible_result
+
+    # Older persisted arming snapshots may contain the preceding answer.
+    restored = solo_visible_result(armed.model_copy(update={
+        "response": checked.response, "evidence_packet": checked.evidence_packet,
+        "scientific_results": checked.scientific_results,
+    }))
+    assert restored.response.claims == []
+    assert restored.evidence_packet.evidence == []
+    assert restored.scientific_results == []
 
 
 async def test_solo_blocks_evidence_after_reconnect_until_explicit_exit(
@@ -2026,6 +2043,12 @@ async def test_episode_student_artefacts_survive_complete_and_idempotent_retry(
     )
     assert clarified.learning_native is not None
     assert clarified.learning_native.phase is LearningPhase.TRANSFER_REQUIRED
+    evaluations = [call for call in gateway.calls
+                   if call["task"] == "analyze_teach_back_reconstruction"]
+    assert len(evaluations) == 2
+    for evaluation in evaluations:
+        assert reconstruction in evaluation["messages"][-1]["content"]
+    assert explanation in evaluations[-1]["messages"][-1]["content"]
     task = clarified.learning_native.transfer
     assert task is not None
     changed = scientific.model_copy(update={"barrier_width_m": 0.15e-9})
@@ -2038,9 +2061,17 @@ async def test_episode_student_artefacts_survive_complete_and_idempotent_retry(
             )
         ),
     )
+    previous_request = last_request
     armed = await turn("开始独立任务。", LearningNativeSubmission(request_transfer_task=True))
     assert armed.learning_native is not None
     assert armed.learning_native.phase is LearningPhase.SOLO_ACTIVE
+    from quantum_agent.teaching.hitl import HitlConflictError
+
+    assert previous_request is not None
+    async with golden_loop_database() as session:
+        with pytest.raises(HitlConflictError, match="Solo locks historical"):
+            await graph.run(session=session, actor=seed.actor,
+                            curriculum_edition_id=seed.edition_id, request=previous_request)
     complete = await turn(
         "独立作答。",
         LearningNativeSubmission(

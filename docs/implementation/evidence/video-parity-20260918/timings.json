@@ -1,0 +1,27 @@
+{
+  "units": "milliseconds unless specified",
+  "modelRun": "2d00c719-fd9e-413a-978c-71283563f478",
+  "providerRequests": 35,
+  "requestCap": 41,
+  "freshJourneyWallSecondsApprox": 186,
+  "apiStackColdProcesses": 42443.309966001834,
+  "cleanFrontendColdProcess": 1160.0646560036694,
+  "sourceOpenAndFetch": {
+    "1920": 72,
+    "1366": 78
+  },
+  "diagnosisTurn": 14240,
+  "revisionTurn": 46290,
+  "bridgeTurn": 7680,
+  "codingTurn": 12504,
+  "codingModelSeconds": 10.828597,
+  "sandboxSeconds": 0.2522321959986584,
+  "verifierStandaloneTimer": "not separately instrumented; included in real coding turn",
+  "parameterRecalculation": [
+    349,
+    346,
+    1399
+  ],
+  "restoreAfterServiceRestart": 2349.058205,
+  "interpretation": "observed single-run latencies, not benchmark percentiles; images prebuilt, persistent volumes retained"
+}

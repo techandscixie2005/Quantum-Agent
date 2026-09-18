@@ -378,3 +378,29 @@ def test_diagnosis_output_retains_baseline_compatibility_but_rejects_blank_reaso
             confidence=0.5,
             reason="   ",
         )
+
+
+async def test_model_proposal_provenance_is_assembled_before_public_validation() -> None:
+    proposed = {
+        "status": "observed",
+        "summary": "该步骤将振幅直接当作概率密度。",
+        "likely_misconception": "振幅等于概率密度",
+        "first_error": {"kind": "physical_interpretation_error", "description": "rho=psi"},
+        "observation_basis": [],
+    }
+    # Public output continues to reject unlabeled inference.
+    with pytest.raises(ValidationError):
+        DiagnosisOutput.model_validate(proposed)
+    diagnosis, degraded = await DiagnosisAgent(FakeModelGateway({
+        "diagnose_student_progress_structured": proposed,
+    })).diagnose(diagnosis_input=DiagnosisInput(
+        request=TeachingTurnInput(mode=TeachingMode.REVIEW_DERIVATIONS,
+                                  message="检查这一步", student_attempt="rho=psi"),
+        evidence_bundle=await _bundle(), student_snapshot=StudentSnapshot(),
+    ))
+    assert not degraded
+    assert diagnosis.status is DiagnosisStatus.MODEL_INFERENCE
+    assert "student_attempt" in diagnosis.observation_basis
+    assert diagnosis.first_error is not None
+    assert diagnosis.first_error.description == "rho=psi"
+    DiagnosisOutput.model_validate(diagnosis.model_dump())

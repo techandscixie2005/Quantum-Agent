@@ -39,6 +39,15 @@ jobs:
       QA_LIVE_REQUIRE_CORPUS: "0"
     steps:
       - uses: actions/checkout@v5
+      - name: Generate ephemeral session encryption key
+        run: |
+          python - <<'PYKEY'
+          import base64, os
+          key = base64.urlsafe_b64encode(os.urandom(32)).decode()
+          print(f"::add-mask::{key}")
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"SESSION_VAULT_KEY={key}\n")
+          PYKEY
       - name: Start the real service topology
         run: docker compose up --build --detach postgres neo4j redis migrate api
       - name: Verify PostgreSQL, pgvector, checkpoints, Neo4j, Redis, and API
@@ -85,11 +94,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Test credential detector
+        run: python scripts/test-history-secrets.py
       - name: Check for committed secrets
-        run: |
-          PATTERNS='sk-proj-|sk-ant-|USTC_API(_KEY)?=[A-Za-z0-9]|TEACHER_PASSWORD=[^[:space:]]|SESSION_SECRET=[^[:space:]]|ghp_|gho_'
-          if git log --all -p | grep -qE "$PATTERNS"; then
-            echo "Potential secrets found in git history"
-            exit 1
-          fi
-          echo "Secret scan complete"
+        run: python scripts/check-history-secrets.py

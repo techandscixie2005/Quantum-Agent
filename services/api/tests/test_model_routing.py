@@ -513,3 +513,23 @@ async def test_router_cancels_a_profile_that_hangs_past_the_shared_budget() -> N
             output_type=StrictOutput,
         ), timeout=3.0)
     assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_schema_failure_does_not_cool_down_other_capabilities() -> None:
+    router, _, gateways = _router_with_outcomes({
+        "reasoning_primary": {"value": "invalid"},
+        "reasoning_second_pass": {"value": 8},
+    })
+    output = await router.structured_generate(
+        task="diagnose_student_progress", messages=[Message(role="user", content="attempt")],
+        output_type=StrictOutput,
+    )
+    assert output.value == 8
+    gateways["reasoning_primary"].outcome = {"value": 9}
+    output = await router.structured_generate(
+        task="compose_grounded_teaching_response",
+        messages=[Message(role="user", content="bridge")], output_type=StrictOutput,
+    )
+    assert output.value == 9
+    assert len(gateways["reasoning_primary"].calls) == 2

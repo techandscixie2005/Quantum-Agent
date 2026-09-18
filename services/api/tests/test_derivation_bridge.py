@@ -69,3 +69,61 @@ async def test_valid_bridge_does_not_publish_a_mislabeled_companion_claim() -> N
     assert response.claims == []
     assert validation.passed
     assert "unsupported_companion_claims_omitted" in validation.warnings
+
+
+@pytest.mark.asyncio
+async def test_catalog_bridge_uses_real_quotes_and_student_endpoints() -> None:
+    from quantum_agent.llm.gateway import FakeModelGateway
+    from quantum_agent.teaching.derivation import explicit_endpoints, selected_bridge
+
+    packet = _packet(uuid4(), uuid4())
+    message = "Explain one step\n原式\uff1ay''=b^2 y\n目标式\uff1ay=C exp(bx)+D exp(-bx)"
+    endpoints = explicit_endpoints(message)
+    assert endpoints == ("y''=b^2 y", "y=C exp(bx)+D exp(-bx)")
+    gateway = FakeModelGateway({"compose_grounded_teaching_response": {
+        "steps": [
+            {"formula": "r^2=b^2", "justification": "Exponential trial", "sources": [0]},
+            {"formula": "r=+-b", "justification": "Roots", "sources": [0]},
+        ], "assumptions": ["constant b"],
+    }})
+    bridge, _ = await selected_bridge(message=message, endpoints=endpoints, packet=packet,
+                                     release=AnswerReleaseLevel.SCAFFOLD, gateway=gateway)
+    assert bridge is not None and bridge.partial
+    assert len(bridge.missing_steps) == 1
+    assert bridge.source_step == endpoints[0]
+    assert bridge.target_step == endpoints[1]
+    assert bridge.source_refs[0].quote == packet.evidence[0].evidence_snippet
+    assert bridge.source_refs[0].evidence_id == packet.evidence[0].evidence_id
+    assert bridge.support_basis == "unverified_model_inference"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("index", [-1, 8])
+async def test_catalog_bridge_rejects_unknown_sources(index: int) -> None:
+    from quantum_agent.llm.gateway import FakeModelGateway
+    from quantum_agent.teaching.derivation import selected_bridge
+
+    gateway = FakeModelGateway({"compose_grounded_teaching_response": {
+        "steps": [{"formula": "B", "justification": "step", "sources": [index]}],
+    }})
+    with pytest.raises(ValueError, match="unknown source"):
+        await selected_bridge(message="any", endpoints=("A", "C"),
+                              packet=_packet(uuid4(), uuid4()),
+                              release=AnswerReleaseLevel.SCAFFOLD, gateway=gateway)
+
+
+@pytest.mark.asyncio
+async def test_catalog_bridge_withholds_at_hint_and_allows_uncertainty() -> None:
+    from quantum_agent.llm.gateway import FakeModelGateway
+    from quantum_agent.teaching.derivation import selected_bridge
+
+    gateway = FakeModelGateway({"compose_grounded_teaching_response": {
+        "steps": [], "clarification": "Please supply the missing definition",
+    }})
+    packet = _packet(uuid4(), uuid4())
+    bridge, _ = await selected_bridge(message="any", endpoints=("A", "C"), packet=packet,
+                                     release=AnswerReleaseLevel.HINT, gateway=gateway)
+    assert bridge is None and not gateway.calls
+    bridge, question = await selected_bridge(message="any", endpoints=("A", "C"), packet=packet,
+                                            release=AnswerReleaseLevel.SCAFFOLD, gateway=gateway)
+    assert bridge is None and question == "Please supply the missing definition"

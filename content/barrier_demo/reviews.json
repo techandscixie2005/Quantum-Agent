@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "test_double": false,
+  "reviews": [
+    {
+      "course_id": "7c33796f-8d45-5fd7-93b9-13ae8c7572eb",
+      "curriculum_edition_id": "5dd085cb-831c-5ed1-ae01-327f700dc12a",
+      "document_version_id": "d90091e5-bdbb-54a1-a94a-83dc26a35a20",
+      "evidence_id": "ddf5e778-e750-5372-841c-99af3e671544",
+      "source_file_sha256": "530ab542811eb36095fa32121dbaeb0ffadde7c9c3bb785c63a469936fdc125c",
+      "source_chunk_sha256": "1cc3e7f115f2cd9a819da955bd851713f2c8e8ed95eb4eaca955fffaaaaa673a",
+      "evidence_sha256": "6aa7ca9ed4e1f5df951e62cf95813ad0fae38f8674f8db89e759a5931dd001e6",
+      "review_reference": "Self-authored demo QB-03 v1.0; operational automated review 2026-09-18; independent boundary-matching regression. Not faculty approval of formal textbooks.",
+      "approved_widths_m": [
+        1e-10,
+        1.5e-10
+      ],
+      "energy_range_eV": [
+        0.5,
+        9.0
+      ],
+      "height_range_eV": [
+        1.0,
+        20.0
+      ],
+      "width_range_m": [
+        5e-11,
+        5e-10
+      ],
+      "potential": "V0 inside [0,a]; zero outside",
+      "energy": "0<E<V0",
+      "boundaries": "constant mass; psi and derivative continuous; left incidence",
+      "formula": "exact flux T,R; not thick-barrier approximation"
+    },
+    {
+      "course_id": "7c33796f-8d45-5fd7-93b9-13ae8c7572eb",
+      "curriculum_edition_id": "5dd085cb-831c-5ed1-ae01-327f700dc12a",
+      "document_version_id": "d90091e5-bdbb-54a1-a94a-83dc26a35a20",
+      "evidence_id": "2c9a7f08-77ba-5351-a5db-eb0f5b620f8e",
+      "source_file_sha256": "530ab542811eb36095fa32121dbaeb0ffadde7c9c3bb785c63a469936fdc125c",
+      "source_chunk_sha256": "fb47f7593823b75c6f48af3b30df670afc5e637ac61573210cc8c93f5a61360a",
+      "evidence_sha256": "6ac946c8b8993aee2f721915a7a8cfc365d8613a5139f3466d1bc671e1662ca5",
+      "review_reference": "Self-authored demo QB-03 v1.0; operational automated review 2026-09-18; independent boundary-matching regression. Not faculty approval of formal textbooks.",
+      "approved_widths_m": [
+        1e-10,
+        1.5e-10
+      ],
+      "energy_range_eV": [
+        0.5,
+        9.0
+      ],
+      "height_range_eV": [
+        1.0,
+        20.0
+      ],
+      "width_range_m": [
+        5e-11,
+        5e-10
+      ],
+      "potential": "V0 inside [0,a]; zero outside",
+      "energy": "0<E<V0",
+      "boundaries": "constant mass; psi and derivative continuous; left incidence",
+      "formula": "exact flux T,R; not thick-barrier approximation"
+    },
+    {
+      "course_id": "7c33796f-8d45-5fd7-93b9-13ae8c7572eb",
+      "curriculum_edition_id": "5dd085cb-831c-5ed1-ae01-327f700dc12a",
+      "document_version_id": "d90091e5-bdbb-54a1-a94a-83dc26a35a20",
+      "evidence_id": "666af34e-a4c0-5d78-8bb9-3dd74d11e7a1",
+      "source_file_sha256": "530ab542811eb36095fa32121dbaeb0ffadde7c9c3bb785c63a469936fdc125c",
+      "source_chunk_sha256": "a208bf8ba15c04233ebc45a21ee9dae08b02306d87e57943c3d88bdc421a75e1",
+      "evidence_sha256": "8e6719d6926705f933cd3fe637385a7855118eeb044e35c64782e56babb905e7",
+      "review_reference": "Self-authored demo QB-03 v1.0; operational automated review 2026-09-18; independent boundary-matching regression. Not faculty approval of formal textbooks.",
+      "approved_widths_m": [
+        1e-10,
+        1.5e-10
+      ],
+      "energy_range_eV": [
+        0.5,
+        9.0
+      ],
+      "height_range_eV": [
+        1.0,
+        20.0
+      ],
+      "width_range_m": [
+        5e-11,
+        5e-10
+      ],
+      "potential": "V0 inside [0,a]; zero outside",
+      "energy": "0<E<V0",
+      "boundaries": "constant mass; psi and derivative continuous; left incidence",
+      "formula": "exact flux T,R; not thick-barrier approximation"
+    }
+  ]
+}

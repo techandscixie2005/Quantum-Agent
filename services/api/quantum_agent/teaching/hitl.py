@@ -25,6 +25,7 @@ from quantum_agent.knowledge.evidence_packets import EvidencePacket, RetrievalCo
 from quantum_agent.multimodal.contracts import ConfirmedEvidence
 from quantum_agent.multimodal.teaching import PerceptionTraceEntry
 from quantum_agent.science import (
+    ScientificVerificationKind,
     ScientificVerificationResult,
     ScientificVerificationStatus,
 )
@@ -319,8 +320,19 @@ def _verifier_disagrees(
         DiagnosisErrorKind.NO_CLEAR_ERROR,
         DiagnosisErrorKind.INCONCLUSIVE,
     }
-    verifier_passes = any(result.status is ScientificVerificationStatus.PASS for result in results)
-    verifier_fails = any(result.status is ScientificVerificationStatus.FAIL for result in results)
+    # A simulation PASS certifies the solver's output, not the student's
+    # explanation. In particular, a valid nonzero tunnelling calculation is
+    # entirely compatible with diagnosing the student's claim that T=0.
+    # Only assertion-checking tools can contradict an attempt diagnosis here.
+    assertion_kinds = {
+        ScientificVerificationKind.SYMBOLIC_EQUIVALENCE,
+        ScientificVerificationKind.SYMBOLIC_RESIDUAL,
+        ScientificVerificationKind.NUMERICAL_NORMALIZATION,
+        ScientificVerificationKind.NUMERICAL_UNITARITY,
+    }
+    checks = [result for result in results if result.kind in assertion_kinds]
+    verifier_passes = any(result.status is ScientificVerificationStatus.PASS for result in checks)
+    verifier_fails = any(result.status is ScientificVerificationStatus.FAIL for result in checks)
     return (model_reports_error and verifier_passes) or (not model_reports_error and verifier_fails)
 
 

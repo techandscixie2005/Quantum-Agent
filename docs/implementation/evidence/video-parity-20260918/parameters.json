@@ -1,0 +1,58 @@
+{
+  "parameterAcceptance": true,
+  "episode": "eff586dc-1f3a-4ecb-bcca-93d6c097cf62",
+  "computations": [
+    {
+      "energy": 3.7,
+      "height": 9.2,
+      "width": 0.137,
+      "inputs_sha256": "9cdbff6198314997b5cb7fd6816971eb42396e6afdd0c30dc5484e89b5372af8",
+      "rendering_sha256": "d984b55394f372cb02a1aa02289563c073dcf734bf8c975d4388c602bd1f2b5c",
+      "T": 0.13365196103825366,
+      "referenceT": 0.1336519610382537,
+      "execution": "fixed_reference_solver"
+    },
+    {
+      "energy": 6.1,
+      "height": 11.3,
+      "width": 0.213,
+      "inputs_sha256": "26519bc006cb7a58b5900890fe112d214684aaddb0d3c20ec2da790e2ffd13cb",
+      "rendering_sha256": "85923034980e2fc17d8f922402e5775e73f26018f3202abb631aa42aaae3b92f",
+      "T": 0.02704002195970811,
+      "referenceT": 0.027040021959708088,
+      "execution": "fixed_reference_solver"
+    },
+    {
+      "energy": 4.8,
+      "height": 13.7,
+      "width": 0.287,
+      "inputs_sha256": "75b0828730bda89bdb5239ae2acfac5d1c25a30c4553d2a98d05df91d0cf9645",
+      "rendering_sha256": "3f42439e1a512f1c5b86fad3eb0a6373733442a41a0c151272018cf302acdc14",
+      "T": 0.0005638426062132884,
+      "referenceT": 0.0005638426062132886,
+      "execution": "fixed_reference_solver"
+    }
+  ],
+  "timings": [
+    {
+      "name": "parameter-baseline",
+      "milliseconds": 922,
+      "status": 200
+    },
+    {
+      "name": "parameters-3.7-9.2-0.137",
+      "milliseconds": 338,
+      "status": 200
+    },
+    {
+      "name": "parameters-6.1-11.3-0.213",
+      "milliseconds": 335,
+      "status": 200
+    },
+    {
+      "name": "parameters-4.8-13.7-0.287",
+      "milliseconds": 1395,
+      "status": 200
+    }
+  ]
+}

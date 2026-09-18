@@ -12,6 +12,8 @@ from time import monotonic
 from typing import Any
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError
+
 _SCOPE: ContextVar[dict[str, str] | None] = ContextVar("model_trace_scope", default=None)
 _LOG = logging.getLogger("quantum_agent.capability_events")
 _LOG.setLevel(logging.INFO)
@@ -76,6 +78,18 @@ def traced_call[**P, T](
             return result
         except Exception as exc:
             event(task, failure_category(exc), elapsed=monotonic() - start)
+            # Diagnose schema failures without recording model content, input,
+            # error messages (which may quote input), or private reasoning.
+            cause: BaseException | None = exc
+            seen: set[int] = set()
+            while cause is not None and id(cause) not in seen:
+                seen.add(id(cause))
+                if isinstance(cause, ValidationError):
+                    for error in cause.errors(include_url=False, include_input=False,
+                                              include_context=False)[:8]:
+                        event(task, "schema_" + error["type"])
+                    break
+                cause = cause.__cause__ or cause.__context__
             raise
         finally:
             _SCOPE.reset(token)

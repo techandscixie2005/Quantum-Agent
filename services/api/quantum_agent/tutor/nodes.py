@@ -762,7 +762,9 @@ async def learning_native_pre_node(
     # needing the retrieved coverage.
     release_is_question_only = gate_eligible
 
-    if solo_active and not solo_submission and not solo_exit_requested:
+    if (solo_active or durable_phase.solo_assistance_locked) and not (
+        solo_submission or solo_exit_requested
+    ):
         # The student is in Solo Mode but is asking for AI help (not
         # submitting a solo attempt or exiting Solo).  Block the LLM call
         # and return a deterministic "Solo Mode active" response.
@@ -1550,6 +1552,7 @@ async def assemble_result_node(
     runtime: Runtime[TutorContext],
 ) -> dict[str, Any]:
     from quantum_agent.teaching.models import TeachingTurnResult
+    from quantum_agent.teaching.solo_visibility import solo_visible_result
 
     session = runtime.context.session
     actor = runtime.context.actor
@@ -1564,7 +1567,7 @@ async def assemble_result_node(
     if state.get("answer_withheld_by_gate"):
         evidence_packet = evidence_packet.redacted_for_gate()
 
-    result = TeachingTurnResult(
+    result = solo_visible_result(TeachingTurnResult(
         conversation_id=started.conversation.id,
         turn_id=started.turn.id,
         workflow_version=WORKFLOW_VERSION,
@@ -1579,7 +1582,7 @@ async def assemble_result_node(
         code_artifact=state.get("code_artifact"),
         trace=state["trace"],
         learning_native=state.get("learning_native"),
-    )
+    ))
     # PRD V3.3 root-cause #8 fix: ``learning_loop_completed`` is a computed
     # function of the authoritative durable phase, not a hardcoded False.  A
     # bounded graph turn reaching ``assemble_result`` is ``turn_completed``;
@@ -1943,6 +1946,7 @@ async def learning_native_node(
             ][:6]
             proposal = await propose_teach_back_analysis(
                 reconstruction=reconstruction,
+                initial_reconstruction=durable_phase.reconstruction,
                 prior_explanation=durable_phase.teach_back_explanation,
                 tutor_probe=durable_phase.teach_back_probe,
                 prior_clarifications=durable_phase.teach_back_clarifications,

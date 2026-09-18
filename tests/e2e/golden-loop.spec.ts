@@ -734,7 +734,10 @@ test.describe("Golden Learning Loop · quantum tunnelling", () => {
     const panel = page.getByTestId("derivation-bridge");
     await expect(panel).toBeVisible();
     await expect(panel.getByText(/尚未经教师审核/)).toBeVisible();
-    await panel.getByText("展开第 1 步：使用定义").click();
+    await panel.getByText("展开第 1 步及依据").click();
+    await expect(panel.getByText("使用定义", { exact: true })).toBeVisible();
+    await expect(panel.getByText(ref.quote)).not.toBeVisible();
+    await panel.getByText("查看本步课程原文", { exact: true }).click();
     await expect(panel.getByText(ref.quote)).toBeVisible();
     await expect(panel.getByText(/其余步骤留给你重构/)).toBeVisible();
     await page.screenshot({ path: "docs/implementation/artifacts/2026-09-15-derivation-bridge.png", fullPage: true });

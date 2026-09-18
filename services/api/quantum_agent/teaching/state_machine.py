@@ -25,7 +25,7 @@ from quantum_agent.science import (
     ScientificVerificationResult,
     ScientificVerificationStatus,
 )
-from quantum_agent.teaching.derivation import constrain_bridge
+from quantum_agent.teaching.derivation import constrain_bridge, explicit_endpoints, selected_bridge
 from quantum_agent.teaching.models import (
     DiagnosisOutput,
     DiagnosisStatus,
@@ -363,6 +363,19 @@ async def draft_response(
         return fallback_response, fallback_validation, model_gateway is None
 
     try:
+        endpoints = explicit_endpoints(request.message)
+        if endpoints is not None and request.mode is TeachingMode.REVIEW_DERIVATIONS:
+            bridge, clarification = await selected_bridge(
+                message=request.message, endpoints=endpoints, packet=packet,
+                release=release_level, gateway=model_gateway,
+            )
+            return TeachingResponse(
+                status=ResponseStatus.MIXED,
+                orientation=_orientation(release_level), claims=tool_claims,
+                next_question=clarification or "请解释这一步，并写出你能确定的下一步。",
+                derivation_bridge=bridge,
+                limitations=["推导为模型推理；所选来源的原文由后端附上，不代表推导已获科学验证。"],
+            ), _validate_claims(tool_claims, packet, scientific_result_ids), False
         draft = await model_gateway.structured_generate(
             task="compose_grounded_teaching_response",
             messages=[

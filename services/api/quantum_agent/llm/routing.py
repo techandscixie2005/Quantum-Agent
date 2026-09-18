@@ -581,10 +581,18 @@ class ModelRouter:
                 await self._health.failed(profile.profile_id)
                 break
             except (GatewayError, ValidationError, TimeoutError) as exc:
-                event(task, failure_category(exc), attempt=route_attempt)
+                category = failure_category(exc)
+                event(task, category, attempt=route_attempt)
                 failures += 1
                 last_exc = exc
-                await self._health.failed(profile.profile_id)
+                if category == "parse":
+                    # The provider answered, but this task's output contract
+                    # failed. Still reject it and try the next bounded route;
+                    # do not suppress unrelated diagnosis/bridge/assessment
+                    # capabilities as though the provider were unavailable.
+                    await self._health.succeeded(profile.profile_id)
+                else:
+                    await self._health.failed(profile.profile_id)
             except BaseException:
                 await self._health.abandoned(profile.profile_id)
                 raise
@@ -597,7 +605,7 @@ class ModelRouter:
             f"No model route completed capability {capability_task.value!r} "
             f"after {failures} bounded attempt(s); "
             f"{cooling} route(s) temporarily cooling down"
-        )
+        ) from last_exc
 
     async def probe(self) -> GatewayCapabilities:
         """Probe only the primary reasoning route; avoid spending calls on every model."""

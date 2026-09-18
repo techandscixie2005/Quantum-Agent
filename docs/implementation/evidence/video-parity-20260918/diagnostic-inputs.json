@@ -1,0 +1,179 @@
+{
+  "complete": true,
+  "results": [
+    {
+      "name": "correct",
+      "milliseconds": 6041,
+      "episode": "50f1d092-9131-45d7-8f9a-2d0900024954",
+      "turn": "f9acae3e-1cc2-4db4-be65-2d6563c00c62",
+      "diagnosis": {
+        "status": "model_inference",
+        "summary": "学生正确指出禁阻区存在非零指数解、需匹配波函数与导数得到透射振幅，并正确判断固定 E、V0 时增大宽度 a 会使透射率降低。这些判断与讲义§2、§3、§5 一致，没有需要纠正的错误。",
+        "likely_misconception": null,
+        "observation_basis": [
+          "student_attempt",
+          "course_evidence"
+        ],
+        "target_concepts": [
+          "finite rectangular barrier tunnelling",
+          "boundary matching",
+          "transmission coefficient dependence on width"
+        ],
+        "first_error": {
+          "inferred": true,
+          "step_index": null,
+          "kind": "no_clear_error",
+          "description": "No clear consequential error has been localized."
+        },
+        "misconception_candidates": [],
+        "missing_prerequisites": [],
+        "progress_state": "started",
+        "confidence": 0.9,
+        "verification_needed": false,
+        "reason": "学生表述与课程证据直接对应，无实质错误；MODE 为 run_experiments，建议按定性任务继续，不需代写答案。"
+      }
+    },
+    {
+      "name": "wrong",
+      "milliseconds": 22961,
+      "episode": "49de7f46-1a18-4eb1-b4fa-47d018254883",
+      "turn": "647f724b-a8d4-485f-81e6-4a97b0c96d28",
+      "diagnosis": {
+        "status": "model_inference",
+        "summary": "学生认为电子能量小于势垒高度时波函数处处为零、透射率严格为零。这与有限矩形势垒隧穿的标准结论不符：0<E<V₀ 时势垒内波函数为指数衰减/增长组合而非为零，透射率 T 一般不为零。课程证据明确指出不能用半无限势垒的零透射结论代替，并给出了有限势垒指数解和精确透射率公式。",
+        "likely_misconception": "将经典禁阻区域（E<V₀）误解为量子波函数必须为零，忽略了有限势垒的隧穿效应。",
+        "observation_basis": [
+          "student_attempt",
+          "course_evidence"
+        ],
+        "target_concepts": [
+          "finite rectangular barrier tunnelling",
+          "exponential wavefunction in barrier",
+          "transmission probability T > 0"
+        ],
+        "first_error": {
+          "inferred": true,
+          "step_index": 0,
+          "kind": "physical_interpretation_error",
+          "description": "因为电子能量小于势垒高度，所以波函数在所有位置都为零，透射率严格等于零。"
+        },
+        "misconception_candidates": [
+          {
+            "statement": "认为 E<V₀ 时波函数必须在势垒区域内为零。",
+            "confidence": 0.9
+          }
+        ],
+        "missing_prerequisites": [
+          "量子隧穿的概念",
+          "指数解与振荡解的区别",
+          "概率流与透射率的定义"
+        ],
+        "progress_state": "started",
+        "confidence": 0.85,
+        "verification_needed": false,
+        "reason": "学生判断直接与课程证据矛盾：讲义指出禁阻区波函数为指数项、透射率由精确公式给出，且透射率一般不为零。"
+      }
+    },
+    {
+      "name": "paraphrase",
+      "milliseconds": 6395,
+      "episode": "b59986ff-b738-4f08-bf7b-b32af3b64348",
+      "turn": "6c8e1206-6128-4f84-aa7f-9766b3b342c4",
+      "diagnosis": {
+        "status": "model_inference",
+        "summary": "学生认为电子无法跨越能量门槛，因此在任何区域都没有概率振幅，右侧透射概率为零。这与课程证据直接矛盾：有限矩形势垒在0<E<V0时允许指数解而非零波函数，且存在非零透射率T={1+[V0²/(4E(V0−E))]sinh²(κa)}⁻¹>0。",
+        "likely_misconception": "学生将经典粒子无法越过势垒的概念错误地应用于量子隧穿，认为禁阻区内波函数必须为零且透射概率为零，忽略了量子力学中的指数解和隧穿效应。",
+        "observation_basis": [
+          "student_attempt",
+          "course_evidence"
+        ],
+        "target_concepts": [
+          "有限矩形势垒隧穿",
+          "指数解与透射率",
+          "量子隧穿效应"
+        ],
+        "first_error": {
+          "inferred": true,
+          "step_index": null,
+          "kind": "physical_interpretation_error",
+          "description": "学生声称'粒子跨不过这个能量门槛，故任何区域都不可能有概率振幅，右侧通过的概率只能是零'，错误地假设0<E<V0时波函数为零，与课程证据中指数解和正透射率矛盾。"
+        },
+        "misconception_candidates": [
+          {
+            "statement": "将经典能量门槛概念用于量子隧穿，认为E<V0时粒子无法通过，透射率必为零。",
+            "confidence": 0.95
+          }
+        ],
+        "missing_prerequisites": [
+          "量子隧穿与经典粒子运动的区别",
+          "定态薛定谔方程中禁阻区指数解的意义"
+        ],
+        "progress_state": "started",
+        "confidence": 0.9,
+        "verification_needed": false,
+        "reason": "课程证据明确指出有限矩形势垒在0<E<V0时解为指数形式，且透射率T为正；学生断言透射率为零，属于典型的经典直觉误用。"
+      }
+    },
+    {
+      "name": "partial",
+      "milliseconds": 4684,
+      "episode": "c8b0a3a2-9869-457f-bc94-710474323a6d",
+      "turn": "f83d4d36-c20e-4945-8286-97b41636ba6c",
+      "diagnosis": {
+        "status": "model_inference",
+        "summary": "学生已开始建立禁阻区方程并正确认识到指数解非零，但尚未进行边界匹配，尚在起步阶段。",
+        "likely_misconception": null,
+        "observation_basis": [
+          "student_attempt",
+          "course_evidence"
+        ],
+        "target_concepts": [
+          "boundary_condition_matching",
+          "finite_barrier_tunneling"
+        ],
+        "first_error": {
+          "inferred": true,
+          "step_index": null,
+          "kind": "no_clear_error",
+          "description": "No clear consequential error has been localized."
+        },
+        "misconception_candidates": [],
+        "missing_prerequisites": [
+          "boundary_condition_matching"
+        ],
+        "progress_state": "started",
+        "confidence": 0.8,
+        "verification_needed": false,
+        "reason": "学生的当前判断与课程证据一致：讲义明确指出κ²为正，区域解为指数项，且不强制为零；学生未出现错误，但尚未连接边界条件，故标记为started。"
+      }
+    },
+    {
+      "name": "unknown",
+      "milliseconds": 5561,
+      "episode": "e6ffacc1-2b0d-4a0e-b581-f1727c5c79f3",
+      "turn": "ed921cea-c8f9-4324-866d-ca49acc7fa54",
+      "diagnosis": {
+        "status": "model_inference",
+        "summary": "学生明确表示尚不知如何判断，也未写出推导，属于未开始状态。",
+        "likely_misconception": null,
+        "observation_basis": [
+          "student_attempt",
+          "course_evidence"
+        ],
+        "target_concepts": [],
+        "first_error": {
+          "inferred": true,
+          "step_index": null,
+          "kind": "no_clear_error",
+          "description": "No clear consequential error has been localized."
+        },
+        "misconception_candidates": [],
+        "missing_prerequisites": [],
+        "progress_state": "started",
+        "confidence": 1,
+        "verification_needed": false,
+        "reason": "学生仅陈述不知道如何判断，没有可诊断的具体尝试内容，因此没有错误可定位，也没有足够证据推断具体误解。"
+      }
+    }
+  ]
+}

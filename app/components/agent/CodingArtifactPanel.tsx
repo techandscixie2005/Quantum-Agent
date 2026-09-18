@@ -3,21 +3,10 @@
 import { useState } from "react";
 import dynamic from "next/dynamic";
 import { Braces, Check, CircleAlert, LoaderCircle, ShieldCheck } from "lucide-react";
-import type { CodeArtifactRun, CodingProgress } from "../teaching/contracts";
+import type { CodeArtifactRun } from "../teaching/contracts";
+import { codingExecutionSteps } from "./coding-status";
 
 const AgentCodeEditor = dynamic(() => import("./AgentCodeEditor"), { ssr: false });
-const PROGRESS_STEPS: ReadonlyArray<{ key: CodingProgress; label: string }> = [
-  { key: "planning", label: "Planning" },
-  { key: "writing", label: "Writing code" },
-  { key: "running", label: "Running" },
-  { key: "verifying", label: "Verifying" },
-  { key: "result", label: "Result" },
-];
-
-function progressIndex(progress: CodingProgress): number {
-  const idx = PROGRESS_STEPS.findIndex((step) => step.key === progress);
-  return idx < 0 ? PROGRESS_STEPS.length - 1 : idx;
-}
 
 function VerificationBadge({ status }: { status: CodeArtifactRun["verification"]["status"] }) {
   if (status === "pass") {
@@ -49,7 +38,6 @@ function VerificationBadge({ status }: { status: CodeArtifactRun["verification"]
 }
 
 export default function CodingArtifactPanel({ run }: { run: CodeArtifactRun }) {
-  const currentIdx = progressIndex(run.progress);
   const [showCode, setShowCode] = useState(false);
   const agentT = run.verification.agent_metrics.T;
   const oracleT = run.verification.oracle_metrics.T;
@@ -59,18 +47,17 @@ export default function CodingArtifactPanel({ run }: { run: CodeArtifactRun }) {
         <Braces />
         <div>
           <strong>Coding Agent</strong>
-          <small>已执行程序的指标核验</small>
+          <small>{run.execution.completed ? "已执行程序的指标核验" : "执行未完成 · 查看失败记录"}</small>
         </div>
         <VerificationBadge status={run.verification.status} />
       </header>
 
       <ol className="qa-coding-progress" aria-label="Coding Agent progress">
-        {PROGRESS_STEPS.map((step, idx) => {
-          const state = run.progress === "result" || idx < currentIdx ? "done" : idx === currentIdx ? "active" : "pending";
+        {codingExecutionSteps(run).map(({ key, label, state }) => {
           return (
-            <li key={step.key} data-state={state} data-testid={`coding-progress-${step.key}`}>
+            <li key={key} data-state={state} data-testid={`coding-progress-${key}`}>
               {state === "active" ? <LoaderCircle size={11} /> : <span className="qa-coding-dot" />}
-              <span>{step.label}</span>
+              <span>{label}</span>
             </li>
           );
         })}

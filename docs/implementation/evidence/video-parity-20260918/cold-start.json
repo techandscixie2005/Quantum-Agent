@@ -1,0 +1,14 @@
+{
+  "kind": "cold service processes, existing persistent volumes and built images",
+  "services": [
+    "api",
+    "web",
+    "sandbox-runner",
+    "postgres",
+    "neo4j",
+    "redis"
+  ],
+  "readyMs": 42443.309966001834,
+  "volumesRemoved": false,
+  "recordingBudgetRemovedFromNormalRuntime": true
+}
