@@ -25,6 +25,7 @@ from quantum_agent.llm.gateway import (
     ModelTier,
     PermanentGatewayError,
 )
+from quantum_agent.llm.observability import event, failure_category, traced_call
 
 T = TypeVar("T")
 
@@ -129,6 +130,7 @@ class ModelCapabilityRegistry:
         "propose_cognitive_commitment": ModelTask.LIGHTWEIGHT,
         "analyze_teach_back_reconstruction": ModelTask.REASONING,
         "generate_transfer_task": ModelTask.REASONING,
+        "evaluate_barrier_trend": ModelTask.REASONING,
         "generate_coding_artifact": ModelTask.CODE,
         "repair_coding_artifact": ModelTask.CODE,
     }
@@ -164,8 +166,8 @@ class ModelCapabilityRegistry:
         lightweight_model: str = "deepseek-v4-flash-ascend1",
         second_pass_model: str = "qwen3.8-reasoner",
         vision_model: str = "qwen3.8-chat",
-        long_context_model: str = "glm-5.2",
-        code_model: str = "glm-5.2",
+        long_context_model: str = "deepseek-v4-flash",
+        code_model: str = "deepseek-v4-flash",
         embedding_model: str = "qwen3-embedding",
         rerank_model: str = "qwen3-reranker",
         document_parser_model: str = "mineru",
@@ -232,7 +234,7 @@ class ModelCapabilityRegistry:
             ),
             _profile(
                 "long_context_secondary",
-                "glm-5.2-107",
+                "deepseek-v4-flash",
                 ModelTransport.CHAT_COMPLETIONS,
                 *_TEXT_STRUCTURED,
                 ModelCapability.REASONING,
@@ -342,7 +344,7 @@ class ModelCapabilityRegistry:
                 required=_TEXT_STRUCTURED | {ModelCapability.REASONING},
                 # PRD V3.2 Demo Closure: deepseek-v4-pro returns a permanent 400
                 # for the Coding Agent's structured-output (CodeArtifact) request.
-                # When glm-5.2 (code_primary) fails transiently, fall to
+                # When deepseek-v4-flash (code_primary) fails transiently, fall to
                 # qwen3.8-reasoner (reasoning_second_pass) which supports the
                 # CodeArtifact schema, before deepseek-v4-pro as a last resort.
                 profile_ids=(
@@ -518,6 +520,7 @@ class ModelRouter:
             self._gateways[profile.profile_id] = gateway
         return gateway
 
+    @traced_call
     async def structured_generate(
         self,
         *,
@@ -543,8 +546,10 @@ class ModelRouter:
         failures = 0
         cooling = 0
         last_exc: BaseException | None = None
-        for profile in profiles:
+        for route_attempt, profile in enumerate(profiles, 1):
+            event(task, "route_attempt", attempt=route_attempt)
             if not await self._health.acquire(profile.profile_id):
+                event(task, "expected_skip:cooldown", attempt=route_attempt)
                 cooling += 1
                 continue
             # If the budget is already exhausted, fail fast instead of
@@ -553,11 +558,14 @@ class ModelRouter:
             if self._clock() >= deadline:
                 break
             try:
-                output = await self._gateway(profile).structured_generate(
-                    task=task,
-                    messages=messages,
-                    output_type=output_type,
-                    model_tier=ModelTier.DEFAULT,
+                output = await asyncio.wait_for(
+                    self._gateway(profile).structured_generate(
+                        task=task,
+                        messages=messages,
+                        output_type=output_type,
+                        model_tier=ModelTier.DEFAULT,
+                    ),
+                    timeout=max(0.0, deadline - self._clock()),
                 )
                 # Defense in depth: a custom gateway implementation cannot bypass
                 # the structured-output contract enforced by the router boundary.
@@ -572,7 +580,8 @@ class ModelRouter:
                 last_exc = exc
                 await self._health.failed(profile.profile_id)
                 break
-            except (GatewayError, ValidationError) as exc:
+            except (GatewayError, ValidationError, TimeoutError) as exc:
+                event(task, failure_category(exc), attempt=route_attempt)
                 failures += 1
                 last_exc = exc
                 await self._health.failed(profile.profile_id)

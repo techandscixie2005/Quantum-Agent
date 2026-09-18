@@ -67,9 +67,11 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   const baseUrl = quantumApiBaseUrl();
   if (!baseUrl) return agentError(503, "BACKEND_NOT_CONFIGURED", "学习状态服务尚未配置。");
 
-  const path =
+  let path =
     `/api/v1/courses/${scope.courseId}/editions/${scope.curriculumEditionId}` +
     `/teaching/threads/${conversationId}/state`;
+  const reviewStage = new URL(request.url).searchParams.get("review_stage");
+  if (reviewStage) path += `?${new URLSearchParams({ review_stage: reviewStage })}`;
   let upstream: Response;
   try {
     upstream = await fetch(new URL(path, baseUrl), {

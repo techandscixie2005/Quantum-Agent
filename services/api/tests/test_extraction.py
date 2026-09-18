@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from quantum_agent.knowledge.extraction import (
     ExtractionContext,
     QuantumKnowledgeExtractor,
@@ -60,7 +58,7 @@ def _context() -> ExtractionContext:
 
 
 async def test_extractor_hydrates_ids_and_forces_teacher_review() -> None:
-    gateway: FakeModelGateway[Any] = FakeModelGateway(
+    gateway: FakeModelGateway = FakeModelGateway(
         {
             "quantum_course_knowledge_extraction": {
                 "nodes": [
@@ -90,7 +88,7 @@ async def test_extractor_hydrates_ids_and_forces_teacher_review() -> None:
 
 
 async def test_unsupported_quote_is_never_promoted() -> None:
-    gateway: FakeModelGateway[Any] = FakeModelGateway(
+    gateway: FakeModelGateway = FakeModelGateway(
         {
             "quantum_course_knowledge_extraction": {
                 "nodes": [

@@ -105,6 +105,7 @@ class CodeVerificationResult(BaseModel):
     agent_metrics: dict[str, str | int | float | bool] = Field(default_factory=dict)
     oracle_metrics: dict[str, str | int | float | bool] = Field(default_factory=dict)
     observations: list[str] = Field(default_factory=list, max_length=12)
+    certification_scope: str = "executed_numeric_metrics_only; prose_and_code_unverified"
     tolerance: float = Field(default=1e-6, ge=0.0, le=1.0)
 
 

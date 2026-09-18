@@ -9,7 +9,7 @@ MANIFEST ?= content/quantum_course/manifest.toml
 GRAPH_SYNC_BATCH_SIZE ?= 100
 
 .PHONY: \
-	help doctor require-secrets compose-schema compose-config build up bootstrap demo-bootstrap \
+	help doctor require-secrets compose-schema compose-config build build-registry up-registry up bootstrap demo-bootstrap \
 	down ps logs migrate ingest graph-sync graph-worker graph-worker-stop \
 	test test-api test-web test-container lint lint-api lint-web lint-container \
 	test-live-infra test-live-model test-live-e2e
@@ -40,6 +40,12 @@ compose-config: require-secrets ## Render Docker Compose configuration and inter
 
 build: require-secrets ## Build the API and web runtime images.
 	$(COMPOSE) -f compose.yaml build api web
+
+build-registry: require-secrets ## Build using official ECR images and verified pgvector source.
+	$(COMPOSE) -f compose.yaml -f compose.registry.yaml build --pull api web postgres
+
+up-registry: require-secrets ## Start the stack while bypassing broken Docker Hub mirrors.
+	$(COMPOSE) -f compose.yaml -f compose.registry.yaml up --build --detach
 
 up: require-secrets ## Start databases, migrate, and launch healthy API/web services.
 	$(COMPOSE) -f compose.yaml up --build --detach postgres neo4j redis migrate api web

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated, Any, NoReturn, Protocol, cast
@@ -29,6 +30,7 @@ from quantum_agent.db_models import (
     AuditLog,
     AuditResourceType,
     CourseRole,
+    LearningEvidence,
     TeachingConversation,
     TeachingConversationStatus,
     TeachingMode,
@@ -37,6 +39,7 @@ from quantum_agent.db_models import (
 )
 from quantum_agent.knowledge.retrieval import RetrievalError
 from quantum_agent.llm.gateway import ModelGateway
+from quantum_agent.llm.recording_budget import RecordingBudgetError
 from quantum_agent.multimodal.teaching import (
     TeachingAttachmentConflictError,
     TeachingAttachmentNotFoundError,
@@ -457,6 +460,19 @@ async def stream_teaching_turn(
             except RetrievalError:
                 await session.rollback()
                 await emit(_sse("workflow.failed", {"code": "RETRIEVAL_UNAVAILABLE"}))
+            except RecordingBudgetError:
+                await session.rollback()
+                await emit(_sse("workflow.failed", {"code": "RECORDING_BUDGET_UNAVAILABLE"}))
+            except Exception as error:
+                # A producer exception must terminate the stream explicitly, not
+                # appear to the browser as a malformed successful response. Never
+                # serialize exception text (providers may include credentials).
+                # CancelledError is a BaseException and retains cancellation semantics.
+                logging.getLogger(__name__).error(
+                    "Teaching stream failed: %s", type(error).__name__,
+                )
+                await session.rollback()
+                await emit(_sse("workflow.failed", {"code": "WORKFLOW_UNAVAILABLE"}))
             finally:
                 await chunk_queue.put(None)
 
@@ -586,6 +602,7 @@ async def get_teaching_conversation_state(
     curriculum_edition_id: UUID,
     conversation_id: UUID,
     session: DatabaseSession,
+    review_stage: str | None = None,
 ) -> dict[str, Any]:
     """Restore the durable learning state after a page refresh (§13).
 
@@ -621,9 +638,54 @@ async def get_teaching_conversation_state(
     durable_phase = await repository.load_durable_learning_phase(
         conversation=conversation,
     )
-    student_durable_phase = durable_phase.model_copy(
-        update={"transfer_verification": None}
-    )
+    if review_stage is not None:
+        allowed_stages = {
+            "predict", "sources", "bridge", "verify", "explain", "teach_back", "transfer", "solo",
+        }
+        if review_stage not in allowed_stages:
+            raise HTTPException(status_code=400, detail="unknown review stage")
+        if durable_phase.solo_assistance_locked or durable_phase.phase.value == "solo_active":
+            raise HTTPException(status_code=423, detail="Solo locks historical answer review")
+        stage_required = {"sources": "diagnose", "bridge": "diagnose"}.get(
+            review_stage, review_stage,
+        )
+        if stage_required not in durable_phase.completed_stages:
+            raise HTTPException(status_code=409, detail="stage is not completed")
+        turns = (await session.scalars(select(TeachingTurn).where(
+            TeachingTurn.conversation_id == conversation.id,
+            TeachingTurn.status == TeachingTurnStatus.COMPLETED,
+        ).order_by(TeachingTurn.sequence_number.desc()).limit(100))).all()
+        for historical in turns:
+            raw = historical.scientific_results_json.get("__result_snapshot")
+            if not isinstance(raw, dict):
+                continue
+            native = raw.get("learning_native") or {}
+            matches = {
+                "predict": bool(native.get("commitment")),
+                "sources": bool((raw.get("evidence_packet") or {}).get("evidence")),
+                "bridge": bool((raw.get("response") or {}).get("derivation_bridge")),
+                "verify": bool(raw.get("scientific_results")) and native.get("phase")
+                not in {"transfer_required", "solo_active", "complete"},
+                "explain": native.get("phase") == "awaiting_revision",
+                "teach_back": bool(native.get("teach_back")),
+                "transfer": native.get("phase") == "transfer_required",
+                "solo": native.get("phase") == "complete",
+            }
+            if matches[review_stage]:
+                return {
+                    "conversation_id": str(conversation.id),
+                    "review_stage": review_stage, "result": raw,
+                    "turn_id": str(historical.id), "sequence": historical.sequence_number,
+                    "student_attempt": historical.student_attempt,
+                }
+        raise HTTPException(status_code=404, detail="no persisted content for this stage")
+    student_durable_phase = durable_phase.model_copy(update={
+        "transfer_verification": None,
+        "reconstruction": "",
+        "teach_back_explanation": "",
+        "teach_back_probe": "",
+        "teach_back_clarifications": [],
+    })
     snapshot: dict[str, Any] | None = None
     turn_id: UUID | None = None
     workflow_version: str | None = None
@@ -642,7 +704,48 @@ async def get_teaching_conversation_state(
             snapshot = raw_snapshot
             turn_id = turn.id
             workflow_version = str(raw_snapshot.get("workflow_version", "")) or None
+    if durable_phase.solo_assistance_locked and snapshot is not None:
+        snapshot_native = snapshot.get("learning_native") or {}
+        if snapshot_native.get("phase") != "solo_active":
+            # An in-flight/failed arming turn must not restore the previous answer.
+            snapshot = None
+            turn_id = None
+            workflow_version = None
+    learning_evidence: list[dict[str, Any]] = []
+    if not durable_phase.solo_assistance_locked and durable_phase.phase.value != "solo_active":
+        observations = (await session.execute(
+            select(LearningEvidence, TeachingTurn.sequence_number)
+            .join(TeachingTurn, TeachingTurn.id == LearningEvidence.teaching_turn_id)
+            .where(TeachingTurn.conversation_id == conversation.id)
+            .order_by(
+                TeachingTurn.sequence_number, LearningEvidence.created_at, LearningEvidence.id
+            )
+            .limit(250)
+        )).all()
+        learning_evidence = [{
+            "id": str(item.id), "turn_id": str(item.teaching_turn_id),
+            "sequence": sequence, "kind": item.kind.value,
+            "observation": item.observation, "payload": item.evidence_json,
+            "timestamp": item.created_at.isoformat(),
+        } for item, sequence in observations]
+    historical_content = {"sources": False, "bridge": False}
+    if not durable_phase.solo_assistance_locked and durable_phase.phase.value != "solo_active":
+        snapshots = (await session.scalars(select(TeachingTurn.scientific_results_json).where(
+            TeachingTurn.conversation_id == conversation.id,
+            TeachingTurn.status == TeachingTurnStatus.COMPLETED,
+        ).order_by(TeachingTurn.sequence_number.desc()).limit(100))).all()
+        for stored in snapshots:
+            saved = stored.get("__result_snapshot")
+            if isinstance(saved, dict):
+                historical_content["sources"] |= bool(
+                    (saved.get("evidence_packet") or {}).get("evidence")
+                )
+                historical_content["bridge"] |= bool(
+                    (saved.get("response") or {}).get("derivation_bridge")
+                )
     return {
+        "historical_content": historical_content,
+        "learning_evidence": learning_evidence,
         "conversation_id": str(conversation.id),
         "mode": conversation.mode.value,
         "status": conversation.status.value,

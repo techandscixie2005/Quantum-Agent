@@ -13,10 +13,15 @@ cleanup_live_e2e_credentials() {
 }
 trap cleanup_live_e2e_credentials EXIT
 
+LIVE_E2E_SCOPE_ARGS=()
+if [[ -n "${QA_LIVE_EDITION_ID:-}" ]]; then
+  LIVE_E2E_SCOPE_ARGS+=(--edition-id "$QA_LIVE_EDITION_ID")
+fi
+
 docker compose -f compose.yaml exec -T api \
   quantum-agent seed-live-e2e \
   --output "${LIVE_E2E_CONTAINER_AUTH}" \
-  --activate-course >/dev/null
+  --activate-course "${LIVE_E2E_SCOPE_ARGS[@]}" >/dev/null
 docker compose -f compose.yaml exec -T api \
   quantum-agent seed-login-account --activate-course >/dev/null
 # Copy the credential to the host.  ``docker compose cp`` cannot read from
@@ -26,4 +31,4 @@ docker compose -f compose.yaml exec -T api cat "${LIVE_E2E_CONTAINER_AUTH}" \
   > "${LIVE_E2E_HOST_AUTH}"
 chmod 0600 "${LIVE_E2E_HOST_AUTH}"
 
-QA_E2E_AUTH_FILE="${LIVE_E2E_HOST_AUTH}" npm run test:e2e:live
+QA_E2E_AUTH_FILE="${LIVE_E2E_HOST_AUTH}" npm run test:e2e:live -- "$@"

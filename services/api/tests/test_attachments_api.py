@@ -41,6 +41,55 @@ PNG = base64.b64decode(
 )
 
 
+@pytest.mark.asyncio
+async def test_failed_image_upload_can_retry_without_duplicate_extraction(
+    attachment_database: async_sessionmaker[AsyncSession], tmp_path: Path,
+) -> None:
+    class RecoveringVision(LowConfidenceVision):
+        calls = 0
+
+        async def transcribe(
+            self, *, image_bytes: bytes, mime_type: str = "image/png", instruction: str,
+        ) -> str:
+            self.calls += 1
+            if self.calls == 1:
+                raise TimeoutError("temporary upstream failure")
+            return await super().transcribe(
+                image_bytes=image_bytes, mime_type=mime_type, instruction=instruction,
+            )
+
+    async with attachment_database() as session:
+        seeded = await _seed(session)
+    app = FastAPI()
+    app.include_router(router)
+    vision = RecoveringVision()
+    app.state.attachment_runtime = AttachmentRuntime(
+        storage=LocalAttachmentStorage(tmp_path / "retry"),
+        validation_policy=UploadValidationPolicy(),
+        perception=MultimodalPerceptionService(vision_gateway=vision),
+        documents=DocumentIntelligenceService(),
+    )
+
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        async with attachment_database() as session:
+            yield session
+
+    app.dependency_overrides[session_dependency] = override_session
+    base = f"/api/v1/courses/{seeded.course_id}/editions/{seeded.edition_id}/attachments"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test",
+        headers={"Authorization": f"Bearer {seeded.owner_token}"},
+    ) as client:
+        first = await client.post(base, files={"file": ("retry.png", PNG, "image/png")})
+        second = await client.post(base, files={"file": ("retry.png", PNG, "image/png")})
+        third = await client.post(base, files={"file": ("retry.png", PNG, "image/png")})
+    assert first.json()["extraction"]["status"] == "failed"
+    assert second.json()["extraction"]["status"] == "needs_confirmation"
+    assert first.json()["extraction"]["id"] == second.json()["extraction"]["id"]
+    assert third.json()["extraction"]["id"] == second.json()["extraction"]["id"]
+    assert vision.calls == 2
+
+
 class LowConfidenceVision:
     async def transcribe(
         self,

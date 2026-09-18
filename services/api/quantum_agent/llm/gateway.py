@@ -14,6 +14,15 @@ import httpx
 import httpx2
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, TypeAdapter, ValidationError
 
+from quantum_agent.llm.observability import (
+    event,
+    failure_category,
+    provider_request,
+    provider_response,
+    traced_call,
+)
+from quantum_agent.llm.recording_budget import RecordingBudgetError, active_budget, bounded
+
 T = TypeVar("T")
 
 
@@ -122,17 +131,20 @@ async def _retry_transient(
             # the deadline keeps its legacy meaning: it bounds the backoff
             # sleeps, not the attempts themselves.
             budget = min(budget, max(deadline - clock(), 0.0))
+        event(label, "transport_group_started", attempt=attempt)
         try:
             if budget is None:
                 return await operation()
             return await asyncio.wait_for(operation(), timeout=budget)
         except TimeoutError as exc:
+            event(label, "timeout", attempt=attempt)
             last_exc = exc
             if attempt == max_attempts:
                 raise GatewayError(
                     f"{label} exceeded its bounded wall-time budget"
                 ) from exc
         except BaseException as exc:
+            event(label, failure_category(exc), attempt=attempt)
             last_exc = exc
             if not _is_transient_exception(exc) or attempt == max_attempts:
                 raise
@@ -195,7 +207,7 @@ class ModelGateway(Protocol):
     async def probe(self) -> GatewayCapabilities: ...
 
 
-class FakeModelGateway[T]:
+class FakeModelGateway:
     """Deterministic test double; unit tests never spend model tokens."""
 
     def __init__(self, responses: Mapping[str, Any] | None = None) -> None:
@@ -281,6 +293,7 @@ class PydanticAIModelGateway:
     def _model_name(self, tier: ModelTier) -> str:
         return self._small_model if tier is ModelTier.SMALL else self._default_model
 
+    @traced_call
     async def structured_generate(
         self,
         *,
@@ -301,14 +314,29 @@ class PydanticAIModelGateway:
         except ImportError as exc:  # pragma: no cover - environment guard
             raise GatewayError("PydanticAI model dependencies are unavailable") from exc
 
+        budget = active_budget()
+        if budget and task not in {
+            "interpret_teaching_turn", "diagnose_student_progress",
+            "diagnose_student_progress_structured", "compose_grounded_teaching_response",
+            "propose_cognitive_commitment", "analyze_teach_back_reconstruction",
+            "generate_transfer_task", "evaluate_barrier_trend",
+            "generate_coding_artifact", "repair_coding_artifact",
+        }:
+            raise RecordingBudgetError("operation disabled during recording")
         owned_client = self._model_http_client is None
         client = self._model_http_client or httpx2.AsyncClient(timeout=self._timeout_seconds)
+        for hook_name, hook in (("request", provider_request), ("response", provider_response)):
+            hooks = client.event_hooks.setdefault(hook_name, [])
+            if hook not in hooks:
+                hooks.append(hook)
         try:
             provider = OpenAIProvider(
                 base_url=self._base_url,
                 api_key=self._api_key.get_secret_value(),
                 http_client=client,
             )
+            if budget:
+                provider.client.max_retries = 0
             model = OpenAIChatModel(self._model_name(model_tier), provider=provider)
             system_parts = [message.content for message in messages if message.role == "system"]
             conversation = "\n\n".join(
@@ -327,11 +355,13 @@ class PydanticAIModelGateway:
                     ),
                 ),
                 system_prompt="\n\n".join(system_parts),
-                retries=self._max_retries,
+                retries=0 if budget else self._max_retries,
             )
 
             async def _run() -> Any:
-                return await agent.run(conversation)
+                return await agent.run(conversation, model_settings=(
+                    {"max_tokens": budget.limits()[1]} if budget else None
+                ))
 
             # PRD V3.1 P1-2: enforce a per-call retry deadline so a single
             # gateway call cannot burn the turn budget.  The deadline is
@@ -340,8 +370,8 @@ class PydanticAIModelGateway:
             call_deadline = time.monotonic() + self._transient_retry_budget_seconds
             try:
                 result = await _retry_transient(
-                    _run,
-                    max_attempts=self._transient_retry_attempts,
+                    (lambda: bounded(_run, budget)) if budget else _run,
+                    max_attempts=1 if budget else self._transient_retry_attempts,
                     base_delay=self._transient_retry_base_delay,
                     max_delay=self._transient_retry_max_delay,
                     label=task,
@@ -368,9 +398,16 @@ class PydanticAIModelGateway:
             raise GatewayError("Model provider timed out") from exc
         except httpx.HTTPError as exc:
             raise GatewayError("Model provider request failed") from exc
-        except GatewayError:
+        except (GatewayError, RecordingBudgetError):
             raise
         except Exception as exc:  # PydanticAI provider/model errors
+            cause: BaseException | None = exc
+            seen: set[int] = set()
+            while cause is not None and id(cause) not in seen:
+                if isinstance(cause, RecordingBudgetError):
+                    raise cause from None
+                seen.add(id(cause))
+                cause = cause.__cause__ or cause.__context__
             raise GatewayError(f"Structured generation failed: {type(exc).__name__}") from exc
         finally:
             if owned_client:
@@ -379,6 +416,8 @@ class PydanticAIModelGateway:
     async def probe(self) -> GatewayCapabilities:
         """Probe small, non-sensitive requests and report observed behavior."""
 
+        if active_budget() is not None:
+            raise RecordingBudgetError("model probes disabled during recording")
         capabilities = GatewayCapabilities()
         owned_client = self._probe_http_client is None
         client = self._probe_http_client or httpx.AsyncClient(

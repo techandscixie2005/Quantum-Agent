@@ -10,6 +10,7 @@ distinct configuration value.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx2
@@ -41,12 +42,14 @@ class VisionGateway:
         api_key: SecretStr,
         base_url: str,
         model: str,
-        timeout_seconds: float = 300.0,
+        timeout_seconds: float = 120.0,
         max_retries: int = 2,
         http_client: httpx2.AsyncClient | None = None,
     ) -> None:
         if not api_key.get_secret_value():
             raise ValueError("A non-empty backend API key is required")
+        if timeout_seconds <= 0 or max_retries < 0:
+            raise ValueError("Vision timeout must be positive and retries non-negative")
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._model = model
@@ -63,6 +66,10 @@ class VisionGateway:
     ) -> str:
         """Return the vision model's transcription of one rendered page image."""
 
+        from quantum_agent.llm.recording_budget import RecordingBudgetError, active_budget
+
+        if active_budget() is not None:
+            raise RecordingBudgetError("capability disabled during recording")
         if not image_bytes:
             raise ValueError("image_bytes must be non-empty")
 
@@ -88,23 +95,42 @@ class VisionGateway:
                 }
             ],
             "temperature": 0,
+            "max_tokens": 4096,
         }
         url = f"{self._base_url}/chat/completions"
 
         owned_client = self._http_client is None
         client = self._http_client or httpx2.AsyncClient(timeout=self._timeout_seconds)
         last_error: Exception | None = None
+        deadline = asyncio.get_running_loop().time() + self._timeout_seconds
         try:
-            for _attempt in range(self._max_retries + 1):
+            for attempt in range(self._max_retries + 1):
                 try:
-                    response = await client.post(url, headers=headers, json=body)
+                    # Bound the entire retry sequence, including providers that
+                    # keep a connection alive without returning a response.
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        raise TimeoutError
+                    response = await asyncio.wait_for(
+                        client.post(url, headers=headers, json=body),
+                        timeout=min(remaining, max(0.01, self._timeout_seconds / 3)),
+                    )
                     if not response.is_success:
                         raise VisionGatewayError(f"HTTP {response.status_code}")
-                    payload = response.json()
-                    content = payload["choices"][0]["message"].get("content", "")
+                    try:
+                        payload = response.json()
+                        content = payload["choices"][0]["message"].get("content", "")
+                    except (ValueError, KeyError, IndexError, TypeError):
+                        raise VisionGatewayError("malformed provider response") from None
                     if not content:
                         raise VisionGatewayError("empty content")
-                    return str(content)
+                    if not isinstance(content, str):
+                        raise VisionGatewayError("malformed provider content")
+                    return content
+                except TimeoutError:
+                    if attempt == self._max_retries:
+                        raise VisionGatewayError("vision provider deadline exceeded") from None
+                    continue
                 except httpx2.HTTPError as exc:
                     last_error = exc
                     continue

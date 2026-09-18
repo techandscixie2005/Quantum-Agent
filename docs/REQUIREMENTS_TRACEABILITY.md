@@ -90,7 +90,7 @@ This document traces the PRD requirements against the current implementation sta
 
 | Requirement | Status | Evidence |
 |---|---|---|
-| GLM route for code generation | ✅ | `code` capability → `glm-5.2` default |
+| GLM route for code generation | ✅ | `code` capability → `deepseek-v4-flash` default |
 | Project templates | ✅ | 4 project definitions in `lib/projects.ts` |
 | Python numerical examples | ⚠️ | Sandbox adapter present; real execution requires external service |
 | Plot downloadable results | ⚠️ | Not implemented (depends on sandbox execution) |

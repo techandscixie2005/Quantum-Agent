@@ -936,3 +936,42 @@ async def test_client_request_id_replays_completed_turn_instead_of_duplicating(
         assert turn_count == 1, (
             f"client_request_id replay must not create a duplicate turn (found {turn_count})"
         )
+
+
+async def test_continuation_retrieval_uses_the_persisted_transfer_topic() -> None:
+    from types import SimpleNamespace
+    from typing import cast
+
+    from langgraph.runtime import Runtime
+
+    from quantum_agent.db_models import TeachingTaskKind
+    from quantum_agent.teaching.models import InterpretationOutput, LearningNativeSubmission
+    from quantum_agent.tutor.nodes import retrieve_evidence_node
+    from quantum_agent.tutor.state import TutorContext, TutorState
+
+    course_id, edition_id = uuid4(), uuid4()
+    retriever = StaticRetriever(_packet(course_id, edition_id))
+    context = cast(TutorContext, SimpleNamespace(
+        retriever=retriever, actor=SimpleNamespace(course_id=course_id),
+        curriculum_edition_id=edition_id, use_specialist_agents=False,
+        started_turn=SimpleNamespace(durable_phase=SimpleNamespace(
+            active_transfer_task_prompt="矩形势垒加宽后，预测透射率如何改变。",
+            pending_scientific_request={"kind": "rectangular_barrier_scattering"},
+        )),
+    ))
+    state = TutorState(
+        request=TeachingTurnInput(
+            mode=TeachingMode.LEARN_CONCEPTS, message="继续 Learning-Native 学习循环。",
+            learning_native=LearningNativeSubmission(),
+        ),
+        interpretation=InterpretationOutput(
+            task_kind=TeachingTaskKind.CONCEPT_QUESTION, relevant_concepts=[],
+            needs_scientific_verification=False, confidence=1.0,
+        ),
+    )
+    result = await retrieve_evidence_node(state, Runtime(context=context))
+    assert "矩形势垒加宽" in result["evidence_packet"].query
+    assert "rectangular barrier scattering" in result["evidence_packet"].query
+    assert retriever.scopes == [RetrievalScope(
+        course_id=course_id, curriculum_edition_id=edition_id,
+    )]

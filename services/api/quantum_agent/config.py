@@ -41,6 +41,7 @@ class Settings(BaseSettings):
         default=384,
         validation_alias="EMBEDDING_DIMENSION",
     )
+
     embedding_provider: Literal["disabled", "local_hashing", "openai_compatible"] = Field(
         default="local_hashing",
         validation_alias="EMBEDDING_PROVIDER",
@@ -79,7 +80,7 @@ class Settings(BaseSettings):
         validation_alias="USTC_MODEL_VISION_REASONER",
     )
     ustc_long_context_model: str = Field(
-        default="glm-5.2",
+        default="deepseek-v4-flash",
         validation_alias="USTC_MODEL_CODE",
     )
     # PRD V3.1 §6: the Coding Agent routes its code-generation calls to this
@@ -87,7 +88,7 @@ class Settings(BaseSettings):
     # compose.yaml; override with ``USTC_MODEL_CODE`` if a dedicated coding
     # model becomes available.
     ustc_code_model: str = Field(
-        default="glm-5.2",
+        default="deepseek-v4-flash",
         validation_alias="USTC_MODEL_CODE_AGENT",
     )
     # PRD V3.1 §3.3: server-side session vault for user-supplied API keys.
@@ -190,6 +191,13 @@ class Settings(BaseSettings):
         le=1000,
         validation_alias="ATTACHMENT_MAX_ARCHIVE_COMPRESSION_RATIO",
     )
+
+    @field_validator("embedding_dimension", mode="before")
+    @classmethod
+    def parse_embedding_dimension(cls, value: object) -> object:
+        # Environment variables are strings; retain the fixed database vector
+        # dimension while accepting its normal environment representation.
+        return 384 if value == "384" else value
 
     @field_validator("database_url")
     @classmethod

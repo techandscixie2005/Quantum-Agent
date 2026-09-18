@@ -34,7 +34,9 @@ from quantum_agent.knowledge.retrieval import (
     build_hydration_statement,
     build_postgres_full_text_statement,
     build_postgres_semantic_statement,
+    is_instructional_passage,
     lexical_query_terms,
+    passage_matches_query,
 )
 from quantum_agent.llm.embeddings import EmbeddingProbe, HashingEmbeddingGateway
 
@@ -82,7 +84,22 @@ def record(
 
 
 RECORD_ONE = record(CHUNK_ONE, EVIDENCE_ONE, "波函数具有统计解释。", "波函数具有统计解释")
-RECORD_TWO = record(CHUNK_TWO, EVIDENCE_TWO, "概率密度等于波函数模方。", "概率密度")
+RECORD_TWO = record(CHUNK_TWO, EVIDENCE_TWO, "概率密度等于波函数模方。", "概率密度等于波函数模方")
+
+
+def test_course_reading_lists_do_not_count_as_physics_evidence() -> None:
+    assert not is_instructional_passage("知识点\t\t隧穿效应\t课程思政\t事实性")
+    assert not is_instructional_passage("参考教材\n第一章 波函数\n第二章 算符\n第三章 势垒")
+    assert not is_instructional_passage("Table of contents\n1 Wavefunctions\n2 Tunnelling")
+    assert not is_instructional_passage("viii\nContents\n2 PARTICLE STATES\n29")
+    assert not is_instructional_passage("12\nContents\n7.9 Coulomb Scattering\n227")
+    assert is_instructional_passage("矩形势垒中, 当 E < V0 时, 波函数按指数衰减。")
+
+
+def test_query_units_cannot_match_inside_unrelated_quoted_words() -> None:
+    terms = lexical_query_terms("势垒 E=5 eV a=0.15 nm", limit=16)
+    assert not passage_matches_query("Every observable evolves in time.", terms)
+    assert passage_matches_query("Tunnelling through finite barriers.", terms)
 
 
 def _postgresql_dialect() -> Dialect:
@@ -371,7 +388,7 @@ async def test_hybrid_fusion_uses_graph_only_after_relational_resolution() -> No
                     source_chunk_id=str(CHUNK_TWO),
                     source_file="第1-2章.pdf",
                     page_number=12,
-                    quote="概率密度",
+                    quote=RECORD_TWO.evidence_snippet,
                 ),
             ),
             review_decision_id=str(uuid4()),
@@ -448,6 +465,27 @@ async def test_graph_text_without_matching_relational_evidence_is_not_a_channel_
 
 
 @pytest.mark.asyncio
+async def test_topic_elsewhere_in_chunk_does_not_validate_unrelated_quote() -> None:
+    repository = StaticRepository()
+    repository.records[CHUNK_ONE] = (record(
+        CHUNK_ONE, EVIDENCE_ONE,
+        "Every observable evolves in time. Later: tunnelling through a barrier.",
+        "Every observable evolves in time.",
+    ),)
+    retriever = HybridEvidenceRetriever(
+        repository=repository,
+        embedding_gateway=HashingEmbeddingGateway(384),
+        graph_store=None,
+    )
+    packet = await retriever.retrieve(
+        RetrievalScope(course_id=COURSE, curriculum_edition_id=EDITION),
+        "势垒 E=5 eV a=0.15 nm",
+    )
+    assert packet.coverage is RetrievalCoverage.NOT_FOUND
+    assert packet.evidence == []
+
+
+@pytest.mark.asyncio
 async def test_local_hashing_is_explicitly_lexical_degraded() -> None:
     retriever = HybridEvidenceRetriever(
         repository=StaticRepository(),
@@ -504,3 +542,9 @@ async def test_hydrated_record_from_another_scope_is_never_returned() -> None:
     assert packet.coverage is RetrievalCoverage.NOT_FOUND
     assert packet.evidence == []
     assert "authoritative_evidence_omitted:scope_mismatch" in packet.warnings
+
+
+def test_interface_words_and_numeric_symbols_do_not_match_arbitrary_course_prose() -> None:
+    terms = lexical_query_terms("继续 Learning-Native 学习循环 T = 0.25 R + T = 1")
+    assert not {"learning", "native", "t", "r", "0.25", "1"}.intersection(terms)
+    assert "barrier" in lexical_query_terms("矩形势垒 T = 0.25")

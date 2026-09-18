@@ -39,6 +39,9 @@ class NodeType(StrEnum):
     FORMULA = "Formula"
     SYMBOL = "Symbol"
     DERIVATION = "Derivation"
+    DERIVATION_STEP = "DerivationStep"
+    ASSUMPTION = "Assumption"
+    VALIDITY_CONDITION = "ValidityCondition"
     EXAMPLE = "Example"
     EXERCISE = "Exercise"
     MISCONCEPTION = "Misconception"
@@ -112,6 +115,9 @@ _CONTENT_NODE_TYPES: Final[frozenset[NodeType]] = frozenset(
         NodeType.FORMULA,
         NodeType.SYMBOL,
         NodeType.DERIVATION,
+        NodeType.DERIVATION_STEP,
+        NodeType.ASSUMPTION,
+        NodeType.VALIDITY_CONDITION,
         NodeType.EXAMPLE,
         NodeType.EXERCISE,
         NodeType.MISCONCEPTION,
@@ -196,6 +202,19 @@ _SCIENTIFIC_PATTERNS: set[TriplePattern] = {
     (NodeType.FORMULA, RelationshipType.VERIFIED_BY, NodeType.EXAMPLE),
 }
 
+_SCIENTIFIC_PATTERNS.update({
+    (NodeType.DERIVATION_STEP, RelationshipType.PART_OF, NodeType.DERIVATION),
+    (NodeType.DERIVATION_STEP, RelationshipType.DERIVES_FROM, NodeType.DERIVATION_STEP),
+    (NodeType.DERIVATION_STEP, RelationshipType.DERIVES_FROM, NodeType.FORMULA),
+    (NodeType.FORMULA, RelationshipType.DERIVES_FROM, NodeType.DERIVATION_STEP),
+})
+_SCIENTIFIC_PATTERNS.update(
+    (source, RelationshipType.VALID_UNDER, condition)
+    for source in (NodeType.FORMULA, NodeType.PRINCIPLE, NodeType.DERIVATION,
+                   NodeType.DERIVATION_STEP, NodeType.APPROXIMATION)
+    for condition in (NodeType.ASSUMPTION, NodeType.VALIDITY_CONDITION)
+)
+
 _USABLE_TARGETS: Final[frozenset[NodeType]] = frozenset(
     {
         NodeType.CONCEPT,
@@ -208,6 +227,9 @@ _USABLE_TARGETS: Final[frozenset[NodeType]] = frozenset(
         NodeType.FORMULA,
         NodeType.SYMBOL,
         NodeType.DERIVATION,
+        NodeType.DERIVATION_STEP,
+        NodeType.ASSUMPTION,
+        NodeType.VALIDITY_CONDITION,
         NodeType.EXAMPLE,
         NodeType.EXPERIMENT,
         NodeType.VISUALIZATION,
@@ -221,6 +243,9 @@ _USING_SOURCES: Final[frozenset[NodeType]] = frozenset(
         NodeType.APPROXIMATION,
         NodeType.FORMULA,
         NodeType.DERIVATION,
+        NodeType.DERIVATION_STEP,
+        NodeType.ASSUMPTION,
+        NodeType.VALIDITY_CONDITION,
         NodeType.EXAMPLE,
         NodeType.EXERCISE,
         NodeType.EXPERIMENT,
@@ -242,6 +267,9 @@ _DEPENDENCY_PATTERNS: set[TriplePattern] = {
         NodeType.APPROXIMATION,
         NodeType.FORMULA,
         NodeType.DERIVATION,
+        NodeType.DERIVATION_STEP,
+        NodeType.ASSUMPTION,
+        NodeType.VALIDITY_CONDITION,
         NodeType.EXPERIMENT,
         NodeType.PROJECT,
     )
@@ -265,6 +293,9 @@ _VISUALIZATION_PATTERNS: set[TriplePattern] = {
         NodeType.QUANTUM_STATE,
         NodeType.FORMULA,
         NodeType.DERIVATION,
+        NodeType.DERIVATION_STEP,
+        NodeType.ASSUMPTION,
+        NodeType.VALIDITY_CONDITION,
         NodeType.EXPERIMENT,
     )
 }
@@ -604,6 +635,9 @@ _NODE_DESCRIPTIONS: Final[dict[NodeType, str]] = {
     NodeType.FORMULA: "A formula preserving the course's exact notation and assumptions.",
     NodeType.SYMBOL: "A symbol whose meaning and scope are explicitly defined.",
     NodeType.DERIVATION: "An ordered derivation grounded in source steps.",
+    NodeType.DERIVATION_STEP: "One source-grounded algebraic or operator step.",
+    NodeType.ASSUMPTION: "An explicitly stated physical or mathematical assumption.",
+    NodeType.VALIDITY_CONDITION: "An explicit boundary on the validity of a result.",
     NodeType.EXAMPLE: "A worked or illustrative example from the materials.",
     NodeType.EXERCISE: "An exercise or assessment item from the materials.",
     NodeType.MISCONCEPTION: "A teacher-reviewable misunderstanding, never inferred as fact.",

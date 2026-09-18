@@ -12,7 +12,7 @@ from typing import Any
 from uuid import UUID
 
 from alembic.config import Config as AlembicConfig
-from sqlalchemy import select
+from sqlalchemy import select, true
 
 from alembic import command
 from quantum_agent.auth import (
@@ -114,6 +114,33 @@ async def _ingest_async(arguments: argparse.Namespace) -> int:
 def _ingest(arguments: argparse.Namespace) -> int:
     arguments.manifest = str(Path(arguments.manifest).resolve())
     return asyncio.run(_ingest_async(arguments))
+
+
+async def _extract_pedagogy_async(arguments: argparse.Namespace) -> int:
+    from quantum_agent.knowledge.pedagogical_import import extract_pedagogical_content
+    from quantum_agent.knowledge.retrieval import RetrievalScope
+
+    settings = Settings()
+    gateway = build_model_gateway(settings)
+    if gateway is None:
+        raise RuntimeError("USTC_API is required for candidate extraction")
+    engine = create_database_engine(settings)
+    try:
+        async with create_session_factory(engine)() as session:
+            report = await extract_pedagogical_content(
+                session, scope=RetrievalScope(
+                    course_id=UUID(arguments.course_id),
+                    curriculum_edition_id=UUID(arguments.edition_id),
+                ), gateway=gateway, query=arguments.query, limit=arguments.limit,
+            )
+        _json_output({"teacher_review_required": True, "chunks": report})
+        return 1 if any("failure" in row for row in report) else 0
+    finally:
+        await engine.dispose()
+
+
+def _extract_pedagogy(arguments: argparse.Namespace) -> int:
+    return asyncio.run(_extract_pedagogy_async(arguments))
 
 
 async def _sync_graph_async(arguments: argparse.Namespace) -> int:
@@ -477,6 +504,10 @@ async def _seed_live_e2e_async(arguments: argparse.Namespace) -> int:
                     select(Course, CurriculumEdition)
                     .join(CurriculumEdition, CurriculumEdition.course_id == Course.id)
                     .where(CurriculumEdition.status == CurriculumEditionStatus.PUBLISHED)
+                    .where(
+                        CurriculumEdition.id == UUID(arguments.edition_id)
+                        if getattr(arguments, "edition_id", None) else true()
+                    )
                     .order_by(
                         (Course.status == CourseStatus.ACTIVE).desc(),
                         CurriculumEdition.published_at.desc(),
@@ -569,6 +600,7 @@ async def _seed_live_e2e_async(arguments: argparse.Namespace) -> int:
             {
                 "course_id": str(course.id),
                 "curriculum_edition_id": str(edition.id),
+                "curriculum_edition_title": edition.title,
                 "student_user_id": str(student.id),
                 "student_token": student_token,
                 "ta_user_id": str(ta.id),
@@ -616,7 +648,11 @@ async def _seed_demo_account_async(arguments: argparse.Namespace) -> int:
                 await session.execute(
                     select(Course, CurriculumEdition)
                     .join(CurriculumEdition, CurriculumEdition.course_id == Course.id)
-                    .where(CurriculumEdition.status == CurriculumEditionStatus.PUBLISHED)
+                    .where(
+                        CurriculumEdition.status == CurriculumEditionStatus.PUBLISHED,
+                        *([Course.id == UUID(arguments.course_id)]
+                          if getattr(arguments, "course_id", None) else []),
+                    )
                     .order_by(
                         (Course.status == CourseStatus.ACTIVE).desc(),
                         CurriculumEdition.published_at.desc(),
@@ -707,6 +743,15 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
     ingest.set_defaults(handler=_ingest)
 
+    pedagogy = commands.add_parser(
+        "extract-pedagogy", help="extract review-required teaching content"
+    )
+    pedagogy.add_argument("--course-id", required=True)
+    pedagogy.add_argument("--edition-id", required=True)
+    pedagogy.add_argument("--query", required=True)
+    pedagogy.add_argument("--limit", type=int, default=4)
+    pedagogy.set_defaults(handler=_extract_pedagogy)
+
     graph = commands.add_parser("sync-graph", help="dispatch approved graph outbox events")
     graph.add_argument("--limit", type=int, default=100)
     graph.add_argument("--worker-id", default=None)
@@ -755,6 +800,7 @@ def build_parser() -> argparse.ArgumentParser:
     live_e2e.add_argument("--output", required=True)
     live_e2e.add_argument("--expires-hours", type=int, default=2)
     live_e2e.add_argument("--activate-course", action="store_true")
+    live_e2e.add_argument("--edition-id", help="explicit published curriculum scope for live E2E")
     live_e2e.set_defaults(handler=_seed_live_e2e)
 
     demo = commands.add_parser(
@@ -762,6 +808,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="seed the competition login student account for /api/v1/auth/login",
     )
     demo.add_argument("--activate-course", action="store_true")
+    demo.add_argument("--course-id", help="explicit demo course; does not change other memberships")
     demo.set_defaults(handler=_seed_demo_account)
     # Backward-compatible alias for callers that still use the old name.
     demo_legacy = commands.add_parser(
@@ -769,6 +816,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="alias for seed-login-account (deprecated)",
     )
     demo_legacy.add_argument("--activate-course", action="store_true")
+    demo_legacy.add_argument("--course-id")
     demo_legacy.set_defaults(handler=_seed_demo_account)
     return parser
 

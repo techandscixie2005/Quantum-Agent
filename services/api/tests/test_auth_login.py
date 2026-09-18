@@ -104,7 +104,7 @@ def _build_app(
 ) -> FastAPI:
     app = FastAPI()
     settings = Settings(
-        environment=environment,  # type: ignore[arg-type]
+        environment=environment,
         session_vault_key=fernet_key,
         login_course_email=email,
     )
@@ -127,7 +127,7 @@ def _build_app(
         base_url=settings.ustc_base_url,
     )
 
-    async def app_session_dependency() -> AsyncSession:
+    async def app_session_dependency() -> AsyncIterator[AsyncSession]:
         async with session_factory() as session:
             yield session
 

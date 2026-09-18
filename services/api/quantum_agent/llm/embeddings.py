@@ -103,6 +103,10 @@ class OpenAICompatibleEmbeddingGateway:
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
+        from quantum_agent.llm.recording_budget import RecordingBudgetError, active_budget
+
+        if active_budget() is not None:
+            raise RecordingBudgetError("capability disabled during recording")
         owned_client = self._http_client is None
         client = self._http_client or httpx.AsyncClient(timeout=self._timeout_seconds)
         try:

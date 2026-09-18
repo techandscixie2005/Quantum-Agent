@@ -893,6 +893,19 @@ async def import_authored_structures(
         ),
         None,
     )
+    if syllabus_context is None and taxonomy_context is None:
+        # Narrative-only courses have no authored graph structure to import.
+        # Their documents still require the normal approval/publication flow.
+        return StructuralImportReport(
+            syllabus_chapter_roots=0,
+            taxonomy_roots=0,
+            syllabus_node_candidates=0,
+            syllabus_relation_candidates=0,
+            taxonomy_node_candidates=0,
+            taxonomy_relation_candidates=0,
+            curriculum_units=0,
+            diagnostics=("no_authored_structure_supplied",),
+        )
     if syllabus_context is None or taxonomy_context is None:
         raise StructuralImportError(
             "manifest must include authored DOCX syllabus and XLSX taxonomy"

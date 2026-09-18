@@ -8,6 +8,7 @@
  */
 
 import { UUID_PATTERN, type EvidenceLocator } from "../knowledge/contracts";
+import { derivationBridgeSchema, type DerivationBridge } from "./derivation";
 
 export const TEACHING_MODES = [
   "learn_concepts",
@@ -72,6 +73,7 @@ export type TeachingTurnRequest = Readonly<{
   student_attempt: string | null;
   attachment_ids: readonly string[];
   scientific_request: SupportedScientificRequest | null;
+  scientific_execution?: "generate_code" | "reference_only";
   learning_native: LearningNativeSubmission | null;
   // PRD V3.0 P1-2: client-generated idempotency key.  The browser sends the
   // same key on a retry so the backend can return the original completed
@@ -569,6 +571,7 @@ export type TeachingTurnResult = Readonly<{
   }>;
   evidence_packet: EvidencePacket;
   response: Readonly<{
+    derivation_bridge?: DerivationBridge | null;
     orientation: string;
     claims: readonly Readonly<{
       text: string;
@@ -892,6 +895,7 @@ export function parseTeachingTurnRequest(value: unknown): TeachingTurnRequest {
       "student_attempt",
       "attachment_ids",
       "scientific_request",
+      "scientific_execution",
       "learning_native",
       "client_request_id",
     ],
@@ -931,6 +935,9 @@ export function parseTeachingTurnRequest(value: unknown): TeachingTurnRequest {
         ? null
         : parseLearningNativeSubmission(input.learning_native, "turnRequest.learning_native"),
     client_request_id: clientRequestId || null,
+    ...(input.scientific_execution === undefined ? {} : {
+      scientific_execution: oneOf(input.scientific_execution, ["generate_code", "reference_only"] as const, "turnRequest.scientific_execution"),
+    }),
   };
 }
 
@@ -2160,6 +2167,19 @@ export function parseTeachingTurnResult(value: unknown): TeachingTurnResult {
     };
   });
   const evidencePacket = parseEvidencePacket(input.evidence_packet, "turnResult.evidence_packet");
+  const bridge = responseInput.derivation_bridge == null ? null : derivationBridgeSchema.parse(responseInput.derivation_bridge);
+  if (bridge) {
+    if (releaseInput.release_level === "question_only" || releaseInput.release_level === "hint") {
+      fail("turnResult.response.derivation_bridge", "a release level permitting worked steps");
+    }
+    if (releaseInput.release_level === "scaffold" && (!bridge.partial || bridge.missing_steps.length > 1)) {
+      fail("turnResult.response.derivation_bridge", "at most one partial worked step");
+    }
+    const refs = [...bridge.source_refs, ...bridge.missing_steps.flatMap((step) => step.source_refs)];
+    if (refs.some((ref) => !evidencePacket.evidence.some((item) => item.evidence_id === ref.evidence_id && item.evidence_snippet.includes(ref.quote)))) {
+      fail("turnResult.response.derivation_bridge", "exact published evidence spans");
+    }
+  }
   const evidenceIds = new Set(evidencePacket.evidence.map((item) => item.evidence_id));
   const scientificResults = array(input.scientific_results, "turnResult.scientific_results").map((item, index) =>
     parseScientificResult(item, `turnResult.scientific_results[${index}]`),
@@ -2344,6 +2364,7 @@ export function parseTeachingTurnResult(value: unknown): TeachingTurnResult {
     },
     evidence_packet: evidencePacket,
     response: {
+      derivation_bridge: bridge,
       orientation: text(responseInput.orientation, "turnResult.response.orientation", 1_200),
       claims,
       next_question: text(responseInput.next_question, "turnResult.response.next_question", 1_000),
@@ -2365,8 +2386,8 @@ export function parseTeachingTurnResult(value: unknown): TeachingTurnResult {
 
 function parseCodeArtifactRun(value: unknown): CodeArtifactRun | null {
   if (value === undefined || value === null) return null;
-  // Fail-closed: a malformed artifact is dropped rather than failing the
-  // whole turn, so a Coding Agent hiccup can never break the Golden Loop.
+  // A malformed execution record must surface a contract error, not disappear
+  // beside a surviving green scientific result.
   try {
     const input = record(value, "turnResult.code_artifact");
     const artifact = record(input.artifact, "turnResult.code_artifact.artifact");
@@ -2379,7 +2400,7 @@ function parseCodeArtifactRun(value: unknown): CodeArtifactRun | null {
         purpose: text(artifact.purpose, "turnResult.code_artifact.artifact.purpose", 600),
         code: text(artifact.code, "turnResult.code_artifact.artifact.code", 20_000),
         expected_outputs: strings(artifact.expected_outputs, "turnResult.code_artifact.artifact.expected_outputs", 8, 200),
-        verification_plan: text(artifact.verification_plan, "turnResult.code_artifact.artifact.verification_plan", 600),
+        verification_plan: boundedTextAllowEmpty(artifact.verification_plan ?? "", "turnResult.code_artifact.artifact.verification_plan", 600),
       },
       execution: {
         completed: bool(execution.completed, "turnResult.code_artifact.execution.completed"),
@@ -2403,7 +2424,7 @@ function parseCodeArtifactRun(value: unknown): CodeArtifactRun | null {
         return {
           attempt_number: integer(r.attempt_number, `turnResult.code_artifact.repairs[${index}].attempt_number`),
           failure_summary: text(r.failure_summary, `turnResult.code_artifact.repairs[${index}].failure_summary`, 1_000),
-          stderr_excerpt: text(r.stderr_excerpt, `turnResult.code_artifact.repairs[${index}].stderr_excerpt`, 1_000),
+          stderr_excerpt: boundedTextAllowEmpty(r.stderr_excerpt ?? "", `turnResult.code_artifact.repairs[${index}].stderr_excerpt`, 1_000),
         };
       }),
       progress: oneOf(input.progress, ["planning", "writing", "running", "verifying", "result"] as const, "turnResult.code_artifact.progress"),
@@ -2413,7 +2434,7 @@ function parseCodeArtifactRun(value: unknown): CodeArtifactRun | null {
           : text(input.figure_png_base64, "turnResult.code_artifact.figure_png_base64", 200_000),
     };
   } catch {
-    return null;
+    throw new Error("计算产物不符合后端合同，无法显示核验结论；请重试。");
   }
 }
 

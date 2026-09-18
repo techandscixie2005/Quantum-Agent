@@ -1183,7 +1183,7 @@ stability
 当前项目可通过 `USTC_API` 调用的模型包括：
 
 ```text
-glm-5.2-107
+deepseek-v4-flash
 deepseek-v4-pro
 deepseek-v4-flash
 smart/default
@@ -1201,7 +1201,7 @@ unlimited-ocr
 qwen3-embedding
 qwen3-reranker
 mineru
-glm-5.2
+deepseek-v4-flash
 deepseek-v4-flash-ascend1
 qwen3.8-chat
 qwen3.8-reasoner

@@ -52,3 +52,11 @@ def test_graph_store_is_disabled_without_server_secret() -> None:
         NEO4J_PASSWORD=None,
     )
     assert build_graph_store(settings) is None
+
+
+def test_embedding_dimension_accepts_environment_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EMBEDDING_DIMENSION", "384")
+    assert Settings().embedding_dimension == 384
+    monkeypatch.setenv("EMBEDDING_DIMENSION", "768")
+    with pytest.raises(ValueError, match="EMBEDDING_DIMENSION"):
+        Settings()

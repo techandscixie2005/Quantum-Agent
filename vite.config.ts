@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import vinext from "vinext";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
@@ -46,6 +47,8 @@ export default defineConfig(async () => {
   return {
     server: {
       host: "0.0.0.0",
+      // KaTeX fonts resolve outside the checkout when node_modules is symlinked.
+      fs: { allow: [process.cwd(), realpathSync("node_modules/katex")] },
       allowedHosts: ["terminal.local"],
       ...(isCodexSeatbeltSandbox
         ? { watch: { useFsEvents: false, usePolling: true } }

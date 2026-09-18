@@ -1,5 +1,8 @@
 # Quantum Agent — Implementation Completion Report
 
+> Historical TypeScript implementation report. For the current Python backend
+> and `QuantumAgent_收敛核心方案.md`, use [the core-plan acceptance record](CORE_PLAN_ACCEPTANCE.md).
+
 **Date**: 2026-07-12
 **Baseline commit**: 9f3b5e349aa286e701b74abd1f21aa9ad6a9b267
 **Final branch**: main (working tree, uncommitted)
@@ -53,7 +56,7 @@ Conditional branches: refuseRequest, escalateToTeacher, refuseOutOfScope, runToo
 | deep | deepseek-v4-pro | USTC_API env var |
 | vision | qwen3.6-chat | USTC_API env var |
 | vision-reasoner | qwen3.6-reasoner | USTC_API env var |
-| code | glm-5.2 | USTC_API env var |
+| code | deepseek-v4-flash | USTC_API env var |
 
 Primary credential: `USTC_API` (single variable, no `USTC_API_KEY`).
 

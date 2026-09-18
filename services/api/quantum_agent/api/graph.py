@@ -19,6 +19,7 @@ from quantum_agent.knowledge.explorer import (
     StudentSubgraphResponse,
 )
 from quantum_agent.knowledge.retrieval import RetrievalScope
+from quantum_agent.teaching.access import require_evidence_access
 
 router = APIRouter(
     prefix="/api/v1/courses/{course_id}/editions/{curriculum_edition_id}/graph",
@@ -35,12 +36,13 @@ async def authenticated_graph_explorer(
 ) -> GraphExplorerService:
     """Authenticate any active course member before resolving the graph service."""
 
-    await authenticate_course_actor(
+    actor = await authenticate_course_actor(
         session,
         credential=bearer_credential(request),
         course_id=course_id,
         allowed_roles=None,
     )
+    await require_evidence_access(session, actor)
     explorer = getattr(request.app.state, "graph_explorer", None)
     required_methods = ("search_concepts", "subgraph", "prerequisite_paths")
     if explorer is None or not all(

@@ -141,7 +141,7 @@ services:
       USTC_VISION_MODEL: ${USTC_VISION_MODEL:-qwen3.8-chat}
       USTC_MODEL_QUICK: ${USTC_MODEL_QUICK:-deepseek-v4-flash-ascend1}
       USTC_MODEL_VISION_REASONER: ${USTC_MODEL_VISION_REASONER:-qwen3.8-reasoner}
-      USTC_MODEL_CODE: ${USTC_MODEL_CODE:-glm-5.2}
+      USTC_MODEL_CODE: ${USTC_MODEL_CODE:-deepseek-v4-flash}
       USTC_MODEL_EMBEDDING: ${USTC_MODEL_EMBEDDING:-qwen3-embedding}
       USTC_MODEL_RERANK: ${USTC_MODEL_RERANK:-qwen3-reranker}
       USTC_MODEL_MINERU: ${USTC_MODEL_MINERU:-mineru}

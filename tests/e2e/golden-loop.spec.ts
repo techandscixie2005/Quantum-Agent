@@ -655,8 +655,100 @@ async function sendStudentMessage(page: Page, message: string) {
 }
 
 test.describe("Golden Learning Loop · quantum tunnelling", () => {
+  test("course entry only loads a task; changed parameters invalidate the mock result", async ({ page }) => {
+    await interceptAgentApis(page, [{ ...GOLDEN_LOOP_STAGES[2]!.result }]);
+    let submissions = 0;
+    page.on("request", request => {
+      if (request.method() === "POST" && request.url().includes("/turns/stream")) submissions++;
+    });
+    await page.goto("/agent");
+    await page.getByRole("button", { name: "加载课程任务", exact: true }).click();
+    expect(submissions).toBe(0);
+    await expect(page.getByTestId("coding-artifact")).toHaveCount(0);
+    await sendStudentMessage(page, "预测非零，请计算并核对。");
+    await expect(page.getByTestId("coding-verification-status")).toContainText("PASS");
+    const width = page.getByLabel(/势垒宽度 a/);
+    for (const next of ["0.137", "0.213", "0.173"]) {
+      await width.fill(next);
+      await expect(page.getByRole("status").filter({ hasText: "参数已改变" })).toBeVisible();
+      await expect(page.getByTestId("coding-verification-status")).toHaveCount(0);
+      await expect(page.getByTestId("tunnelling-metrics")).toHaveCount(0);
+    }
+  });
+
+  test("restores the selected curriculum before recovering a saved thread", async ({ page }) => {
+    await interceptAgentApis(page, []);
+    await page.route("**/api/agent/context", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ...STUDENT_CONTEXT, courses: [
+        { ...STUDENT_CONTEXT.courses[0], curriculum_edition_id: "88888888-8888-4888-8888-888888888888", edition_title: "另一课程版本" },
+        ...STUDENT_CONTEXT.courses,
+      ] }),
+    }));
+    await page.addInitScript(({ course, edition, conversation }) => {
+      localStorage.setItem("qa_course_key", `${course}:${edition}`);
+      localStorage.setItem("qa_conversation_id", conversation);
+    }, { course: COURSE_ID, edition: EDITION_ID, conversation: CONVERSATION_ID });
+    const restoredScopes: string[] = [];
+    await page.route("**/api/teaching/threads/**/state?**", (route) => {
+      restoredScopes.push(new URL(route.request().url()).searchParams.get("curriculum_edition_id") ?? "");
+      return route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+    });
+    await page.route("**/api/teaching/threads/**/interrupt?**", (route) =>
+      route.fulfill({ status: 404, contentType: "application/json", body: "{}" }));
+    await page.goto("/agent", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("banner")).toContainText("2026 秋");
+    await expect.poll(() => restoredScopes.length).toBe(1);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect.poll(() => restoredScopes.length).toBe(2);
+    expect(restoredScopes).toEqual([EDITION_ID, EDITION_ID]);
+  });
+
+  test("renders a source-linked partial derivation bridge", async ({ page }) => {
+    const ref = { evidence_id: EVIDENCE_ID, quote: "Tunneling through a rectangular barrier." };
+    const bridgeResult = baseResult({
+      release: { action: "check_derivation_step", release_level: "scaffold", attempts_observed: 2, reason_code: "attempt_observed" },
+      response: {
+        orientation: "先补一个中间步骤。", claims: [], next_question: "下一步依赖什么条件？",
+        status: "mixed", limitations: [],
+        derivation_bridge: {
+          source_step: "A", target_step: "D", missing_steps: [{ formula: "B", justification: "使用定义", source_refs: [ref] }],
+          used_definitions: ["课程定义"], assumptions: ["定态"], prerequisites: ["边界连续"],
+          validity_conditions: ["矩形势垒"], source_refs: [ref], partial: true,
+          support_basis: "unverified_model_inference",
+        },
+      },
+    });
+    await interceptAgentApis(page, [bridgeResult]);
+    await page.goto("/agent", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("agent-experience")).toBeVisible();
+    await page.getByRole("button", { name: "打开命令面板", exact: true }).click();
+    const commands = page.getByRole("dialog", { name: "命令面板" });
+    await commands.getByRole("button", { name: /2026 秋/ }).click({ timeout: 10_000 });
+    await expect(commands).not.toBeVisible();
+    await page.getByText("补全课件跳步：指定推导的起止式").click();
+    await page.getByLabel("推导桥原式", { exact: true }).fill("A");
+    await page.getByLabel("推导桥目标式", { exact: true }).fill("D");
+    await expect(page.getByRole("button", { name: /发送/ })).toBeEnabled();
+    await sendStudentMessage(page, "请补两行之间的逻辑");
+    const panel = page.getByTestId("derivation-bridge");
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText(/尚未经教师审核/)).toBeVisible();
+    await panel.getByText("展开第 1 步：使用定义").click();
+    await expect(panel.getByText(ref.quote)).toBeVisible();
+    await expect(panel.getByText(/其余步骤留给你重构/)).toBeVisible();
+    await page.screenshot({ path: "docs/implementation/artifacts/2026-09-15-derivation-bridge.png", fullPage: true });
+  });
+
   test("drives prediction → diagnosis → simulation → teach-back → transfer → mirror", async ({ page }) => {
-    const stageResults = GOLDEN_LOOP_STAGES.map((stage) => stage.result);
+    const stageResults: Record<string, unknown>[] = GOLDEN_LOOP_STAGES.map((stage) => ({ ...stage.result }));
+    // Persisted transfer data may remain in a completed episode. It must not
+    // resurrect a submission form after independent verification succeeds.
+    const completed = stageResults[5]!;
+    completed.learning_native = {
+      ...(completed.learning_native as Record<string, unknown>),
+      transfer: (stageResults[4]!.learning_native as Record<string, unknown>).transfer,
+    };
     await interceptAgentApis(page, stageResults);
 
     await page.goto("/agent", { waitUntil: "domcontentloaded" });
@@ -674,6 +766,36 @@ test.describe("Golden Learning Loop · quantum tunnelling", () => {
     await sendStudentMessage(page, "势垒右侧振幅应该很小但不为零。运行模拟看看。");
     await GOLDEN_LOOP_STAGES[2]!.assert(page);
 
+    // Explicit mock history contract: read-only review never advances the episode.
+    await page.route("**/api/teaching/threads/**/state?**", route => route.fulfill({
+      status: 200, contentType: "application/json", body: JSON.stringify({
+        conversation_id: CONVERSATION_ID, review_stage: "verify", sequence: 3,
+        learning_evidence: [], result: stageResults[2], student_attempt: "势垒右侧振幅应该很小但不为零。",
+      }),
+    }));
+    await page.getByRole("button", { name: "回看科学计算", exact: true }).click();
+    await expect(page.getByTestId("stage-review")).toBeVisible();
+    await expect(page.getByTestId("stage-review")).toContainText("第 3 轮");
+    await expect(page.getByRole("button", { name: "发送 / 运行", exact: true })).not.toBeVisible();
+    await page.screenshot({ path: "docs/implementation/artifacts/video-parity-followup-20260917/mock-review.png" });
+    await page.getByRole("button", { name: "返回当前任务", exact: true }).click();
+    await expect(page.getByTestId("stage-review")).toHaveCount(0);
+    await page.getByRole("button", { name: "回看学习证据", exact: true }).click();
+    await expect(page.getByText("本次过程尚未完成，下面仅展示已保存的行动证据。")).toBeVisible();
+    await page.getByRole("button", { name: "回看本次原始学习证据", exact: true }).click();
+    await expect(page.getByTestId("episode-evidence")).toContainText("0 条");
+    await expect(page.getByTestId("learning-loop-complete")).toHaveCount(0);
+    await page.getByRole("button", { name: "返回当前任务", exact: true }).click();
+
+    // Changing the workspace must preserve the episode and its next action.
+    for (const label of [/^实验模式/, /^概念模式/, /^推导模式/]) {
+      await page.getByRole("button", { name: label }).click();
+      await expect(page.getByTestId("learning-phase")).toHaveAttribute(
+        "data-phase", "awaiting_revision",
+      );
+      await expect(page.getByTestId("request-teach-back-button")).toBeVisible();
+    }
+
     // Stage 4: prediction-vs-result comparison → student explanation → teach-back.
     await sendStudentMessage(page, "原来 T=0.08 非零，与我之前的零预测冲突。让我用自己的话解释。");
     await GOLDEN_LOOP_STAGES[3]!.assert(page);
@@ -681,9 +803,23 @@ test.describe("Golden Learning Loop · quantum tunnelling", () => {
     // Stage 5: transfer task → Solo Mode.
     await sendStudentMessage(page, "我想挑战一个迁移任务。");
     await GOLDEN_LOOP_STAGES[4]!.assert(page);
+    await expect(page.getByRole("button", { name: "回看科学计算", exact: true })).toBeDisabled();
+    await expect(page.getByTestId("stage-review")).toHaveCount(0);
 
     // Stage 6: solo attempt → Cognitive Mirror update.
     await sendStudentMessage(page, "透射率随势垒宽度增加而指数下降。");
     await GOLDEN_LOOP_STAGES[5]!.assert(page);
+    await expect(page.getByTestId("transfer-card")).toHaveCount(0);
+    await page.getByRole("button", { name: /^实验模式/ }).click();
+    await expect(page.getByRole("slider")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "发送 / 运行", exact: true })).not.toBeVisible();
+    await expect(page.getByTestId("agent-tutor-result")).toHaveCount(0);
+    for (const [width, height] of [[1920, 1080], [1366, 768]]) {
+      await page.setViewportSize({ width, height });
+      const completed = page.getByTestId("learning-loop-complete");
+      await expect(completed).toBeInViewport();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+      await page.screenshot({ path: `docs/implementation/artifacts/video-parity-current/mock-complete-${width}.png` });
+    }
   });
 });

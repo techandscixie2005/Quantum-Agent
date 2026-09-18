@@ -11,6 +11,13 @@ import { projectDefinitions } from "../lib/projects";
 import { inspectSandboxCode } from "../lib/sandbox";
 import { runTutorWorkflow } from "../lib/tutor-engine";
 import { verifyHermiticity, verifyProbabilityConservation } from "../lib/verifiers";
+import { retiredLegacyEndpoint } from "../app/api/legacy";
+
+test("parallel legacy teaching endpoints no longer execute teaching or verification", async () => {
+  const response = retiredLegacyEndpoint();
+  assert.equal(response.status, 410);
+  assert.equal((await response.json()).error, "legacy_teaching_endpoint_retired");
+});
 
 test("courseware index contains all seven PDFs and hundreds of page chunks", () => {
   assert.equal(coursewareManifest.length, 7);
@@ -61,7 +68,7 @@ test("server capability routing uses USTC defaults without exposing a client mod
   const code = providerConfigForCapability("code", { USTC_API: "test-key" });
   assert.equal(quick.provider, "ustc");
   assert.equal(quick.model, "deepseek-v4-flash-ascend1");
-  assert.equal(code.model, "glm-5.2");
+  assert.equal(code.model, "deepseek-v4-flash");
 });
 
 test("image validation rejects unsupported attachment types", () => {

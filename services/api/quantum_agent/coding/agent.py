@@ -62,6 +62,8 @@ Do NOT call open, eval, exec, compile, or access dunder attributes.
 The program must print its numeric results as a single final line in this
 exact format (no other JSON line, no trailing prose):
 ### METRICS_JSON: {"T": <float>, "R": <float>, "conservation_error": <float>}
+Use json.dumps(metrics, allow_nan=False) to serialize that line. Printing a
+Python dict produces single quotes and is not valid JSON.
 
 If a matplotlib figure is appropriate, save it to the file "figure.png" in
 the current directory using matplotlib.pyplot.savefig("figure.png") then
@@ -76,7 +78,8 @@ _REPAIR_SYSTEM_PROMPT = """You are repairing a Python program that the Coding
 Agent wrote for a quantum-physics task.  The previous version failed.  Use
 the failure summary and stderr excerpt to produce a corrected, self-contained
 program that still obeys the import and call allowlist and still prints the
-final ### METRICS_JSON: {...} line.  Return ONLY the same JSON schema.
+final ### METRICS_JSON: {...} line using json.dumps(metrics, allow_nan=False),
+never str(dict) or print(dict). Return ONLY the same JSON schema.
 """
 
 
@@ -374,7 +377,7 @@ class CodingAgent:
                         failure_summary=(
                             f"model generation failed: {type(exc).__name__}"
                         ),
-                        stderr_excerpt=str(exc)[:1000],
+                        stderr_excerpt=type(exc).__name__,
                     )
                 )
                 last_execution = CodeExecutionResult(
@@ -439,6 +442,22 @@ class CodingAgent:
                     "execution did not complete"
                     + (" (timed out)" if run.result.timed_out else "")
                     + f", exit_code={run.result.exit_code}",
+                    run.result.stderr_bounded[:1000],
+                )
+                continue
+
+            # A successful process can still violate the output contract.
+            # Repair missing JSON metrics within the existing budget; never
+            # infer them from prose or substitute the oracle's values.
+            missing_outputs = [
+                key for key in task.required_outputs
+                if key not in run.metrics or isinstance(run.metrics[key], bool)
+            ]
+            if missing_outputs and not is_final_attempt:
+                record_repair(
+                    "Required numeric JSON metrics are missing: "
+                    + ", ".join(missing_outputs)
+                    + ". Print '### METRICS_JSON: ' + json.dumps(metrics, allow_nan=False).",
                     run.result.stderr_bounded[:1000],
                 )
                 continue

@@ -307,7 +307,7 @@ Browser → Next.js → FastAPI → LangGraph (learning_native_pre → scientifi
 - `coding/agent.py`（新）: `CodingAgent.solve` 循环——`structured_generate(task="generate_coding_artifact")` → `validate_code_safety` → `sandbox.execute_program_with_figure` → 失败则 `CodeRepairAttempt` 反馈（上限 2 次修复）→ 成功则用确定性 `RectangularBarrierRequest` oracle 交叉验证 T/R（容差 1e-6）→ `CodeVerificationResult(PASS/FAIL/INCONCLUSIVE/NO_ORACLE)`。永不把 FAIL 改写成 PASS。
 - `coding/safety.py`: 允许列表加入 `time`、`random`；解除 `matplotlib.pyplot` 阻止（沙箱强制 `MPLBACKEND=Agg`）。
 - `coding/__init__.py`: 修复破坏的导入，导出 `CodingAgent`/`SubprocessSandbox`/`SandboxDisabled`/`CodeArtifactRun`/`CodingProgress`。
-- `llm/routing.py`: 新增 `ModelTask.CODE` + `code_primary` profile（`ustc_code_model`/`glm-5.2`）+ `CODE` 路由（fallback `reasoning_primary`/`long_context_primary`）+ `_OPERATION_TASKS` 注册 `generate_coding_artifact`/`repair_coding_artifact`。
+- `llm/routing.py`: 新增 `ModelTask.CODE` + `code_primary` profile（`ustc_code_model`/`deepseek-v4-flash`）+ `CODE` 路由（fallback `reasoning_primary`/`long_context_primary`）+ `_OPERATION_TASKS` 注册 `generate_coding_artifact`/`repair_coding_artifact`。
 - `tutor/state.py`: `TutorState` 新增 `code_artifact: CodeArtifactRun | None`；`TutorContext` 新增 `coding_agent`/`sandbox`。
 - `tutor/nodes.py`: `scientific_tools_node` 在确定性 oracle 运行后，若请求是计算型（`RectangularBarrierRequest`/`TwoLevelSimulationRequest`）且 `coding_agent` 可用，**同时**运行 Coding Agent（双路径），写入 `code_artifact`；trace 步骤仍为 `RUN_SCIENTIFIC_TOOLS`（不新增步骤，保持 10-step `WORKFLOW_ORDER` 不变量）。`assemble_result_node` 传递 `code_artifact` 到 `TeachingTurnResult`。
 - `teaching/models.py`: `TeachingTurnResult` 新增 `code_artifact: CodeArtifactRun | None = None`；`trace_has_fixed_order` 验证器不变。

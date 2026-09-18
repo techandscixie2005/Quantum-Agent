@@ -13,6 +13,7 @@ from quantum_agent.auth import authenticate_course_actor, bearer_credential
 from quantum_agent.database import session_dependency
 from quantum_agent.knowledge.evidence_packets import EvidencePacket
 from quantum_agent.knowledge.retrieval import HybridEvidenceRetriever, RetrievalScope
+from quantum_agent.teaching.access import require_evidence_access
 
 router = APIRouter(
     prefix="/api/v1/courses/{course_id}/editions/{curriculum_edition_id}",
@@ -47,11 +48,12 @@ async def retrieve_evidence_packet(
     session: DatabaseSession,
     retriever: Annotated[HybridEvidenceRetriever, Depends(retriever_dependency)],
 ) -> EvidencePacket:
-    await authenticate_course_actor(
+    actor = await authenticate_course_actor(
         session,
         credential=bearer_credential(request),
         course_id=course_id,
     )
+    await require_evidence_access(session, actor)
     return await retriever.retrieve(
         RetrievalScope(
             course_id=course_id,

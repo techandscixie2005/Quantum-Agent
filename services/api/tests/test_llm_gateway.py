@@ -385,3 +385,59 @@ async def test_structured_generate_classifies_401_as_permanent() -> None:
         finally:
             await client.aclose()
     assert calls["n"] == 1
+
+
+async def test_vision_deadline_bounds_hung_provider_across_retries() -> None:
+    import asyncio
+    from time import monotonic
+
+    from quantum_agent.llm.vision import VisionGateway, VisionGatewayError
+
+    calls = 0
+
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx2.Response(503)
+        await asyncio.sleep(10)
+        return httpx2.Response(200, json=_chat_response("late transcription"))
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
+        gateway = VisionGateway(
+            api_key=SecretStr("backend-test-token"),
+            base_url="https://vision.invalid/v1",
+            model="test-vision",
+            timeout_seconds=0.05,
+            max_retries=5,
+            http_client=client,
+        )
+        started = monotonic()
+        with pytest.raises(VisionGatewayError, match="deadline exceeded"):
+            await gateway.transcribe(image_bytes=b"test image")
+        assert monotonic() - started < 2
+        assert 2 <= calls <= 6
+        assert not client.is_closed
+
+
+async def test_vision_recovers_when_one_attempt_hangs() -> None:
+    import asyncio
+
+    from quantum_agent.llm.vision import VisionGateway
+
+    calls = 0
+
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await asyncio.sleep(10)
+        return httpx2.Response(200, json=_chat_response("visible equation"))
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
+        gateway = VisionGateway(
+            api_key=SecretStr("test"), base_url="https://vision.invalid/v1",
+            model="test", timeout_seconds=0.3, http_client=client,
+        )
+        assert await gateway.transcribe(image_bytes=b"image") == "visible equation"
+        assert calls == 2

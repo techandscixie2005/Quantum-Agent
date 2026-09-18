@@ -295,14 +295,34 @@ async def test_coding_agent_does_not_pass_when_required_metrics_are_missing() ->
         expected_outputs=["T", "R", "conservation_error"],
         verification_plan="must not pass without metrics",
     )
-    gateway = FakeModelGateway(
-        {"generate_coding_artifact": artifact.model_dump(mode="json")}
-    )
+    gateway = FakeModelGateway({
+        "generate_coding_artifact": artifact.model_dump(mode="json"),
+        "repair_coding_artifact": artifact.model_dump(mode="json"),
+    })
 
     run = await CodingAgent(sandbox=SubprocessSandbox()).solve(
         _tunnelling_task(), gateway=gateway
     )
 
     assert run.execution.completed is True
+    assert len(run.repairs) == 2
     assert run.verification.agent_metrics == {}
     assert run.verification.status is not CodeVerificationStatus.PASS
+
+
+async def test_coding_agent_repairs_python_dict_output_before_verification() -> None:
+    malformed = _tunnelling_artifact().model_copy(update={
+        "code": "print(\"### METRICS_JSON: {'T': 0.333, 'R': 0.667}\")",
+    })
+    fixed = _tunnelling_artifact()
+    gateway = FakeModelGateway({
+        "generate_coding_artifact": malformed.model_dump(mode="json"),
+        "repair_coding_artifact": fixed.model_dump(mode="json"),
+    })
+    run = await CodingAgent(sandbox=SubprocessSandbox()).solve(
+        _tunnelling_task(), gateway=gateway
+    )
+    assert len(run.repairs) == 1
+    assert "JSON metrics are missing" in run.repairs[0].failure_summary
+    assert run.artifact.code == fixed.code
+    assert run.verification.status is CodeVerificationStatus.PASS

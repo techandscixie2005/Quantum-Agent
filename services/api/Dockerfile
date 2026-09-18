@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# Use the bundled BuildKit frontend; no docker/dockerfile registry pull is needed.
 
 ARG PYTHON_IMAGE=python:3.12.13-slim-bookworm
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.10.4@sha256:4cac394b6b72846f8a85a7a0e577c6d61d4e17fe2ccee65d9451a8b3c9efb4ac
@@ -6,6 +6,8 @@ ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.10.4@sha256:4cac394b6b72846f8a85a7a0e577c6d6
 FROM ${UV_IMAGE} AS uv
 
 FROM ${PYTHON_IMAGE} AS dependencies
+
+ARG UV_CACHE_ID=quantum-agent-uv
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -22,15 +24,16 @@ WORKDIR /build
 
 COPY --from=uv /uv /uvx /bin/
 
-# ``uv sync`` builds the project wheel (hatchling), so ``quantum_agent`` must
-# be present.  The ``--mount=type=cache`` keeps uv's downloaded wheels across
-# rebuilds, so a source-only edit no longer re-fetches scipy/numpy from the
-# network in the container (the previous single-threaded stall).
+# Cache the locked third-party environment independently of project source.
+# The second sync installs the project wheel and its CLI entry point.
 COPY pyproject.toml uv.lock ./
-COPY quantum_agent ./quantum_agent
 
-RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    uv sync --frozen --no-dev --no-editable
+RUN --mount=type=cache,id=${UV_CACHE_ID},target=/root/.cache/uv,sharing=locked \
+    uv sync --frozen --no-dev --no-install-project
+
+COPY quantum_agent ./quantum_agent
+RUN --mount=type=cache,id=${UV_CACHE_ID},target=/root/.cache/uv,sharing=locked \
+    UV_COMPILE_BYTECODE=0 uv sync --frozen --no-dev --no-editable
 
 
 FROM dependencies AS test-dependencies

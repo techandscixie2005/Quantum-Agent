@@ -1,4 +1,5 @@
-.agentShell {
+.agentShell,
+.cmdPalette {
   --paper: #f6f5f0;
   --surface: #fffefb;
   --ink: #15201c;
@@ -15,7 +16,10 @@
   --amber-soft: #f8ecdb;
   --rail-collapsed: 60px;
   --rail-expanded-right: 420px;
-  --stage-max: 880px;
+  --stage-max: 1440px;
+}
+
+.agentShell {
   min-height: 100vh;
   color: var(--ink);
   background: var(--paper);
@@ -376,7 +380,7 @@
 .tutorRecord > header strong { margin-top: 3px; font-size: 13px; font-weight: 600; }
 .tutorRecord > header em { color: var(--green); font: 700 10px var(--font-geist-mono), monospace; text-transform: uppercase; letter-spacing: .04em; }
 .orientation { padding: 4px 0 4px 18px; border-left: 3px solid var(--green); }
-.orientation span { color: var(--green); font: 700 10px var(--font-geist-mono), monospace; letter-spacing: .08em; }
+.orientation > span { color: var(--green); font: 700 10px var(--font-geist-mono), monospace; letter-spacing: .08em; }
 .orientation h2 { margin: 6px 0 0; font: 500 clamp(19px, 2.2vw, 26px)/1.5 Georgia, "Noto Serif SC", serif; color: var(--ink); }
 .claims { display: grid; gap: 10px; margin: 20px 0; }
 .claims section { display: grid; grid-template-columns: 28px 1fr auto; align-items: start; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
@@ -419,17 +423,12 @@
 .stageVerification .toolResult small { display: block; margin-top: 8px; color: var(--faint); font: 600 11px var(--font-geist-mono), monospace; }
 .stageVerification .tunnellingMetrics { margin: 12px 0 0; }
 
-/* Compact floating composer: a single calm bar pinned ~24px above the
-   viewport bottom, centered under the Stage column.  Default ~96px tall; it
-   grows with content.  No large shadow, no heavy border — just a hairline and
-   a soft lift so it reads as an instrument input, not a chat dock. */
+/* Keep task input in document flow so long evidence and action cards remain
+   reachable at either desktop height, including keyboard zoom. */
 .composer {
-  position: fixed;
-  z-index: 10;
-  bottom: 22px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(var(--stage-max), calc(100vw - 2 * clamp(28px, 8vw, 120px)));
+  position: relative;
+  width: 100%;
+  margin-top: 24px;
   padding: 8px 12px 8px;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -593,7 +592,9 @@
 .sideEmpty p { margin: 0; font-size: 13px; line-height: 1.6; }
 
 .dialogOverlay { position: fixed; z-index: 80; inset: 0; background: rgba(11, 20, 17, .58); backdrop-filter: blur(4px); }
-.sourceDialog { position: fixed; z-index: 81; inset: 5vh 5vw; display: grid; grid-template-rows: auto 1fr; overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: 0 30px 90px rgba(0,0,0,.28); }
+.sourceDialog { --surface: #fffefb; --paper: #f6f5f0; --ink: #173c31; --muted: #64736b; --line: #dcded5; --green: #216b56; position: fixed; z-index: 81; inset: 5vh 5vw; display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); background: var(--surface); box-shadow: 0 30px 90px rgba(0,0,0,.28); }
+.sourceDialog .sourceExcerpt { max-height: 24vh; overflow-y: auto; }
+.sourceDialog header a { display: inline-block; margin-top: 8px; color: var(--green); font-size: 13px; }
 .sourceDialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
 .sourceDialog h2 { margin: 0; font: 500 18px Georgia, "Noto Serif SC", serif; }
 .sourceDialog p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
@@ -623,7 +624,7 @@
 
 /* ── Command Palette (⌘K / Ctrl+K) ─────────────────────────────────── */
 .cmdOverlay { position: fixed; z-index: 90; inset: 0; display: grid; place-items: start center; padding-top: 12vh; background: rgba(11, 20, 17, .5); backdrop-filter: blur(6px); }
-.cmdPalette { width: min(560px, 92vw); overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: 0 30px 90px rgba(0,0,0,.32); }
+.cmdPalette { position: fixed; z-index: 91; top: 12vh; left: 50%; transform: translateX(-50%); width: min(560px, 92vw); overflow: hidden; border: 1px solid var(--line); border-radius: 14px; color: var(--ink); background: var(--surface); box-shadow: 0 30px 90px rgba(0,0,0,.32); }
 .cmdPalette > header { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .cmdPalette > header svg { width: 18px; color: var(--muted); }
 .cmdPalette > header input { flex: 1; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 16px; }
@@ -668,7 +669,7 @@
   .parameterPanel { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .parameterPanel > .kicker,
   .parameterPanel > h2 { grid-column: 1 / -1; }
-  .composer { bottom: 16px; width: calc(100vw - 32px); }
+  .composer { width: 100%; }
   .composer footer small { display: none; }
   .sourceDialog { inset: 2vh 2vw; }
 }
@@ -845,6 +846,8 @@
 .learningCard footer small { color: var(--muted); font-size: 12px; }
 
 .teachBackFindings {
+  max-height: min(26vh, 260px);
+  overflow-y: auto;
   display: grid;
   gap: 8px;
   margin-top: 13px;
@@ -1025,4 +1028,100 @@
 .goldenLoopToggle:hover { background: color-mix(in srgb, var(--mint) 34%, transparent); }
 
 .goldenLoopToggle svg { width: 15px; }
+.bridgeSheet {
+  display: grid;
+  gap: 16px;
+  line-height: 1.7;
+}
 
+.bridgeSheet details {
+  padding: 12px 16px;
+  border-left: 2px solid #c4d7d0;
+  background: #f6f8f5;
+}
+
+.bridgeSheet summary { cursor: pointer; }
+.bridgeSheet blockquote { margin: 12px 0 0; font-size: 14px; }
+.bridgeSheet blockquote footer { color: #566b63; font-size: 12px; }
+.bridgeSheet ul { padding-left: 20px; }
+
+.bridgeInputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.bridgeInputs label { display: grid; gap: 6px; font-size: 12px; }
+.bridgeInputs textarea { width: 100%; padding: 8px; border: 1px solid #c4d7d0; border-radius: 6px; }
+
+@media (max-width: 600px) {
+  .bridgeInputs { grid-template-columns: 1fr; }
+}
+
+.courseTask {
+  padding: clamp(20px, 2.2vw, 34px);
+  margin: 20px 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+}
+.courseTask h2 { font-size: clamp(23px, 2vw, 30px); margin: 8px 0 20px; }
+.courseTask p { line-height: 1.8; max-width: 75ch; }
+.courseTask button {
+  padding: 12px 22px;
+  border: 1px solid var(--green);
+  border-radius: 8px;
+  background: var(--green);
+  color: var(--surface);
+  cursor: pointer;
+}
+.courseTask button:focus-visible { outline: 3px solid var(--amber); outline-offset: 3px; }
+.calculationNotice { padding: 16px; background: var(--amber-soft); color: var(--ink); }
+.courseTitle > span { overflow: hidden; text-overflow: ellipsis; font-size: 14px; color: var(--muted); }
+
+.sourceExcerpt { margin: 16px 24px; padding: 18px 24px; background: var(--mint, #e7f1ec); border-left: 4px solid #1c6b53; line-height: 1.7; max-height: 24vh; overflow: auto; }
+
+.historyStage {
+  margin: 16px auto;
+  max-width: 1200px;
+  padding: 28px;
+  background: #fffefa;
+  border: 1px solid #dcded7;
+  border-radius: 10px;
+}
+.historyStage header { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.historyStage header p, .historyStage small { overflow-wrap: anywhere; color: #68746f; }
+.historyStage button { border: 1px solid #17634d; border-radius: 5px; padding: 8px 14px; color: #17634d; }
+.historyStage button:focus-visible { outline: 2px solid #17634d; outline-offset: 3px; }
+.historyStage article { margin: 20px 0; }
+.historyStage pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.episodeEvidence { min-width: 0; width: 100%; }
+.episodeEvidence > button {
+  padding: 10px 16px; border: 1px solid var(--green); border-radius: 8px;
+  background: var(--surface); color: var(--green); cursor: pointer;
+}
+.episodeEvidence > button:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.episodeEvidence details { margin-top: 10px; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.episodeEvidence summary { cursor: pointer; font-weight: 600; }
+.episodeEvidence p { line-height: 1.7; }
+.episodeEvidence small, .episodeEvidence time { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.episodeEvidence pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.learningNativeActions:has(.episodeEvidence) { flex-direction: column; align-items: stretch; }
+.reviewComputation { display: grid; gap: 20px; align-items: start; }
+.reviewComputation > * { min-width: 0; margin: 0; }
+.reviewComputation pre { max-height: 320px; overflow: auto; }
+@media (min-width: 1100px) {
+  .reviewComputation:has(> [data-testid="coding-artifact"]) { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
+  .historyStage .reviewComputation article { margin: 0; }
+}
+
+.parameterPanel > small { display: block; margin-top: 9px; line-height: 1.6; color: var(--muted); }
+.parameterPanel > button { margin-top: 12px; }
+.parameterPanel input[type="checkbox"] { width: auto; margin: 0; }
+.plotMetrics { display: flex; align-items: center; gap: 24px; margin: 8px 0 14px; color: var(--green); font: 14px var(--font-geist-mono), monospace; }
+.plotPanel [role="group"] button { padding: 6px 16px; border: 1px solid var(--line); border-radius: 5px; }
+.plotPanel [role="group"] button[aria-pressed="true"] { color: white; background: var(--green); }
+.plotPanel table { width: 100%; border-collapse: collapse; font: 12px var(--font-geist-mono), monospace; }
+.plotPanel th, .plotPanel td { padding: 7px 12px; border-bottom: 1px solid var(--line); text-align: right; }
