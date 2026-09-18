@@ -1925,6 +1925,8 @@ async def test_episode_student_artefacts_survive_complete_and_idempotent_retry(
     import json
     import os
 
+    from pydantic import TypeAdapter
+
     from quantum_agent.db_models import TeachingTurn
     from quantum_agent.science.models import RectangularBarrierRequest
     from quantum_agent.science.toolbox import ScientificToolbox
@@ -1932,7 +1934,27 @@ async def test_episode_student_artefacts_survive_complete_and_idempotent_retry(
 
     async with golden_loop_database() as session:
         seed = await _seed_actor(session)
-    gateway = FakeModelGateway(
+    class PartialThenContextGateway(FakeModelGateway):
+        async def structured_generate(
+            self, *, task: str, messages: Sequence[Message], output_type: type[T],
+            model_tier: ModelTier = ModelTier.DEFAULT,
+        ) -> T:
+            result = await super().structured_generate(
+                task=task, messages=messages, output_type=output_type, model_tier=model_tier,
+            )
+            if (task == "analyze_teach_back_reconstruction"
+                    and "Initial student reconstruction: \n" in messages[-1].content):
+                # Explicit fixture: the latest clarification covers one relation;
+                # the real evaluator must consult stored context for the rest.
+                return TypeAdapter(output_type).validate_python({
+                    "covered_relations": [{"relation": "covered", "description": "当前边界关系"}],
+                    "missing_relations": [
+                        {"relation": "missing", "description": "需要早先概率流解释"},
+                    ],
+                })
+            return result
+
+    gateway = PartialThenContextGateway(
         responses={
             "evaluate_barrier_trend": {
                 "trend": "decreases",
@@ -2043,8 +2065,12 @@ async def test_episode_student_artefacts_survive_complete_and_idempotent_retry(
     )
     assert clarified.learning_native is not None
     assert clarified.learning_native.phase is LearningPhase.TRANSFER_REQUIRED
-    evaluations = [call for call in gateway.calls
-                   if call["task"] == "analyze_teach_back_reconstruction"]
+    all_evaluations = [call for call in gateway.calls
+                       if call["task"] == "analyze_teach_back_reconstruction"]
+    assert len(all_evaluations) == 4
+    for current in all_evaluations[::2]:
+        assert reconstruction not in current["messages"][-1]["content"]
+    evaluations = all_evaluations[1::2]
     assert len(evaluations) == 2
     for evaluation in evaluations:
         assert reconstruction in evaluation["messages"][-1]["content"]

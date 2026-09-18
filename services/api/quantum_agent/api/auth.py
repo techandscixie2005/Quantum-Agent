@@ -24,7 +24,7 @@ import logging
 import time
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -117,6 +117,7 @@ async def _probe_ustc_key(
     api_key: str,
     base_url: str,
     model: str,
+    thinking_mode: Literal["enabled", "disabled"] | None = None,
 ) -> bool:
     """Validate the API key by sending a 1-token chat request to USTC.
 
@@ -135,6 +136,8 @@ async def _probe_ustc_key(
         "max_tokens": 1,
         "temperature": 0,
     }
+    if thinking_mode is not None:
+        body["thinking"] = {"type": thinking_mode}
     # An explicit 401/403 is a real rejection and fails closed immediately.
     # Timeouts / 5xx / network errors are transient stalls under load, so we
     # grant one retry before failing closed.
@@ -178,7 +181,8 @@ async def api_key_login(
     probe_ok = await _probe_ustc_key(
         api_key=api_key,
         base_url=settings.ustc_base_url,
-        model=settings.ustc_quick_model,
+        model=settings.ustc_text_model_override or settings.ustc_quick_model,
+        thinking_mode=settings.ustc_text_thinking_mode,
     )
     if not probe_ok:
         raise HTTPException(

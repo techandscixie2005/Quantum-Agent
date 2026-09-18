@@ -1,0 +1,14 @@
+{
+  "episode": "966ef7e3-71ba-4b72-8c48-ad7a918d137a",
+  "turn": "cca84470-7b89-4e52-ab62-9570947312d9",
+  "phase": "complete",
+  "evidenceCount": 17,
+  "beforeMs": 3941.275137,
+  "afterMs": 1347.025521,
+  "apiRestarted": true,
+  "snapshotFullyEqual": true,
+  "concurrentReplaysBefore": 2,
+  "concurrentReplaysAfter": 2,
+  "afterAllServicesRestartMs": 2464.752968,
+  "allServicesSnapshotFullyEqual": true
+}

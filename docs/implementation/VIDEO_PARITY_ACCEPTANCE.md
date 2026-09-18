@@ -1,5 +1,25 @@
 # 视频主线验收 · 2026-09-18
 
+## 最新验收：统一 Flash 后两条全新主线通过
+
+在 `deepseek-v4-flash`、显式非思考模式、结构化生成 temperature=0 的服务端配置下，两次独立的新学习记录均通过严格 live Golden Loop，未拦截第一方 API、未预填产品作答、未恢复旧成功记录代替重跑：
+
+- [第一次主线](evidence/video-parity-flash-20260918/main-run.json)：episode `966ef7e3-71ba-4b72-8c48-ad7a918d137a`，约 2.3 分钟，36/41 个模型请求。
+- [第二次独立主线](evidence/video-parity-flash-20260918/repeat-run.json)：episode `f96687cd-ae82-43f9-98c1-4fc5c89c5932`，约 2.2 分钟。
+- 两次都验证本轮来源、实际生成代码、隔离执行、独立领域参考、重建/回讲、迁移、新 Solo 的直接 API/SSE/历史重放锁、错误 Solo 不完成、正确 Solo 才完成，以及同一 episode 的持久化证据。
+- [真实错误→修正回讲](evidence/video-parity-flash-20260918/teachback-corrections.json)验证历史错误不会永久阻塞已经明确修正的解释，错误本身仍被拒绝。
+- [五种真实诊断输入](evidence/video-parity-flash-20260918/diagnostic-inputs.json)覆盖正确、错误、同义改写、部分正确和不知道；不知道返回 insufficient_evidence，未冒充掌握。
+- [本轮学习事件](evidence/video-parity-flash-20260918/episode-evidence.json)、[Solo 锁证据](evidence/video-parity-flash-20260918/solo-lock.json)、[恢复记录](evidence/video-parity-flash-20260918/recovery.json)、[双尺寸检查](evidence/video-parity-flash-20260918/visual-review.json)、[未经剪辑录制](evidence/video-parity-flash-20260918/main-raw.webm)及[录制哈希](evidence/video-parity-flash-20260918/recording.json)。时长为固定学生测试输入驱动的操作过程，不是真实学生学习效率承诺。
+
+最终本地 Python 全量 **468 passed、2 skipped**（352.28 秒），Ruff、mypy（142 文件）通过；两项 skip 是既有 opt-in 入口，本轮真实主线另行运行，远程多模态不在本次 P0 范围。历史上下文集成测试保留原断言，并新增当前回答独立评价、有效部分回答再带历史的两段检查。没有删除失败用例或放宽阶段规则。[质量记录](evidence/video-parity-flash-20260918/validation.json)。
+
+[当前模型配置](evidence/video-parity-flash-20260918/model-config.json)与[预算记录](evidence/video-parity-flash-20260918/budgets.json)：第二次使用 35/41 请求；包含失败与语义变体在内本轮合计 142 次，不自动补额。已移除正常服务中的测试预算，保留 Flash 配置。[保留卷的全服务停启](evidence/video-parity-flash-20260918/cold-start.json)约 49.58 秒；完成记录在全服务重启后恢复约 2.46 秒，17 条事件及完整快照不变，两个并发重放不重复写入。不是空机器下载安装耗时。
+
+本轮实际修复：文本模型覆盖包括主备候选与登录探测；请求体显式携带非思考开关；代码修复收到上一版程序及完整安全约束；回讲先评当前观点，仅在当前回答有效但不完整时结合历史再评价。没有改动数值容差、Solo 锁或阶段完成条件，也没有用关键词直接判定理解。
+
+[前置失败记录](evidence/video-parity-flash-20260918/preceding-failures.json)保留切换过程中的诊断超时、错误代码和回讲误判。仅替换模型名称不足以解决全部问题。以下旧复核记录是这些修复之前的历史结果，不能视为当前验收状态。
+
+
 > **后续复核（同日 20:28 起）：不能把先前成功等同于当前稳定全程可用。** 新 episode `63618708-d5aa-47c5-8a13-cd1bff92d758` 的全新真实重跑在代码生成处失败：上游 timeout，Coding Agent 返回 `INCONCLUSIVE`，没有程序、没有 PASS，也没有进入完成阶段。模型服务恢复后仍需重新执行全新 live 主线。见 [失败记录](evidence/video-parity-recheck-20260918/fresh-run-failed.json) 和 [复核结果](evidence/video-parity-recheck-20260918/recheck.json)。
 
 本次还发现并修复了首屏空计算区把发送按钮挤出视口的问题：有限势垒新任务在收到真实轮次结果前不显示空计算区。两种尺寸的新任务检查均通过（[1366](evidence/video-parity-recheck-20260918/1366-new-task.png)、[1920](evidence/video-parity-recheck-20260918/1920-new-task.png)），未调用模型、未拦截 API。新页面回看原完成 episode 的六个历史阶段、真实 PDF 与两种尺寸检查通过，这是恢复验收，不能当作新的全程验收。

@@ -1,0 +1,8 @@
+# Explicit, server-only text-model test profile. No model substitution on failure.
+# Append after your normal compose files. Embeddings/vision retain their protocols;
+# the finite-barrier live test uses neither a remote embedding model nor images.
+services:
+  api:
+    environment:
+      USTC_TEXT_MODEL_OVERRIDE: deepseek-v4-flash
+      USTC_TEXT_THINKING_MODE: disabled

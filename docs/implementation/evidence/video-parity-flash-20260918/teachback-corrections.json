@@ -1,0 +1,101 @@
+{
+  "complete": true,
+  "results": [
+    {
+      "name": "wrong",
+      "episode": "d79039a6-f1e9-4174-868c-672a793be500",
+      "turn": "04388f5d-73ac-4a03-a8b5-56c04fd97b8c",
+      "phase": "reconstruction_required",
+      "evaluation": {
+        "covered_relations": [],
+        "missing_relations": [
+          {
+            "relation": "missing",
+            "description": "未提及禁阻区（0≤x≤a）内波函数为两个非零指数项 ψⅡ=C exp(κx)+D exp(−κx) 的物理内容。",
+            "target_concept_id": null
+          },
+          {
+            "relation": "missing",
+            "description": "未提及边界处波函数及其导数连续，四个匹配条件决定透射振幅与反射振幅。",
+            "target_concept_id": null
+          },
+          {
+            "relation": "missing",
+            "description": "未提及概率流守恒及透射率 T=|F/A|² 的推导关系。",
+            "target_concept_id": null
+          },
+          {
+            "relation": "missing",
+            "description": "未提及固定 E、V₀、m 时，势垒宽度 a 增大使 κa 增大，从而透射率 T 降低的因果趋势。",
+            "target_concept_id": null
+          }
+        ],
+        "contradictions": [
+          {
+            "relation": "contradictory",
+            "description": "学生称“所有区域的波函数都严格为零”，但同时又承认“E低于势垒”且“透射率必定为零”；若波函数处处为零，则不存在入射波，与“电子从左侧入射”的物理设定矛盾。",
+            "target_concept_id": null
+          },
+          {
+            "relation": "contradictory",
+            "description": "学生称“透射率必定为零”与有限矩形势垒（0<E<V₀）的精确解 T={1+[V₀²/(4E(V₀−E))]sinh²(κa)}⁻¹ 矛盾，该解在有限宽度下 T>0。",
+            "target_concept_id": null
+          }
+        ],
+        "unsupported_claims": [
+          {
+            "relation": "unsupported",
+            "description": "“所有区域的波函数都严格为零”没有课程证据支持，课程明确说明禁阻区波函数为两个指数项而非零。",
+            "target_concept_id": null
+          },
+          {
+            "relation": "unsupported",
+            "description": "“电子没有足够能量，透射率必定为零”与课程中有限矩形势垒的隧穿结论不符，课程指出不能用半无限势垒的零透射结论代替。",
+            "target_concept_id": null
+          }
+        ],
+        "recommended_probe": "你提到‘所有区域的波函数都严格为零’，但课程中有限矩形势垒的禁阻区解是 ψⅡ=C exp(κx)+D exp(−κx)。请解释：如果波函数处处为零，入射波 A exp(ikx) 还存在吗？边界连续条件如何能同时满足？",
+        "verified": false,
+        "is_model_inference": true
+      },
+      "milliseconds": 22476
+    },
+    {
+      "name": "correct",
+      "episode": "d79039a6-f1e9-4174-868c-672a793be500",
+      "turn": "1cecca14-5729-4dbf-ac06-f354f2d6f2ed",
+      "phase": "transfer_required",
+      "evaluation": {
+        "covered_relations": [
+          {
+            "relation": "covered",
+            "description": "学生明确说明禁阻区波函数非零，由薛定谔方程得到κ²=2m(V0−E)/ℏ²，并保留增长和衰减两个指数项。",
+            "target_concept_id": null
+          },
+          {
+            "relation": "covered",
+            "description": "学生指出两端波函数和导数连续，四个条件连接左侧入射加反射波与右侧仅向右传播的波，确定各振幅比。",
+            "target_concept_id": null
+          },
+          {
+            "relation": "covered",
+            "description": "学生说明透射率定义为透射概率流与入射概率流之比，且因两侧零势能、同质量、同能量，波数相同，故T=|F/A|²。",
+            "target_concept_id": null
+          },
+          {
+            "relation": "covered",
+            "description": "学生说明固定E、V0、m时κ不变，宽度a增加使禁阻区衰减距离更长、右侧透射振幅更小，因此T降低但有限宽度时不为零。",
+            "target_concept_id": null
+          }
+        ],
+        "missing_relations": [],
+        "contradictions": [],
+        "unsupported_claims": [],
+        "recommended_probe": "",
+        "verified": false,
+        "is_model_inference": true
+      },
+      "milliseconds": 3610
+    }
+  ]
+}

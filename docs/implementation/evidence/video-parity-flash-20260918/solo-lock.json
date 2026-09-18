@@ -1,0 +1,252 @@
+{
+  "state": {
+    "historical_content": {
+      "sources": false,
+      "bridge": false
+    },
+    "learning_evidence": [],
+    "conversation_id": "966ef7e3-71ba-4b72-8c48-ad7a918d137a",
+    "mode": "run_experiments",
+    "status": "active",
+    "durable_phase": {
+      "phase": "solo_active",
+      "active_transfer_task_id": "8c6f5593-3120-4d5e-b48a-43f0d6866d2b",
+      "active_transfer_task_prompt": "Solo · 电子从左侧入射有限矩形势垒，两侧零势能、同质量、无吸收。保持 E=4 eV、V₀=12 eV，完整宽度从 0.12 nm 增至 0.18 nm。说明透射率如何变化及其物理依据，不要求精确数值。",
+      "solo_started_at": "2026-09-18T13:17:18.607357+00:00",
+      "solo_assistance_locked": true,
+      "expected_attempt_kind": "transfer",
+      "loop_required": true,
+      "completed_stages": [
+        "predict",
+        "diagnose",
+        "explore",
+        "verify",
+        "explain",
+        "teach_back",
+        "transfer"
+      ],
+      "pending_scientific_request": {
+        "kind": "rectangular_barrier_tunnelling",
+        "energy_eV": 5,
+        "barrier_height_eV": 10,
+        "barrier_width_m": 1.5e-10,
+        "particle_mass_kg": 9.1093837015e-31,
+        "conservation_tolerance": 1e-9
+      },
+      "transfer_verification": null,
+      "aided_transfer_verified": true,
+      "reconstruction": "",
+      "teach_back_explanation": "",
+      "teach_back_probe": "",
+      "teach_back_clarifications": []
+    },
+    "result": {
+      "conversation_id": "966ef7e3-71ba-4b72-8c48-ad7a918d137a",
+      "turn_id": "bd95c1ab-996e-434e-b896-af78624cb24d",
+      "workflow_version": "teaching-state-machine/1.0.0",
+      "interpretation": {
+        "task_kind": "experiment_help",
+        "relevant_concepts": [
+          "boundary conditions",
+          "transmission coefficient",
+          "wave propagation",
+          "numerical verification"
+        ],
+        "needs_scientific_verification": true,
+        "confidence": 0.9
+      },
+      "diagnosis": {
+        "status": "insufficient_evidence",
+        "summary": "Solo 期间不返回辅助诊断。提交后的任务评价见 Solo 反馈。",
+        "likely_misconception": null,
+        "observation_basis": [],
+        "target_concepts": [],
+        "first_error": null,
+        "misconception_candidates": [],
+        "missing_prerequisites": [],
+        "progress_state": "no_attempt",
+        "confidence": 0,
+        "verification_needed": false,
+        "reason": "Baseline diagnosis without specialist-agent enrichment."
+      },
+      "policy": {
+        "policy_id": null,
+        "source": "safe_default",
+        "mode": "run_experiments",
+        "allow_full_solution": false,
+        "minimum_attempts_for_scaffold": 1,
+        "minimum_attempts_for_full_solution": 2,
+        "max_hint_level": 3
+      },
+      "release": {
+        "action": "ask_diagnostic_question",
+        "release_level": "question_only",
+        "attempts_observed": 1,
+        "reason_code": "solo_mode_assistance_locked"
+      },
+      "evidence_packet": {
+        "id": "7c9bbe6a-5c00-4302-af2f-06ec7b797e38",
+        "course_id": "7c33796f-8d45-5fd7-93b9-13ae8c7572eb",
+        "curriculum_edition_id": "5dd085cb-831c-5ed1-ae01-327f700dc12a",
+        "query": "Solo task",
+        "created_at": "2026-09-18T13:17:18.430698Z",
+        "coverage": "not_found",
+        "evidence": [],
+        "graph_nodes": [],
+        "graph_edges": [],
+        "degraded_channels": [],
+        "warnings": [
+          "evidence_withheld_by_solo"
+        ]
+      },
+      "response": {
+        "orientation": "Solo 独立任务。辅助解答已锁定。",
+        "claims": [],
+        "next_question": "请独立提交当前任务的回答。或明确退出 Solo 请求帮助。",
+        "derivation_bridge": null,
+        "status": "grounded",
+        "limitations": [
+          "Solo 中不提供辅助解答。提交后才返回允许的任务评价。"
+        ]
+      },
+      "validation": {
+        "passed": true,
+        "citation_ids_valid": true,
+        "literal_course_claims_valid": true,
+        "scientific_references_valid": true,
+        "warnings": [
+          "answer_blocked_by_solo_mode"
+        ]
+      },
+      "scientific_results": [],
+      "code_artifact": null,
+      "trace": [
+        {
+          "name": "classify_task",
+          "status": "completed",
+          "detail": "Task class constrained by the selected product mode."
+        },
+        {
+          "name": "identify_concepts",
+          "status": "completed",
+          "detail": "Identified 4 query concepts; they are retrieval hints, not approved knowledge."
+        },
+        {
+          "name": "retrieve_evidence",
+          "status": "skipped",
+          "detail": "Retrieval skipped until the student submits a cognitive commitment."
+        },
+        {
+          "name": "diagnose_progress",
+          "status": "skipped",
+          "detail": "Diagnosis skipped until the student submits a cognitive commitment."
+        },
+        {
+          "name": "choose_teaching_action",
+          "status": "completed",
+          "detail": "Backend selected action ask_diagnostic_question."
+        },
+        {
+          "name": "apply_answer_policy",
+          "status": "completed",
+          "detail": "Backend policy released question_only; reason=solo_mode_assistance_locked."
+        },
+        {
+          "name": "run_scientific_tools",
+          "status": "skipped",
+          "detail": "Scientific tools skipped until the student submits a cognitive commitment."
+        },
+        {
+          "name": "generate_response",
+          "status": "skipped",
+          "detail": "Solo Mode blocked the LLM answer; the student must submit an independent transfer attempt before AI assistance resumes."
+        },
+        {
+          "name": "validate_response",
+          "status": "completed",
+          "detail": "No claims emitted; validation is trivially satisfied."
+        },
+        {
+          "name": "record_learning_evidence",
+          "status": "completed",
+          "detail": "Commitment-gate evidence persisted; zero unverified mastery adjustment."
+        }
+      ],
+      "learning_native": {
+        "commitment": null,
+        "learning_action": "enter_solo",
+        "teach_back": null,
+        "transfer": {
+          "task_id": "8c6f5593-3120-4d5e-b48a-43f0d6866d2b",
+          "transfer_type": "parameter",
+          "prompt": "Solo · 电子从左侧入射有限矩形势垒，两侧零势能、同质量、无吸收。保持 E=4 eV、V₀=12 eV，完整宽度从 0.12 nm 增至 0.18 nm。说明透射率如何变化及其物理依据，不要求精确数值。",
+          "source_concept_ids": [],
+          "key_parameters": [
+            "E=4 eV",
+            "V0=12 eV",
+            "a=0.18 nm"
+          ],
+          "expected_observable": "qualitative width trend",
+          "verifiable": true
+        },
+        "solo": {
+          "status": "active",
+          "active_transfer": {
+            "task_id": "8c6f5593-3120-4d5e-b48a-43f0d6866d2b",
+            "transfer_type": "parameter",
+            "prompt": "Solo · 电子从左侧入射有限矩形势垒，两侧零势能、同质量、无吸收。保持 E=4 eV、V₀=12 eV，完整宽度从 0.12 nm 增至 0.18 nm。说明透射率如何变化及其物理依据，不要求精确数值。",
+            "source_concept_ids": [],
+            "key_parameters": [
+              "E=4 eV",
+              "V0=12 eV",
+              "a=0.18 nm"
+            ],
+            "expected_observable": "qualitative width trend",
+            "verifiable": true
+          },
+          "started_at": "2026-09-18T13:17:18.607357+00:00",
+          "assistance_locked": true,
+          "unlock_reason": ""
+        },
+        "cognitive_mirror": null,
+        "minimal_intervention_prompt": "",
+        "evidence_persisted": [
+          "transfer_assigned",
+          "solo_assigned"
+        ],
+        "phase": "solo_active",
+        "current_stage": "solo",
+        "completed_stages": [
+          "predict",
+          "diagnose",
+          "explore",
+          "verify",
+          "explain",
+          "teach_back",
+          "transfer"
+        ],
+        "required_action": "solo_attempt",
+        "loop_required": true
+      },
+      "turn_completed": true,
+      "learning_loop_completed": false
+    },
+    "turn_id": "bd95c1ab-996e-434e-b896-af78624cb24d",
+    "workflow_version": "teaching-state-machine/1.0.0"
+  },
+  "historyStatus": 423,
+  "sourceStatus": 409,
+  "blockedRequests": [
+    {
+      "status": 200,
+      "turn": "e70a4fad-3640-4e40-805f-e482bd476bce",
+      "phase": "solo_active"
+    },
+    {
+      "status": 200,
+      "turn": "f288773f-284b-4bef-88ad-389a10f930bf",
+      "phase": "solo_active"
+    }
+  ],
+  "replayStatus": 200
+}

@@ -34,6 +34,8 @@ def build_model_capability_registry(settings: Settings) -> ModelCapabilityRegist
     """Build the server-only registry used by chat and future specialist adapters."""
 
     return ModelCapabilityRegistry.ustc_default(
+        text_model_override=settings.ustc_text_model_override,
+        text_thinking_mode=settings.ustc_text_thinking_mode,
         reasoning_model=settings.ustc_model,
         lightweight_model=settings.ustc_quick_model,
         second_pass_model=settings.ustc_second_pass_model,
@@ -59,6 +61,7 @@ def build_model_router(settings: Settings) -> ModelRouter | None:
             base_url=settings.ustc_base_url,
             default_model=profile.provider_model,
             small_model=profile.provider_model,
+            thinking_mode=profile.thinking_mode,
         )
 
     return ModelRouter(registry=registry, gateway_factory=gateway_factory)
@@ -144,6 +147,7 @@ def build_per_credential_gateway(
         base_url=base_url,
         default_model=profile.provider_model,
         small_model=profile.provider_model,
+        thinking_mode=profile.thinking_mode,
     )
 
 

@@ -1281,6 +1281,24 @@ async def propose_teach_back_analysis(
     if model_gateway is None:
         return None
 
+    if initial_reconstruction or prior_explanation or prior_clarifications:
+        # Assess the student's current position before introducing historical
+        # assertions. A complete correction must not inherit an old error, and
+        # an explicitly wrong/unknown new answer cannot borrow an old success.
+        current = await propose_teach_back_analysis(
+            reconstruction=reconstruction,
+            target_concept_names=target_concept_names,
+            model_gateway=model_gateway,
+            task_context=task_context,
+            tutor_probe=tutor_probe,
+        )
+        if (current is None or not current.covered_relations
+                or current.contradictions or current.unsupported_claims
+                or not current.missing_relations):
+            return current
+        # A valid partial clarification may rely on previously explained
+        # relations. It still requires a real contextual model evaluation.
+
     concepts = ", ".join(target_concept_names)[:500] or "the current concept"
     try:
         return await model_gateway.structured_generate(
@@ -1306,7 +1324,20 @@ async def propose_teach_back_analysis(
                         "The tutor_probe is a SYSTEM QUESTION, never a student claim. "
                         "Service failure notices are not physics claims or contradictions. "
                         "A clarification can correct the earlier explanation; evaluate the "
-                        "student's current position. Correct paraphrases and physically valid "
+                        "student's current position. Earlier mistakes are historical learning "
+                        "evidence, NOT current errors after an explicit correction. Never "
+                        "report a contradiction merely by comparing an old answer against a "
+                        "new corrected answer. Test the latest position against physics and "
+                        "for internal consistency. Explicit latest statements supersede "
+                        "earlier statements; earlier correct context only fills omissions. "
+                        "A contradiction requires CURRENT propositions "
+                        "that cannot both hold under the SAME assumptions: quote the "
+                        "conflicting student words and state the physical incompatibility. "
+                        "Adding a justification or specifying a previously implicit condition "
+                        "does not contradict the original conditional statement. Do not mark "
+                        "a physically valid, nonessential scope remark as unsupported merely "
+                        "because the course excerpt does not discuss that extension. "
+                        "Correct paraphrases and physically valid "
                         "reasoning need not appear verbatim in course excerpts. A conceptual "
                         "reconstruction need not reproduce an entire symbolic derivation. "
                         "For a finite-barrier conceptual reconstruction, assess these core "

@@ -156,18 +156,31 @@ def _mock_probe_unauthorized(*_args: object, **_kwargs: object) -> AsyncMock:
     return client
 
 
+@pytest.mark.parametrize("text_override", [None, "deepseek-v4-flash"])
 async def test_login_returns_session_when_probe_succeeds(
-    login_database: async_sessionmaker[AsyncSession],
+    login_database: async_sessionmaker[AsyncSession], text_override: str | None,
 ) -> None:
     async with login_database() as session:
         course, edition, user = await _seed_login_account(session, email="demo-student@quantum-agent.local")
     app = _build_app(session_factory=login_database, fernet_key=_fernet_key())
-    with patch("quantum_agent.api.auth.httpx.AsyncClient", side_effect=_mock_probe_ok):
+    app.state.settings = app.state.settings.model_copy(
+        update={"ustc_text_model_override": text_override,
+                "ustc_text_thinking_mode": "disabled" if text_override else None},
+    )
+    probe = _mock_probe_ok()
+    with patch("quantum_agent.api.auth.httpx.AsyncClient", return_value=probe):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/auth/login",
                 json={"api_key": "sk-test-key-1234567890abcdef"},
             )
+    assert probe.post.call_args.kwargs["json"]["model"] == (
+        text_override or app.state.settings.ustc_quick_model
+    )
+    if text_override:
+        assert probe.post.call_args.kwargs["json"]["thinking"] == {"type": "disabled"}
+    else:
+        assert "thinking" not in probe.post.call_args.kwargs["json"]
     assert response.status_code == 200
     body = response.json()
     assert body["course_id"] == str(course.id)

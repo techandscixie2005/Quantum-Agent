@@ -19,3 +19,21 @@ QA_DEMO_API_CONTAINER=<api-container> bash scripts/video-parity/prepare-demo.sh 
 发布后正常登录，选择该课程/版本，在 `/agent` 新建记录并加载任务。
 不要将测试驱动中的学生输入植入产品。运行与验收说明见
 [DEFENSE_RUNBOOK](../../docs/implementation/DEFENSE_RUNBOOK.md)。
+
+## 统一 Flash 文本模型验收
+
+将 `compose.flash-test.yaml` **追加**到现有 Compose 文件列表后重建 API，保留原来的
+端口、卷和私有环境文件。该配置将推理、诊断、回讲、代码生成/修复等全部文本路由
+（包括候选回退）以及登录探测统一为 `deepseek-v4-flash`，并显式发送
+`thinking.type=disabled`。结构化生成使用 temperature=0；未配置覆盖时保留原模型路由。
+
+```bash
+docker compose -f compose.yaml -f content/barrier_demo/compose.example.yaml \
+  -f content/barrier_demo/compose.flash-test.yaml up -d --build api
+```
+
+这是服务端测试配置，不含密钥，也不下发浏览器。不同模型不会被冒充成 Flash。
+嵌入、重排、图像与文件解析接口不被强行替换成聊天协议；本例真实主线使用已发布 PDF
+和标明降级的本地检索，不调用这些远程模型。非思考开关参考
+[DeepSeek 官方参数说明](https://api-docs.deepseek.com/guides/thinking_mode/)，实际兼容性以
+本部署的真实测试为准，不据模型名称承诺延迟或正确率。

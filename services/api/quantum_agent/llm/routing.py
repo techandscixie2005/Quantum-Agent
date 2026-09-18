@@ -11,9 +11,9 @@ import asyncio
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
@@ -72,6 +72,7 @@ class ModelProfile:
     provider_model: str
     transport: ModelTransport
     capabilities: frozenset[ModelCapability]
+    thinking_mode: Literal["enabled", "disabled"] | None = None
 
     def supports(self, required: frozenset[ModelCapability]) -> bool:
         return required <= self.capabilities
@@ -162,6 +163,8 @@ class ModelCapabilityRegistry:
     def ustc_default(
         cls,
         *,
+        text_model_override: str | None = None,
+        text_thinking_mode: Literal["enabled", "disabled"] | None = None,
         reasoning_model: str = "deepseek-v4-pro",
         lightweight_model: str = "deepseek-v4-flash-ascend1",
         second_pass_model: str = "qwen3.8-reasoner",
@@ -354,6 +357,28 @@ class ModelCapabilityRegistry:
                 ),
             ),
         ]
+        if text_model_override is not None:
+            if (not text_model_override.strip()
+                    or text_model_override != text_model_override.strip()):
+                raise ValueError("text model override must be normalized non-blank text")
+            # Include secondary routes: a test must not silently fall back to a
+            # different provider model. Vision and non-chat transports retain
+            # their real capabilities; a text override cannot grant image input.
+            profiles = [
+                replace(profile, provider_model=text_model_override)
+                if profile.transport is ModelTransport.CHAT_COMPLETIONS
+                and ModelCapability.VISION_INPUT not in profile.capabilities
+                else profile
+                for profile in profiles
+            ]
+        if text_thinking_mode is not None:
+            profiles = [
+                replace(profile, thinking_mode=text_thinking_mode)
+                if profile.transport is ModelTransport.CHAT_COMPLETIONS
+                and ModelCapability.VISION_INPUT not in profile.capabilities
+                else profile
+                for profile in profiles
+            ]
         return cls(profiles=profiles, routes=routes)
 
     def _validate_routes(self) -> None:

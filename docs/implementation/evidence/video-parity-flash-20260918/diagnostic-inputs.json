@@ -1,0 +1,180 @@
+{
+  "complete": true,
+  "results": [
+    {
+      "name": "correct",
+      "milliseconds": 11306,
+      "episode": "24b97fd7-3e54-4a9c-bb13-7a348cf1fc70",
+      "turn": "6fbd5d54-07ec-40f5-a3fd-1e0045396c0e",
+      "diagnosis": {
+        "status": "model_inference",
+        "summary": "学生判断与讲义一致：0<E<V0时禁阻区有非零指数解，需匹配两端波函数和导数得到透射振幅；固定E、V0时增加宽度a使透射率降低。",
+        "likely_misconception": null,
+        "observation_basis": [
+          "student_attempt",
+          "course_evidence"
+        ],
+        "target_concepts": [
+          "finite rectangular barrier",
+          "tunneling",
+          "boundary matching",
+          "transmission coefficient"
+        ],
+        "first_error": {
+          "inferred": true,
+          "step_index": null,
+          "kind": "no_clear_error",
+          "description": "No clear consequential error has been localized."
+        },
+        "misconception_candidates": [],
+        "missing_prerequisites": [],
+        "progress_state": "started",
+        "confidence": 0.9,
+        "verification_needed": false,
+        "reason": "学生表述与讲义§1、§2、§3、§5内容一致，未发现错误或误解。"
+      }
+    },
+    {
+      "name": "wrong",
+      "milliseconds": 27835,
+      "episode": "bda88d3f-731c-4a89-9e82-37c3aab56b54",
+      "turn": "2cdfcad3-dffb-467b-a5b9-49807a56be53",
+      "diagnosis": {
+        "status": "model_inference",
+        "summary": "学生认为电子能量低于势垒高度时波函数处处为零、透射率严格为零，这与有限矩形势垒的隧穿结论不符。",
+        "likely_misconception": "将经典禁区（E<V0）误解为量子波函数必须为零，忽略了有限势垒中指数衰减解仍可导致非零透射。",
+        "observation_basis": [
+          "student_attempt",
+          "course_evidence"
+        ],
+        "target_concepts": [
+          "finite rectangular barrier tunneling",
+          "wavefunction in classically forbidden region",
+          "transmission probability"
+        ],
+        "first_error": {
+          "inferred": true,
+          "step_index": null,
+          "kind": "physical_interpretation_error",
+          "description": "学生声称“波函数在所有位置都为零，透射率严格等于零”，但有限势垒中禁阻区波函数为指数形式，透射率非零。"
+        },
+        "misconception_candidates": [
+          {
+            "statement": "E<V0时波函数在势垒内必须为零，因此透射率为零。",
+            "confidence": 0.9
+          }
+        ],
+        "missing_prerequisites": [
+          "量子隧穿中波函数在禁区的指数解",
+          "概率流与透射率的定义"
+        ],
+        "progress_state": "started",
+        "confidence": 0.95,
+        "verification_needed": false,
+        "reason": "课程证据明确说明有限矩形势垒不能用半无限势垒的零透射结论代替，且禁阻区波函数为指数项而非零。学生判断与证据直接冲突，故为模型推断。"
+      }
+    },
+    {
+      "name": "paraphrase",
+      "milliseconds": 27524,
+      "episode": "962f01b0-6faa-4109-91f1-ed1411230079",
+      "turn": "a7b0cd36-0be4-4f03-ad02-e3165d33d0c8",
+      "diagnosis": {
+        "status": "model_inference",
+        "summary": "学生认为电子无法跨越能量门槛，因此任何区域都不可能有概率振幅，右侧透射概率为零。这与课程证据中有限矩形势垒的指数解和精确透射率公式直接矛盾。",
+        "likely_misconception": "将经典粒子无法越过势垒的概念错误地应用于量子隧穿，认为禁阻区波函数必须为零且透射概率为零。",
+        "observation_basis": [
+          "student_attempt",
+          "course_evidence"
+        ],
+        "target_concepts": [
+          "quantum tunneling",
+          "finite barrier transmission",
+          "wavefunction in classically forbidden region"
+        ],
+        "first_error": {
+          "inferred": true,
+          "step_index": null,
+          "kind": "physical_interpretation_error",
+          "description": "学生声称“任何区域都不可能有概率振幅，右侧通过的概率只能是零”，这忽略了量子隧穿效应和有限势垒的指数解。"
+        },
+        "misconception_candidates": [
+          {
+            "statement": "经典粒子无法越过势垒，因此量子粒子也无法透射。",
+            "confidence": 0.9
+          },
+          {
+            "statement": "在禁阻区（E<V0）波函数必须为零。",
+            "confidence": 0.85
+          }
+        ],
+        "missing_prerequisites": [
+          "量子隧穿的基本概念",
+          "波函数在势垒内的指数形式"
+        ],
+        "progress_state": "started",
+        "confidence": 0.95,
+        "verification_needed": false,
+        "reason": "课程证据明确说明有限矩形势垒存在非零透射率，且禁阻区波函数为指数形式而非零。学生判断与证据直接冲突，属于物理解释错误。"
+      }
+    },
+    {
+      "name": "partial",
+      "milliseconds": 21554,
+      "episode": "89e215e0-d9fd-49ad-851d-10eb586c01b2",
+      "turn": "320eb6e0-65b5-44f4-99e1-68b9592a3d7a",
+      "diagnosis": {
+        "status": "model_inference",
+        "summary": "学生正确移项得到ψ″=κ²ψ且κ²>0，并认识到禁阻区指数解可以非零，这与讲义§2一致。但学生表示尚未掌握边界连接，处于早期起步阶段。",
+        "likely_misconception": null,
+        "observation_basis": [
+          "student_attempt",
+          "course_evidence"
+        ],
+        "target_concepts": [],
+        "first_error": {
+          "inferred": true,
+          "step_index": null,
+          "kind": "no_clear_error",
+          "description": "No clear consequential error has been localized."
+        },
+        "misconception_candidates": [],
+        "missing_prerequisites": [
+          "边界连续性条件（波函数及其导数在x=0和x=a处匹配）"
+        ],
+        "progress_state": "started",
+        "confidence": 0.8,
+        "verification_needed": false,
+        "reason": "学生已正确推导出禁阻区方程形式，与讲义§2一致；但明确表示不会连接边界，因此无错误可定位，仅需补充边界匹配知识。"
+      }
+    },
+    {
+      "name": "unknown",
+      "milliseconds": 7128,
+      "episode": "897581a6-d44e-4962-a60b-537d948a6d0b",
+      "turn": "b2ae7fc6-4bdf-41ca-907c-0e6202072fec",
+      "diagnosis": {
+        "status": "insufficient_evidence",
+        "summary": "学生表示尚不知道如何判断，也未写出任何推导，因此无法定位具体错误或推断误解。",
+        "likely_misconception": null,
+        "observation_basis": [
+          "student_attempt",
+          "course_evidence"
+        ],
+        "target_concepts": [],
+        "first_error": {
+          "inferred": true,
+          "step_index": null,
+          "kind": "no_clear_error",
+          "description": "No clear consequential error has been localized."
+        },
+        "misconception_candidates": [],
+        "missing_prerequisites": [],
+        "progress_state": "started",
+        "confidence": 0.9,
+        "verification_needed": false,
+        "reason": "学生未提供可诊断的尝试内容，仅声明无法判断，故无法进行错误定位或误解推断。"
+      }
+    }
+  ]
+}
