@@ -319,7 +319,8 @@ class PydanticAIModelGateway:
             "interpret_teaching_turn", "diagnose_student_progress",
             "diagnose_student_progress_structured", "compose_grounded_teaching_response",
             "propose_cognitive_commitment", "analyze_teach_back_reconstruction",
-            "generate_transfer_task", "generate_coding_artifact", "repair_coding_artifact",
+            "generate_transfer_task", "evaluate_barrier_trend",
+            "generate_coding_artifact", "repair_coding_artifact",
         }:
             raise RecordingBudgetError("operation disabled during recording")
         owned_client = self._model_http_client is None

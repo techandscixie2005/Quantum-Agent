@@ -655,6 +655,27 @@ async function sendStudentMessage(page: Page, message: string) {
 }
 
 test.describe("Golden Learning Loop · quantum tunnelling", () => {
+  test("course entry only loads a task; changed parameters invalidate the mock result", async ({ page }) => {
+    await interceptAgentApis(page, [{ ...GOLDEN_LOOP_STAGES[2]!.result }]);
+    let submissions = 0;
+    page.on("request", request => {
+      if (request.method() === "POST" && request.url().includes("/turns/stream")) submissions++;
+    });
+    await page.goto("/agent");
+    await page.getByRole("button", { name: "加载课程任务", exact: true }).click();
+    expect(submissions).toBe(0);
+    await expect(page.getByTestId("coding-artifact")).toHaveCount(0);
+    await sendStudentMessage(page, "预测非零，请计算并核对。");
+    await expect(page.getByTestId("coding-verification-status")).toContainText("PASS");
+    const width = page.getByLabel(/势垒宽度 a/);
+    for (const next of ["0.137", "0.213", "0.173"]) {
+      await width.fill(next);
+      await expect(page.getByRole("status").filter({ hasText: "参数已改变" })).toBeVisible();
+      await expect(page.getByTestId("coding-verification-status")).toHaveCount(0);
+      await expect(page.getByTestId("tunnelling-metrics")).toHaveCount(0);
+    }
+  });
+
   test("restores the selected curriculum before recovering a saved thread", async ({ page }) => {
     await interceptAgentApis(page, []);
     await page.route("**/api/agent/context", (route) => route.fulfill({
@@ -745,6 +766,27 @@ test.describe("Golden Learning Loop · quantum tunnelling", () => {
     await sendStudentMessage(page, "势垒右侧振幅应该很小但不为零。运行模拟看看。");
     await GOLDEN_LOOP_STAGES[2]!.assert(page);
 
+    // Explicit mock history contract: read-only review never advances the episode.
+    await page.route("**/api/teaching/threads/**/state?**", route => route.fulfill({
+      status: 200, contentType: "application/json", body: JSON.stringify({
+        conversation_id: CONVERSATION_ID, review_stage: "verify", sequence: 3,
+        learning_evidence: [], result: stageResults[2], student_attempt: "势垒右侧振幅应该很小但不为零。",
+      }),
+    }));
+    await page.getByRole("button", { name: "回看科学计算", exact: true }).click();
+    await expect(page.getByTestId("stage-review")).toBeVisible();
+    await expect(page.getByTestId("stage-review")).toContainText("第 3 轮");
+    await expect(page.getByRole("button", { name: "发送 / 运行", exact: true })).not.toBeVisible();
+    await page.screenshot({ path: "docs/implementation/artifacts/video-parity-followup-20260917/mock-review.png" });
+    await page.getByRole("button", { name: "返回当前任务", exact: true }).click();
+    await expect(page.getByTestId("stage-review")).toHaveCount(0);
+    await page.getByRole("button", { name: "回看学习证据", exact: true }).click();
+    await expect(page.getByText("本次过程尚未完成，下面仅展示已保存的行动证据。")).toBeVisible();
+    await page.getByRole("button", { name: "回看本次原始学习证据", exact: true }).click();
+    await expect(page.getByTestId("episode-evidence")).toContainText("0 条");
+    await expect(page.getByTestId("learning-loop-complete")).toHaveCount(0);
+    await page.getByRole("button", { name: "返回当前任务", exact: true }).click();
+
     // Changing the workspace must preserve the episode and its next action.
     for (const label of [/^实验模式/, /^概念模式/, /^推导模式/]) {
       await page.getByRole("button", { name: label }).click();
@@ -761,10 +803,23 @@ test.describe("Golden Learning Loop · quantum tunnelling", () => {
     // Stage 5: transfer task → Solo Mode.
     await sendStudentMessage(page, "我想挑战一个迁移任务。");
     await GOLDEN_LOOP_STAGES[4]!.assert(page);
+    await expect(page.getByRole("button", { name: "回看科学计算", exact: true })).toBeDisabled();
+    await expect(page.getByTestId("stage-review")).toHaveCount(0);
 
     // Stage 6: solo attempt → Cognitive Mirror update.
     await sendStudentMessage(page, "透射率随势垒宽度增加而指数下降。");
     await GOLDEN_LOOP_STAGES[5]!.assert(page);
     await expect(page.getByTestId("transfer-card")).toHaveCount(0);
+    await page.getByRole("button", { name: /^实验模式/ }).click();
+    await expect(page.getByRole("slider")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "发送 / 运行", exact: true })).not.toBeVisible();
+    await expect(page.getByTestId("agent-tutor-result")).toHaveCount(0);
+    for (const [width, height] of [[1920, 1080], [1366, 768]]) {
+      await page.setViewportSize({ width, height });
+      const completed = page.getByTestId("learning-loop-complete");
+      await expect(completed).toBeInViewport();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+      await page.screenshot({ path: `docs/implementation/artifacts/video-parity-current/mock-complete-${width}.png` });
+    }
   });
 });

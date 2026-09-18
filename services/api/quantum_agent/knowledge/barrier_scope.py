@@ -3,6 +3,7 @@
 This registry is separate from publication: publishing a source does not confirm
 its applicability or an erratum. No production reviews are supplied by default.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -32,25 +33,40 @@ class BarrierSourceReview(BaseModel):
     evidence_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     review_reference: str = Field(min_length=1)
     approved_widths_m: tuple[float, ...] = Field(min_length=1)
+    energy_range_eV: tuple[float, float] = (5.0, 5.0)
+    height_range_eV: tuple[float, float] = (10.0, 10.0)
+    width_range_m: tuple[float, float] | None = None
     potential: Literal["V0 inside [0,a]; zero outside"]
     energy: Literal["0<E<V0"]
     boundaries: Literal["constant mass; psi and derivative continuous; left incidence"]
     formula: Literal["exact flux T,R; not thick-barrier approximation"]
 
-
     @field_validator("approved_widths_m")
     @classmethod
     def supported_widths(cls, values: tuple[float, ...]) -> tuple[float, ...]:
-        if any(value not in (1e-10, 1.5e-10) for value in values):
-            raise ValueError("unsupported approved width")
+        if any(not math.isfinite(value) or value <= 0 for value in values):
+            raise ValueError("approved widths must be finite and positive")
+        return values
+
+    @field_validator("energy_range_eV", "height_range_eV", "width_range_m")
+    @classmethod
+    def ordered_range(cls, values: tuple[float, float] | None) -> tuple[float, float] | None:
+        if values is not None and (
+            not all(math.isfinite(value) and value > 0 for value in values) or values[0] > values[1]
+        ):
+            raise ValueError("review ranges must be finite, positive and ordered")
         return values
 
 
 def is_barrier_case(query: str) -> bool:
     # Include the durable scientific request kind used on continuation turns.
-    return bool(re.search(
-        r"势垒|隧穿|barrier|tunnell?ing|tunneling", query, re.IGNORECASE,
-    ))
+    return bool(
+        re.search(
+            r"势垒|隧穿|barrier|tunnell?ing|tunneling",
+            query,
+            re.IGNORECASE,
+        )
+    )
 
 
 def has_subbarrier_scope(query: str) -> bool:
@@ -60,21 +76,20 @@ def has_subbarrier_scope(query: str) -> bool:
 
 
 class BarrierTask(BaseModel):
-    """Only the explicitly supported original and transfer tasks."""
+    """Electron subbarrier contract; applicability comes from the pinned review."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["rectangular_barrier_tunnelling"]
-    energy_eV: float = Field(ge=5.0, le=5.0)
-    barrier_height_eV: float = Field(ge=10.0, le=10.0)
-    barrier_width_m: float
+    energy_eV: float = Field(gt=0, allow_inf_nan=False)
+    barrier_height_eV: float = Field(gt=0, allow_inf_nan=False)
+    barrier_width_m: float = Field(gt=0, allow_inf_nan=False)
     conservation_tolerance: float = Field(default=1e-9, gt=0, le=1e-2)
     particle_mass_kg: float = Field(ge=9.1093837015e-31, le=9.1093837015e-31)
 
-
     @model_validator(mode="after")
     def supported_width(self) -> BarrierTask:
-        if not any(math.isclose(self.barrier_width_m, value, rel_tol=1e-12, abs_tol=0)
-                   for value in (1e-10, 1.5e-10)):
-            raise ValueError("unsupported task width")
+        if self.energy_eV >= self.barrier_height_eV:
+            raise ValueError("review requires 0<E<V0")
         return self
 
 
@@ -97,8 +112,18 @@ def task_is_barrier() -> bool:
 def task_matches(review: BarrierSourceReview) -> bool:
     try:
         task = BarrierTask.model_validate(_TASK.get())
-        return any(math.isclose(task.barrier_width_m, width, rel_tol=1e-12, abs_tol=0)
-                   for width in review.approved_widths_m)
+        width_matches = any(
+            math.isclose(task.barrier_width_m, width, rel_tol=1e-12, abs_tol=0)
+            for width in review.approved_widths_m
+        ) or (
+            review.width_range_m is not None
+            and review.width_range_m[0] <= task.barrier_width_m <= review.width_range_m[1]
+        )
+        return (
+            width_matches
+            and review.energy_range_eV[0] <= task.energy_eV <= review.energy_range_eV[1]
+            and review.height_range_eV[0] <= task.barrier_height_eV <= review.height_range_eV[1]
+        )
     except ValueError:
         return False
 
@@ -110,16 +135,19 @@ class ReviewManifest(BaseModel):
     reviews: tuple[BarrierSourceReview, ...]
 
 
-def load_reviews(path: Path, digest: str, *, allow_test_double: bool = False
-                 ) -> tuple[BarrierSourceReview, ...]:
+def load_reviews(
+    path: Path, digest: str, *, allow_test_double: bool = False
+) -> tuple[BarrierSourceReview, ...]:
     raw = path.read_bytes()
     if hashlib.sha256(raw).hexdigest() != digest:
         raise ValueError("review manifest hash mismatch")
     manifest = ReviewManifest.model_validate(json.loads(raw))
     if manifest.test_double and not allow_test_double:
         raise ValueError("test double cannot be loaded in production")
-    if any("TEST DOUBLE" in item.review_reference for item in manifest.reviews
-           ) and not allow_test_double:
+    if (
+        any("TEST DOUBLE" in item.review_reference for item in manifest.reviews)
+        and not allow_test_double
+    ):
         raise ValueError("test review cannot be loaded in production")
     return manifest.reviews
 

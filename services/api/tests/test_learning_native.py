@@ -80,6 +80,7 @@ from quantum_agent.teaching.models import (
     ConceptStateLabel,
     LearningNativeSubmission,
     LearningPhase,
+    LearningPolicyAction,
     SoloAttemptSubmission,
     SoloMode,
     SoloModeStatus,
@@ -1175,6 +1176,8 @@ class TestCognitiveMirrorEvidenceSemantics:
                 concept_id=concept_id,
             ),
         ]
+        observations[0].evidence_json["unaided"] = True
+        observations[1].evidence_json["pedagogical_complete"] = True
         state = LearningNativePolicy._concept_state(
             concept_id=concept_id,
             observations=observations,
@@ -1256,6 +1259,7 @@ class TestCognitiveMirrorEvidenceSemantics:
                 concept_id=concept_id,
             ),
         ]
+        verified_legacy[1].evidence_json["pedagogical_complete"] = True
         state_verified = LearningNativePolicy._concept_state(
             concept_id=concept_id,
             observations=verified_legacy,
@@ -1839,6 +1843,7 @@ class TestTeachBackAndTransferUIInitiation:
                 session,
                 seed,
                 phase="transfer_required",
+                extra_phase={"aided_transfer_verified": True},
             )
 
         fake = FakeModelGateway(
@@ -1909,6 +1914,7 @@ class TestTeachBackAndTransferUIInitiation:
                 session,
                 seed,
                 phase="transfer_required",
+                extra_phase={"aided_transfer_verified": True},
             )
 
         # model_gateway=None simulates model unavailability; the fallback path
@@ -1998,3 +2004,27 @@ def test_teach_back_absence_placeholder_does_not_become_a_contradiction() -> Non
         "No contradictions found in step one, but step two violates R+T=1.",
     ]
     assert evidence[0].evidence_json["contradictions"] == 2
+
+
+@pytest.mark.parametrize("text", ["不知道", "我还不知道", "我不会", "I don't know."])
+def test_explicit_unknown_is_a_commitment_not_blank(text: str) -> None:
+    assert LearningNativePolicy.explicitly_unknown(text)
+    assert LearningNativePolicy.attempt_is_meaningful(text)
+    assert not LearningNativePolicy.attempt_is_meaningful("   ")
+    commitment, action, evidence = LearningNativePolicy().decide_commitment(
+        request_has_attempt=False,
+        release_is_question_only=True,
+        proposal=None,
+        submission=CognitiveCommitment(
+            gate_decision=CommitmentGateDecision.ATTEMPT_REQUIRED,
+            attempt_required=True,
+            attempt_type=CommitmentKind.PREDICTION,
+            candidate_prompt=text,
+            reason_summary="Explicitly requests basic support",
+        ),
+        submission_confidence=None,
+    )
+    assert commitment.accepted
+    assert action is LearningPolicyAction.GIVE_HINT
+    assert evidence[0].kind is LearningEvidenceKind.COMMITMENT
+    assert evidence[0].evidence_json["explicitly_unknown"] is True

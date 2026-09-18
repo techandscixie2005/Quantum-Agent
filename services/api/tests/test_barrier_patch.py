@@ -1,4 +1,5 @@
 """Offline counterexamples; all source approvals and gateways are test doubles."""
+
 from __future__ import annotations
 
 import json
@@ -31,41 +32,68 @@ from tests.test_retrieval import (
 )
 
 
-async def barrier_packet(text: str, *, reviewed: bool = False, changed: bool = False,
-                         query: str = "finite rectangular barrier 0<E<V0") -> EvidencePacket:
+async def barrier_packet(
+    text: str,
+    *,
+    reviewed: bool = False,
+    changed: bool = False,
+    query: str = "finite rectangular barrier 0<E<V0",
+) -> EvidencePacket:
     source = record(CHUNK_ONE, EVIDENCE_ONE, text, text)
     reviews: tuple[BarrierSourceReview, ...] = ()
     if reviewed:
-        reviews = (BarrierSourceReview(
-            **{key: getattr(source, key) for key in (
-                "course_id", "curriculum_edition_id", "document_version_id", "evidence_id",
-                "source_file_sha256", "source_chunk_sha256", "evidence_sha256",
-            )},
-            review_reference="TEST DOUBLE ONLY: no teacher approval",
-            approved_widths_m=(1e-10, 1.5e-10),
-            potential="V0 inside [0,a]; zero outside", energy="0<E<V0",
-            boundaries="constant mass; psi and derivative continuous; left incidence",
-            formula="exact flux T,R; not thick-barrier approximation",
-        ),)
+        reviews = (
+            BarrierSourceReview(
+                **{
+                    key: getattr(source, key)
+                    for key in (
+                        "course_id",
+                        "curriculum_edition_id",
+                        "document_version_id",
+                        "evidence_id",
+                        "source_file_sha256",
+                        "source_chunk_sha256",
+                        "evidence_sha256",
+                    )
+                },
+                review_reference="TEST DOUBLE ONLY: no teacher approval",
+                approved_widths_m=(1e-10, 1.5e-10),
+                potential="V0 inside [0,a]; zero outside",
+                energy="0<E<V0",
+                boundaries="constant mass; psi and derivative continuous; left incidence",
+                formula="exact flux T,R; not thick-barrier approximation",
+            ),
+        )
     if changed:
         source = source.model_copy(update={"document_version_id": uuid4()})
     repository = StaticRepository()
     repository.records = {CHUNK_ONE: (source,)}
-    with source_task(dict(kind="rectangular_barrier_tunnelling", energy_eV=5.0,
-                          barrier_height_eV=10.0, barrier_width_m=1e-10,
-                          particle_mass_kg=9.1093837015e-31)):
+    with source_task(
+        dict(
+            kind="rectangular_barrier_tunnelling",
+            energy_eV=5.0,
+            barrier_height_eV=10.0,
+            barrier_width_m=1e-10,
+            particle_mass_kg=9.1093837015e-31,
+        )
+    ):
         return await HybridEvidenceRetriever(
-            repository=repository, embedding_gateway=None, graph_store=None,
+            repository=repository,
+            embedding_gateway=None,
+            graph_store=None,
             config=HybridRetrievalConfig(barrier_source_reviews=reviews),
         ).retrieve(RetrievalScope(course_id=COURSE, curriculum_edition_id=EDITION), query)
 
 
-@pytest.mark.parametrize("text", [
-    "For the semi-infinite barrier x>0, E<V0: R=1; T=0.",
-    "Harmonic oscillator tunnelling wave function.",
-    "Radial resonance barrier transmission.",
-    "Finite rectangular barrier T formula without boundary conditions.",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "For the semi-infinite barrier x>0, E<V0: R=1; T=0.",
+        "Harmonic oscillator tunnelling wave function.",
+        "Radial resonance barrier transmission.",
+        "Finite rectangular barrier T formula without boundary conditions.",
+    ],
+)
 async def test_unreviewed_comparison_is_not_direct_formula_evidence(text: str) -> None:
     packet = await barrier_packet(text)
     assert packet.coverage is RetrievalCoverage.NOT_FOUND
@@ -82,14 +110,20 @@ async def test_review_binding_preserves_exact_text_and_rejects_new_version() -> 
 
 
 async def test_conflicting_prose_does_not_become_verified_metrics() -> None:
-    artifact = _tunnelling_artifact().model_copy(update={
-        "code": _tunnelling_artifact().code + "\n# r=1-t (incorrect amplitude claim)\n",
-        "expected_outputs": ["T=2.55e-9"], "verification_plan": "T=2.55e-9",
-    })
+    artifact = _tunnelling_artifact().model_copy(
+        update={
+            "code": _tunnelling_artifact().code + "\n# r=1-t (incorrect amplitude claim)\n",
+            "expected_outputs": ["T=2.55e-9"],
+            "verification_plan": "T=2.55e-9",
+        }
+    )
     run = await CodingAgent(sandbox=SubprocessSandbox()).solve(
-        _tunnelling_task(), gateway=FakeModelGateway({
-            "generate_coding_artifact": artifact.model_dump(mode="json"),
-        }),
+        _tunnelling_task(),
+        gateway=FakeModelGateway(
+            {
+                "generate_coding_artifact": artifact.model_dump(mode="json"),
+            }
+        ),
     )
     assert run.verification.status is CodeVerificationStatus.PASS
     assert float(run.verification.agent_metrics["T"]) == pytest.approx(0.3336822872167467)
@@ -100,12 +134,16 @@ async def test_conflicting_prose_does_not_become_verified_metrics() -> None:
 
 async def test_thick_barrier_approximation_does_not_pass_exact_scoring() -> None:
     artifact = _tunnelling_artifact()
-    code = artifact.code.replace("sinh_sq = math.sinh(kappa * a) ** 2",
-                                 "sinh_sq = math.exp(2 * kappa * a) / 4")
+    code = artifact.code.replace(
+        "sinh_sq = math.sinh(kappa * a) ** 2", "sinh_sq = math.exp(2 * kappa * a) / 4"
+    )
     run = await CodingAgent(sandbox=SubprocessSandbox(), max_repairs=0).solve(
-        _tunnelling_task(), gateway=FakeModelGateway({
-            "generate_coding_artifact": artifact.model_copy(update={"code": code}).model_dump(),
-        }),
+        _tunnelling_task(),
+        gateway=FakeModelGateway(
+            {
+                "generate_coding_artifact": artifact.model_copy(update={"code": code}).model_dump(),
+            }
+        ),
     )
     assert run.verification.status is CodeVerificationStatus.FAIL
 
@@ -123,8 +161,12 @@ async def test_retry_correlation_and_no_exception_content(caplog: pytest.LogCapt
 
     @traced_call
     async def capability(*, task: str) -> str:
-        return cast(str, await _retry_transient(operation, max_attempts=2, base_delay=0,
-                                                max_delay=0, label=task))
+        return cast(
+            str,
+            await _retry_transient(
+                operation, max_attempts=2, base_delay=0, max_delay=0, label=task
+            ),
+        )
 
     session_id, turn_id = uuid4(), uuid4()
     with turn_scope(session_id, turn_id):
@@ -132,8 +174,11 @@ async def test_retry_correlation_and_no_exception_content(caplog: pytest.LogCapt
         event("draft", "citation_contract")
         event("draft", "source_insufficient")
         event("diagnosis", "expected_skip:no_student_attempt")
-    rows = [json.loads(item.message) for item in caplog.records
-            if item.name == "quantum_agent.capability_events"]
+    rows = [
+        json.loads(item.message)
+        for item in caplog.records
+        if item.name == "quantum_agent.capability_events"
+    ]
     assert all(row["session_id"] == str(session_id) for row in rows)
     assert all(row["turn_id"] == str(turn_id) for row in rows)
     assert len({row["run_id"] for row in rows}) == 1
@@ -160,27 +205,85 @@ async def test_sdk_parse_retries_have_individual_request_ids(
     async def handler(request: httpx2.Request) -> httpx2.Response:
         nonlocal count
         count += 1
-        return httpx2.Response(200, json=_chat_response(
-            'not-json' if count == 1 else '{"value": 7}',
-        ))
+        return httpx2.Response(
+            200,
+            json=_chat_response(
+                "not-json" if count == 1 else '{"value": 7}',
+            ),
+        )
 
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
         gateway = PydanticAIModelGateway(
-            api_key=SecretStr("PRIVATE_TEST_CREDENTIAL"), model_http_client=client,
+            api_key=SecretStr("PRIVATE_TEST_CREDENTIAL"),
+            model_http_client=client,
             max_retries=1,
         )
         with turn_scope(uuid4(), uuid4()):
             result = await gateway.structured_generate(
-                task="test_sdk_retry", messages=[Message(role="user", content="PRIVATE_PROMPT")],
+                task="test_sdk_retry",
+                messages=[Message(role="user", content="PRIVATE_PROMPT")],
                 output_type=StructuredProbe,
             )
     assert result.value == 7
     assert count == 2
-    rows = [json.loads(row.message) for row in caplog.records
-            if row.name == "quantum_agent.capability_events"]
+    rows = [
+        json.loads(row.message)
+        for row in caplog.records
+        if row.name == "quantum_agent.capability_events"
+    ]
     requests = [row for row in rows if row["reason"] == "request_started"]
     assert len({row["request_id"] for row in requests}) == 2
     assert len({row["call_id"] for row in requests}) == 1
     assert len({row["turn_id"] for row in requests}) == 1
     assert "PRIVATE_TEST_CREDENTIAL" not in caplog.text
     assert "PRIVATE_PROMPT" not in caplog.text
+
+
+def test_review_ranges_are_explicit_and_legacy_approval_does_not_expand() -> None:
+    from quantum_agent.knowledge.barrier_scope import task_matches
+
+    text = "finite rectangular barrier"
+    source = record(CHUNK_ONE, EVIDENCE_ONE, text, text)
+    review = BarrierSourceReview(
+        **{
+            key: getattr(source, key)
+            for key in (
+                "course_id",
+                "curriculum_edition_id",
+                "document_version_id",
+                "evidence_id",
+                "source_file_sha256",
+                "source_chunk_sha256",
+                "evidence_sha256",
+            )
+        },
+        review_reference="TEST DOUBLE: explicit scope test",
+        approved_widths_m=(1e-10,),
+        potential="V0 inside [0,a]; zero outside",
+        energy="0<E<V0",
+        boundaries="constant mass; psi and derivative continuous; left incidence",
+        formula="exact flux T,R; not thick-barrier approximation",
+    )
+    task = dict(
+        kind="rectangular_barrier_tunnelling",
+        energy_eV=4.0,
+        barrier_height_eV=12.0,
+        barrier_width_m=0.137e-9,
+        particle_mass_kg=9.1093837015e-31,
+    )
+    with source_task(task):
+        assert not task_matches(review)
+        expanded = review.model_copy(
+            update={
+                "energy_range_eV": (0.5, 9.0),
+                "height_range_eV": (1.0, 20.0),
+                "width_range_m": (0.05e-9, 0.5e-9),
+            }
+        )
+        assert task_matches(expanded)
+    with source_task(task | {"barrier_width_m": 0.6e-9}):
+        assert not task_matches(expanded)
+    with source_task(task | {"energy_eV": 13.0}):
+        assert not task_matches(expanded)
+    with pytest.raises(ValueError):
+        BarrierSourceReview.model_validate(review.model_dump() | {"width_range_m": [1.0, -1.0]})

@@ -26,6 +26,7 @@ from quantum_agent.db_models import (
     SourceDocumentVersion,
 )
 from quantum_agent.knowledge.source_manifest import sha256_file
+from quantum_agent.teaching.access import require_evidence_access
 
 router = APIRouter(
     prefix="/api/v1/courses/{course_id}/editions/{curriculum_edition_id}/sources",
@@ -214,11 +215,12 @@ async def _authenticate(
     *,
     course_id: UUID,
 ) -> None:
-    await authenticate_course_actor(
+    actor = await authenticate_course_actor(
         session,
         credential=bearer_credential(request),
         course_id=course_id,
     )
+    await require_evidence_access(session, actor)
 
 
 @router.get("/{document_version_id}", response_model=PublishedSourceMetadata)

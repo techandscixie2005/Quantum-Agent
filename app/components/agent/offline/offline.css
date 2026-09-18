@@ -1,0 +1,30 @@
+.offline-demo { font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif; color:#183b36; padding-top:100px; }
+.offline-banner { position:fixed; inset:0 0 auto; height:54px; background:#173f37; color:white; display:flex; align-items:center; padding:0 32px; gap:35px; z-index:10000; font-size:21px; }
+.offline-banner span { margin-left:auto;font-size:15px; }
+.offline-demo button { cursor:pointer; }
+.offline-banner button,.offline-tools button,.offline-dialog button,.offline-next { border:1px solid #a8c1b7; background:#f5faf6; color:#183b36; border-radius:7px; padding:9px 17px; font-size:17px; }
+.offline-tools { position:fixed;top:54px;left:0;right:0;height:46px;display:flex;justify-content:center;gap:10px;background:#e5eeea;z-index:9999; }
+.offline-tools button {font-size:16px;padding:5px 15px;}
+.offline-next { position:fixed;bottom:65px;left:20px;z-index:1000;box-shadow:0 4px 12px #183b3620; }
+.offline-demo [data-testid="agent-experience"] {height:calc(100dvh - 140px);min-height:0;}
+.offline-caption { position:fixed;bottom:0;left:0;right:0;height:40px;background:#173f37;color:white;text-align:center;padding:6px;font-size:21px;z-index:10000; }
+.offline-dialog { position:fixed;inset:110px 65px 53px;background:#f9fbf8;border:1px solid #9eb7ab;box-shadow:0 15px 80px #183b3655;z-index:9998;border-radius:12px;padding:25px 38px;overflow:auto;font-size:21px;line-height:1.6; }
+.offline-dialog>header {display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #c5d6cb;padding-bottom:15px;margin-bottom:20px;}
+.offline-dialog h1 {font-size:32px;margin:0;}.offline-dialog h2 {font-size:25px;margin:0 0 15px;}.offline-dialog p {margin:14px 0;}.offline-dialog small {display:block;font-size:16px;color:#43665b;}
+.offline-columns {display:grid;grid-template-columns:1fr 1fr;gap:40px;}.offline-columns article {min-width:0;}
+.offline-dialog textarea {display:block;width:100%;padding:18px;border:1px solid #a7bbb0;height:120px;font-size:24px;margin:16px 0;}.offline-actions {display:flex;gap:12px;}.offline-upload {display:block;font-size:17px;margin:15px 0;}
+.offline-preview {height:330px;background:white;border:1px solid #cfdbd3;padding:18px;}.offline-preview img {height:100%;width:100%;object-fit:contain;}.offline-preview iframe {height:100%;}.offline-dialog iframe {width:100%;height:380px;background:white;border:1px solid #cedbd4;}.offline-result {border-left:5px solid #278468;background:#e4f1e8;padding:18px;margin-top:22px;}.offline-graph {display:flex;justify-content:space-between;align-items:start;gap:10px;margin:45px 0;}.offline-graph button[aria-pressed=true]{background:#185c48;color:white;}.offline-graph p {font-size:14px;}.offline-bridge {max-width:1300px;margin:auto;}.offline-dialog .katex {font-size:1.15em;}.offline-dialog pre {font-size:18px;line-height:1.7;background:#eaf0eb;padding:22px;overflow:auto;}.offline-plot {width:100%;max-height:340px;}.offline-plot text {font-size:16px;fill:#244e41;}.offline-metrics {display:flex;gap:24px;font-family:monospace;font-size:23px;}.offline-dialog select {font-size:22px;margin-left:20px;padding:8px;}.offline-timeline {line-height:1.65;padding-left:28px;}.offline-timeline li {margin-bottom:10px;}.offline-dialog a {color:#146a56;text-decoration:underline;}
+@media(max-width:1000px){.offline-banner{font-size:14px;padding:0 8px;}.offline-banner span{display:none;}.offline-columns{grid-template-columns:1fr;}.offline-dialog{inset:110px 10px 45px;}.offline-tools{overflow:auto;justify-content:start;}.offline-tools button{white-space:nowrap;}.offline-metrics{flex-wrap:wrap;}}
+.offline-demo [class*="leftPanel"] {top:156px;bottom:45px;}
+.offline-demo [class*="rightPanel"] {top:105px;bottom:45px;width:520px;}
+.offline-demo [class*="composer"] {bottom:58px;}
+.offline-demo [class*="composer"] textarea {font-size:18px;}
+.offline-demo [class*="learningCard"] {font-size:18px;}
+.offline-demo [class*="workspaceScroll"] {padding-bottom:260px;}
+.offline-demo [class*="workspaceScroll"] p {font-size:18px;}
+.offline-demo [class*="workspaceScroll"] h2 {font-family:"Microsoft YaHei",sans-serif;}
+.offline-demo [class*="sideCard"] p,.offline-demo [class*="cognitiveMirrorCard"] p {font-size:17px;}
+.offline-demo button:disabled {opacity:.45;cursor:not-allowed;}
+.offline-demo [class*="learningCard"] textarea,.offline-demo [class*="teachBackFindings"] span,.offline-demo [class*="teachBackFindings"] strong {font-size:18px;line-height:1.6;}
+.offline-preview {overflow:auto;}
+.offline-preview .offline-pdf-page {width:100%;height:auto;max-height:none;object-fit:contain;}

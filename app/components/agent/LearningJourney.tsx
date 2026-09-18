@@ -7,14 +7,18 @@ import type { LearningNativeTurnState, LearningStage } from "@/app/components/te
 type JourneySegment = Readonly<{
   label: string;
   stage: LearningStage;
+  id?: string;
 }>;
 
 const JOURNEY: readonly JourneySegment[] = [
-  { label: "预测", stage: "predict" },
-  { label: "理解", stage: "diagnose" },
-  { label: "验证", stage: "verify" },
-  { label: "讲解", stage: "explain" },
-  { label: "迁移", stage: "transfer" },
+  { label: "材料与判断", stage: "predict" },
+  { label: "课程依据", stage: "diagnose", id: "sources" },
+  { label: "推导补桥", stage: "diagnose", id: "bridge" },
+  { label: "科学计算", stage: "verify" },
+  { label: "解释与重建", stage: "explain" },
+  { label: "Teach-Back", stage: "teach_back" },
+  { label: "Transfer", stage: "transfer" },
+  { label: "Solo", stage: "solo" },
 ];
 
 function stageCompleted(state: LearningNativeTurnState, stage: LearningStage): boolean {
@@ -25,30 +29,46 @@ function stageActive(state: LearningNativeTurnState, stage: LearningStage): bool
   return state.current_stage === stage;
 }
 
-export function LearningJourney({ state }: { state: LearningNativeTurnState | null }) {
-  if (!state) return null;
-  const loopDone = state.phase === "complete";
+export function LearningJourney({ state, hasSources = false, hasBridge = false, onReview, selected }: {
+  state: LearningNativeTurnState | null; hasSources?: boolean; hasBridge?: boolean;
+  onReview?: (stage: string) => void; selected?: string | null;
+}) {
+  const loopDone = state?.phase === "complete";
   return (
     <ol className="qa-journey" aria-label="学习旅程" data-testid="learning-journey">
       {JOURNEY.map((segment, index) => {
-        const done = loopDone || stageCompleted(state, segment.stage);
-        const active = !done && stageActive(state, segment.stage);
+        const done = segment.id === "sources" ? hasSources : segment.id === "bridge" ? hasBridge : Boolean(state && stageCompleted(state, segment.stage));
+        const active = !done && (state ? stageActive(state, segment.stage) && !segment.id : segment.stage === "predict");
         const stateAttr = done ? "done" : active ? "active" : "idle";
         return (
-          <li key={segment.stage} data-state={stateAttr} data-stage={segment.stage}>
+          <li key={segment.id ?? segment.stage} data-state={stateAttr} data-stage={segment.stage}>
+            <button type="button" onClick={() => onReview?.(segment.id ?? segment.stage)}
+              disabled={!onReview || !done || state?.solo?.status === "active"}
+              aria-label={`回看${segment.label}`} aria-pressed={selected === (segment.id ?? segment.stage)}>
             <span className="qa-journey-mark">
               {done ? <Check size={12} aria-hidden="true" /> : String(index + 1).padStart(2, "0")}
             </span>
             <span className="qa-journey-label">{segment.label}</span>
+            </button>
           </li>
         );
       })}
+      <li data-state={loopDone ? "done" : "idle"} data-stage="evidence">
+        <button type="button" onClick={() => onReview?.("evidence")}
+          disabled={!onReview || state?.solo?.status === "active"}
+          aria-label="回看学习证据" aria-pressed={selected === "evidence"}>
+        <span className="qa-journey-mark">{loopDone ? <Check size={12} /> : "09"}</span>
+        <span className="qa-journey-label">学习证据</span>
+        </button>
+      </li>
       <style>{`
         .qa-journey {
           list-style: none;
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
+          justify-content: space-between;
+          flex-wrap: wrap;
           margin: 14px 0 22px;
           padding: 0;
           font-family: var(--font-geist-mono, ui-monospace, monospace);
@@ -59,9 +79,17 @@ export function LearningJourney({ state }: { state: LearningNativeTurnState | nu
           gap: 7px;
           min-width: 0;
           color: var(--muted, #68746f);
-          font-size: 11px;
+          font-size: clamp(11px, 1vw, 16px);
           letter-spacing: .02em;
         }
+        .qa-journey button {
+          display: flex; align-items: center; gap: 7px; color: inherit;
+          background: transparent; border: 0; padding: 4px 0; font: inherit;
+          cursor: pointer;
+        }
+        .qa-journey button:disabled { cursor: default; }
+        .qa-journey button:focus-visible { outline: 2px solid #17634d; outline-offset: 4px; }
+        .qa-journey button[aria-pressed="true"] { text-decoration: underline; }
         .qa-journey li[data-state="done"] { color: var(--green, #17634d); }
         .qa-journey li[data-state="active"] { color: var(--ink, #14231f); }
         .qa-journey-mark {
@@ -84,12 +112,9 @@ export function LearningJourney({ state }: { state: LearningNativeTurnState | nu
           border-color: var(--green, #17634d);
           color: var(--green, #17634d);
         }
-        .qa-journey li:not(:last-child)::after {
-          content: "";
-          width: 18px;
-          height: 1px;
-          background: var(--line, #dcded7);
-          margin: 0 2px;
+        @media (min-width: 1100px) and (max-width: 1450px) {
+          .qa-journey li { font-size: 12px; gap: 4px; }
+          .qa-journey-mark { width: 21px; height: 21px; }
         }
         @media (prefers-reduced-motion: reduce) {
           .qa-journey li { transition: none; }

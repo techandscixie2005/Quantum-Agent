@@ -130,6 +130,7 @@ class ModelCapabilityRegistry:
         "propose_cognitive_commitment": ModelTask.LIGHTWEIGHT,
         "analyze_teach_back_reconstruction": ModelTask.REASONING,
         "generate_transfer_task": ModelTask.REASONING,
+        "evaluate_barrier_trend": ModelTask.REASONING,
         "generate_coding_artifact": ModelTask.CODE,
         "repair_coding_artifact": ModelTask.CODE,
     }

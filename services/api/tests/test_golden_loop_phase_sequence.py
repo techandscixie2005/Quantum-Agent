@@ -60,11 +60,8 @@ from quantum_agent.knowledge.evidence_packets import (
 from quantum_agent.knowledge.retrieval import RetrievalScope
 from quantum_agent.llm.gateway import FakeModelGateway, Message, ModelTier
 from quantum_agent.science.models import (
-    ScientificVerificationKind,
-    ScientificVerificationMethod,
     ScientificVerificationResult,
     ScientificVerificationStatus,
-    ToolIdentity,
 )
 from quantum_agent.teaching.learning_native import (
     assert_phase_transition,
@@ -285,9 +282,7 @@ async def _read_phase(
 ) -> str:
     async with database() as session:
         conv = await session.scalar(
-            select(TeachingConversation).where(
-                TeachingConversation.id == conversation_id
-            )
+            select(TeachingConversation).where(TeachingConversation.id == conversation_id)
         )
         assert conv is not None
         assert conv.learning_phase_json is not None
@@ -387,7 +382,11 @@ class TestGoldenLoopAntiSkip:
                 self.compose_calls = 0
 
             async def structured_generate(
-                self, *, task: str, messages: Sequence[Message], output_type: type[T],
+                self,
+                *,
+                task: str,
+                messages: Sequence[Message],
+                output_type: type[T],
                 model_tier: ModelTier = ModelTier.DEFAULT,
             ) -> T:
                 if task == "compose_grounded_teaching_response":
@@ -429,10 +428,7 @@ class TestGoldenLoopAntiSkip:
         assert result.learning_native.loop_required is True
         # The accepted commitment advances the durable phase forward.
         assert result.learning_native.phase is LearningPhase.ATTEMPT_RECEIVED
-        assert (
-            await _read_phase(golden_loop_database, conversation_id)
-            == "attempt_received"
-        )
+        assert await _read_phase(golden_loop_database, conversation_id) == "attempt_received"
         # At least one concrete next step MUST be visible/actionable
         # (no-orphan invariant).
         assert result.learning_native.required_action.value != "none"
@@ -453,8 +449,7 @@ class TestGoldenLoopAntiSkip:
         # run the real evidence/diagnosis/policy work (retrieve trace step is
         # no longer SKIPPED as "retrieval_skipped_until_commitment").
         assert not any(
-            "retrieval_skipped_until_commitment" in step.detail
-            for step in result.trace
+            "retrieval_skipped_until_commitment" in step.detail for step in result.trace
         ), "a continued episode must actually run retrieval"
 
     async def test_commitment_hold_is_rejected_by_transition_table(
@@ -698,15 +693,19 @@ class TestGoldenLoopAntiSkip:
             from quantum_agent.db_models import TeachingTurn
 
             rows = (
-                await session.execute(
-                    select(LearningEvidence)
-                    .join(TeachingTurn, TeachingTurn.id == LearningEvidence.teaching_turn_id)
-                    .where(
-                        TeachingTurn.conversation_id == conversation_id,
-                        LearningEvidence.kind == LearningEvidenceKind.TRANSFER_VERIFIED,
+                (
+                    await session.execute(
+                        select(LearningEvidence)
+                        .join(TeachingTurn, TeachingTurn.id == LearningEvidence.teaching_turn_id)
+                        .where(
+                            TeachingTurn.conversation_id == conversation_id,
+                            LearningEvidence.kind == LearningEvidenceKind.TRANSFER_VERIFIED,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         assert rows == []
 
     async def test_solo_lock_blocks_normal_answer_generation(
@@ -733,7 +732,11 @@ class TestGoldenLoopAntiSkip:
                 self.compose_calls = 0
 
             async def structured_generate(
-                self, *, task: str, messages: Sequence[Message], output_type: type[T],
+                self,
+                *,
+                task: str,
+                messages: Sequence[Message],
+                output_type: type[T],
                 model_tier: ModelTier = ModelTier.DEFAULT,
             ) -> T:
                 if task == "compose_grounded_teaching_response":
@@ -866,32 +869,33 @@ class TestGoldenLoopAntiSkip:
         # valid scientific_request + oracle; here we prove the verifier and
         # guard accept a correct numeric submission against a persisted oracle,
         # and reject a wrong one.
-        verification = TransferVerificationSpec(
-            scientific_request={},
-            metric_name="transmission_coefficient",
-            expected_value=0.001,
-            absolute_tolerance=1e-4,
+        from quantum_agent.science.models import RectangularBarrierRequest
+        from quantum_agent.science.toolbox import ScientificToolbox
+
+        request = RectangularBarrierRequest(
+            energy_eV=5,
+            barrier_height_eV=10,
+            barrier_width_m=0.25e-9,
+            particle_mass_kg=9.1093837015e-31,
         )
-        # A passing scientific result for this turn (correlated PASS signal).
-        passing_result = ScientificVerificationResult(
-            kind=ScientificVerificationKind.RECTANGULAR_BARRIER_TUNNELLING,
-            method=ScientificVerificationMethod.NUMERICAL,
-            status=ScientificVerificationStatus.PASS,
-            tool=ToolIdentity(name="barrier-oracle", version="1.0.0"),
-            inputs_sha256="a" * 64,
-            observations=["T within tolerance of oracle."],
-            limitations=["deterministic oracle"],
+        passing_result = ScientificToolbox().verify(request)
+        expected = float(passing_result.metrics["T"])
+        verification = TransferVerificationSpec(
+            scientific_request=request.model_dump(mode="json"),
+            metric_name="T",
+            expected_value=expected,
+            absolute_tolerance=1e-8,
         )
         from quantum_agent.tutor.nodes import _attempt_verified
         from quantum_agent.tutor.state import TutorState
 
         state_with_pass: TutorState = {"scientific_results": [passing_result]}
-        assert _attempt_verified(state_with_pass, "T ≈ 0.001", verification) is True
+        assert _attempt_verified(state_with_pass, f"T ≈ {expected}", verification) is True
         assert _attempt_verified(state_with_pass, "随便写的答案", verification) is False
         # Without the oracle, fail closed.
-        assert _attempt_verified(state_with_pass, "T ≈ 0.001", None) is False
+        assert _attempt_verified(state_with_pass, f"T ≈ {expected}", None) is False
         # Without a PASS scientific result, fail closed.
-        assert _attempt_verified({}, "T ≈ 0.001", verification) is False
+        assert _attempt_verified({}, f"T ≈ {expected}", verification) is False
         # The transition guard accepts the legal solo_verified transition.
         assert_phase_transition(
             LearningPhase.SOLO_ACTIVE,
@@ -1093,9 +1097,7 @@ class TestGoldenLoopAntiSkip:
                 phase="reconstruction_required",
                 extra_phase={
                     "loop_required": True,
-                    "pending_scientific_request": barrier_request.model_dump(
-                        mode="json"
-                    ),
+                    "pending_scientific_request": barrier_request.model_dump(mode="json"),
                 },
             )
 
@@ -1138,16 +1140,39 @@ class TestGoldenLoopAntiSkip:
             assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
+        assert result.learning_native.phase is LearningPhase.RECONSTRUCTION_REQUIRED
+        assert result.learning_native.teach_back is not None
+        assert result.learning_native.teach_back.recommended_probe
+        # A distinct student clarification is required, even for a good explanation.
+        request = request.model_copy(
+            update={
+                "learning_native": LearningNativeSubmission(
+                    teach_back=TeachBackSubmission(
+                        reconstruction=(
+                            "边界处波函数和导数连续，联立两端条件确定系数的比值；"
+                            "右侧与入射概率流之比才是透射率，不能只由指数项判断数值。"
+                        )
+                    ),
+                ),
+            }
+        )
+        async with golden_loop_database() as session:
+            result = await _graph(gateway).run(
+                session=session,
+                actor=seed.actor,
+                curriculum_edition_id=seed.edition_id,
+                request=request,
+            )
+            assert isinstance(result, TeachingTurnResult)
+            await session.commit()
+        assert result.learning_native is not None
         assert result.learning_native.phase is LearningPhase.TRANSFER_REQUIRED
         assert result.learning_native.transfer is not None
         assert (
             result.learning_native.solo is None
             or result.learning_native.solo.status is not SoloModeStatus.ACTIVE
         )
-        assert (
-            await _read_phase(golden_loop_database, conversation_id)
-            == "transfer_required"
-        )
+        assert await _read_phase(golden_loop_database, conversation_id) == "transfer_required"
 
     async def test_contradictory_teach_back_is_rejected_and_phase_holds(
         self,
@@ -1188,8 +1213,7 @@ class TestGoldenLoopAntiSkip:
             learning_native=LearningNativeSubmission(
                 teach_back=TeachBackSubmission(
                     reconstruction=(
-                        "因为能量小于势垒高度，粒子完全不可能出现在右侧，"
-                        "透射概率恒为零。"
+                        "因为能量小于势垒高度，粒子完全不可能出现在右侧，透射概率恒为零。"
                     )
                 )
             ),
@@ -1204,29 +1228,16 @@ class TestGoldenLoopAntiSkip:
             assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
-        assert (
-            result.learning_native.phase is LearningPhase.RECONSTRUCTION_REQUIRED
-        )
+        assert result.learning_native.phase is LearningPhase.RECONSTRUCTION_REQUIRED
         assert result.learning_native.teach_back is not None
         assert result.learning_native.teach_back.recommended_probe
-        assert (
-            await _read_phase(golden_loop_database, conversation_id)
-            == "reconstruction_required"
-        )
+        assert await _read_phase(golden_loop_database, conversation_id) == "reconstruction_required"
 
-    async def test_degenerate_empty_analysis_does_not_deadlock_the_loop(
+    async def test_degenerate_empty_analysis_fails_closed(
         self,
         golden_loop_database: async_sessionmaker[AsyncSession],
     ) -> None:
-        # Live E2E observation (2026-09-05): the real USTC model returned an
-        # ENTIRELY empty analysis (covered=0, missing=0, contradictions=0,
-        # unsupported=0) on a substantial reconstruction.  With the old
-        # fallback (only proposal is None) the loop deadlocked at
-        # reconstruction_required: the gate failed closed, no contradictions
-        # were reported, and the student had no way forward.  A substantial
-        # reconstruction plus a degenerate empty analysis must advance
-        # deterministically (same guarantee as the model-unavailable fallback),
-        # while a SHORT reconstruction still holds (length alone never passes).
+        # Missing model evidence must never count as a completed teach-back.
         async with golden_loop_database() as session:
             seed = await _seed_actor(session)
             conversation_id = await _seed_conversation(
@@ -1271,11 +1282,8 @@ class TestGoldenLoopAntiSkip:
             assert isinstance(result, TeachingTurnResult)
             await session.commit()
         assert result.learning_native is not None
-        assert result.learning_native.phase is LearningPhase.TRANSFER_REQUIRED
-        assert (
-            await _read_phase(golden_loop_database, conversation_id)
-            == "transfer_required"
-        )
+        assert result.learning_native.phase is LearningPhase.RECONSTRUCTION_REQUIRED
+        assert await _read_phase(golden_loop_database, conversation_id) == "reconstruction_required"
 
     async def test_degenerate_empty_analysis_short_reconstruction_still_holds(
         self,
@@ -1324,10 +1332,7 @@ class TestGoldenLoopAntiSkip:
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.phase is LearningPhase.RECONSTRUCTION_REQUIRED
-        assert (
-            await _read_phase(golden_loop_database, conversation_id)
-            == "reconstruction_required"
-        )
+        assert await _read_phase(golden_loop_database, conversation_id) == "reconstruction_required"
 
     async def test_solo_oracle_results_are_redacted_in_the_response(
         self,
@@ -1599,15 +1604,19 @@ class TestGoldenLoopAntiSkip:
             from quantum_agent.db_models import TeachingTurn
 
             verified = (
-                await session.execute(
-                    select(LearningEvidence)
-                    .join(TeachingTurn, TeachingTurn.id == LearningEvidence.teaching_turn_id)
-                    .where(
-                        TeachingTurn.conversation_id == conversation_id,
-                        LearningEvidence.kind == LearningEvidenceKind.TRANSFER_VERIFIED,
+                (
+                    await session.execute(
+                        select(LearningEvidence)
+                        .join(TeachingTurn, TeachingTurn.id == LearningEvidence.teaching_turn_id)
+                        .where(
+                            TeachingTurn.conversation_id == conversation_id,
+                            LearningEvidence.kind == LearningEvidenceKind.TRANSFER_VERIFIED,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         assert verified == []
 
     async def test_open_to_complete_is_rejected_at_guard(
@@ -1711,12 +1720,12 @@ class TestGoldenLoopAntiSkip:
         # (teacher trace summaries read conversation.mode).
         async with golden_loop_database() as session:
             conv = await session.scalar(
-                select(TeachingConversation).where(
-                    TeachingConversation.id == conversation_id
-                )
+                select(TeachingConversation).where(TeachingConversation.id == conversation_id)
             )
             assert conv is not None
             assert conv.mode is TeachingMode.RUN_EXPERIMENTS
+
+
 # TutorGraph.run signature requires a session; this helper opens one.
 async def _run_turn(
     graph: TutorGraph,
@@ -1743,3 +1752,527 @@ async def _run_turn(
         assert isinstance(result, TeachingTurnResult)
         await session.commit()
     return result
+
+
+async def test_aided_transfer_is_verified_before_new_solo_task(
+    golden_loop_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from quantum_agent.science.models import RectangularBarrierRequest
+    from quantum_agent.science.toolbox import ScientificToolbox
+    from quantum_agent.teaching.models import TransferAttemptSubmission
+
+    task_id = uuid4()
+    scientific = RectangularBarrierRequest(
+        energy_eV=5,
+        barrier_height_eV=10,
+        barrier_width_m=0.25e-9,
+        particle_mass_kg=9.1093837015e-31,
+    )
+    expected = ScientificToolbox().verify(scientific).metrics["T"]
+    async with golden_loop_database() as session:
+        seed = await _seed_actor(session)
+        conversation_id = await _seed_conversation(
+            session,
+            seed,
+            phase="transfer_required",
+            extra_phase={
+                "loop_required": True,
+                "active_transfer_task_id": str(task_id),
+                "active_transfer_task_prompt": "a=0.25 nm，计算 T 并说明理由。",
+                "pending_scientific_request": scientific.model_dump(mode="json"),
+                "transfer_verification": {
+                    "scientific_request": scientific.model_dump(mode="json"),
+                    "metric_name": "T",
+                    "expected_value": expected,
+                    "absolute_tolerance": 1e-7,
+                },
+            },
+        )
+    graph = _graph()
+
+    async def turn(submission: LearningNativeSubmission) -> TeachingTurnResult:
+        async with golden_loop_database() as session:
+            result = await graph.run(
+                session=session,
+                actor=seed.actor,
+                curriculum_edition_id=seed.edition_id,
+                request=TeachingTurnInput(
+                    mode=TeachingMode.LEARN_CONCEPTS,
+                    conversation_id=conversation_id,
+                    message="提交当前任务。",
+                    learning_native=submission,
+                ),
+            )
+            assert isinstance(result, TeachingTurnResult)
+            await session.commit()
+            return result
+
+    early = await turn(LearningNativeSubmission(request_transfer_task=True))
+    assert early.learning_native is not None
+    assert early.learning_native.phase is LearningPhase.TRANSFER_REQUIRED
+    wrong_task = await turn(
+        LearningNativeSubmission(
+            transfer_attempt=TransferAttemptSubmission(
+                transfer_task_id=uuid4(),
+                response=f"T={expected}",
+            )
+        )
+    )
+    assert wrong_task.learning_native is not None
+    assert "transfer_verified" not in wrong_task.learning_native.evidence_persisted
+    checked = await turn(
+        LearningNativeSubmission(
+            transfer_attempt=TransferAttemptSubmission(
+                transfer_task_id=task_id,
+                response=f"T={expected}，加宽有限势垒导致更强衰减，透射率降低。",
+            )
+        )
+    )
+    assert checked.learning_native is not None
+    assert checked.learning_native.phase is LearningPhase.TRANSFER_REQUIRED
+    assert "transfer_verified" in checked.learning_native.evidence_persisted
+    assert checked.learning_native.cognitive_mirror is not None
+    assert all(
+        not item.unaided_retrieval
+        for item in checked.learning_native.cognitive_mirror.concept_states
+    )
+    from quantum_agent.tutor import nodes
+
+    original_contract = nodes._tunnelling_transfer_contract
+    observed_locks: list[bool] = []
+
+    def inspect_lock(payload: dict[str, object], runtime: Any) -> Any:
+        locked = runtime.context.started_turn.durable_phase.solo_assistance_locked
+        observed_locks.append(locked)
+        assert locked is True  # Before constructing the new task, not afterwards.
+        return original_contract(payload, runtime)
+
+    monkeypatch.setattr(nodes, "_tunnelling_transfer_contract", inspect_lock)
+    armed = await turn(LearningNativeSubmission(request_transfer_task=True))
+    assert observed_locks == [True]
+    assert armed.learning_native is not None
+    assert armed.learning_native.phase is LearningPhase.SOLO_ACTIVE
+    assert armed.learning_native.solo is not None
+    assert armed.learning_native.solo.assistance_locked
+    assert armed.learning_native.transfer is not None
+    assert armed.learning_native.transfer.task_id != task_id
+    assert "0.12 nm 增至 0.18 nm" in armed.learning_native.transfer.prompt
+    assert "不要求精确数值" in armed.learning_native.transfer.prompt
+
+
+async def test_solo_blocks_evidence_after_reconnect_until_explicit_exit(
+    golden_loop_database: async_sessionmaker[AsyncSession],
+) -> None:
+    from fastapi import HTTPException
+
+    from quantum_agent.teaching.access import require_evidence_access
+
+    async with golden_loop_database() as session:
+        seed = await _seed_actor(session)
+        conversation_id = await _seed_conversation(
+            session, seed, phase="solo_active", extra_phase={"solo_assistance_locked": True}
+        )
+    async with golden_loop_database() as session:
+        with pytest.raises(HTTPException) as denied:
+            await require_evidence_access(session, seed.actor)
+        assert denied.value.status_code == 409
+    async with golden_loop_database() as session:
+        result = await _graph().run(
+            session=session,
+            actor=seed.actor,
+            curriculum_edition_id=seed.edition_id,
+            request=TeachingTurnInput(
+                mode=TeachingMode.LEARN_CONCEPTS,
+                conversation_id=conversation_id,
+                message="退出独立任务，返回有帮助学习。",
+                learning_native=LearningNativeSubmission(request_solo_exit=True),
+            ),
+        )
+        assert isinstance(result, TeachingTurnResult)
+        assert result.learning_native is not None
+        assert result.learning_native.phase is LearningPhase.ABORTED
+        await session.commit()
+    async with golden_loop_database() as session:
+        await require_evidence_access(session, seed.actor)
+
+
+async def test_episode_student_artefacts_survive_complete_and_idempotent_retry(
+    golden_loop_database: async_sessionmaker[AsyncSession],
+) -> None:
+    """One persisted episode, separate reconstruction, explanation, clarification and tasks.
+
+    Models/retrieval are explicit offline fixtures; the real policy, SQLite
+    persistence and scientific oracle run. This is not a live runner test.
+    """
+    import json
+    import os
+
+    from quantum_agent.db_models import TeachingTurn
+    from quantum_agent.science.models import RectangularBarrierRequest
+    from quantum_agent.science.toolbox import ScientificToolbox
+    from quantum_agent.teaching.models import TransferAttemptSubmission
+
+    async with golden_loop_database() as session:
+        seed = await _seed_actor(session)
+    gateway = FakeModelGateway(
+        responses={
+            "evaluate_barrier_trend": {
+                "trend": "decreases",
+                "trend_quote": "透射更低",
+                "mechanism": "evanescent_width_dependence",
+                "mechanism_quote": "衰减距离变长",
+                "contradictions": [],
+                "rationale": "连接了宽度、衰减距离和透射。",
+            },
+            "analyze_teach_back_reconstruction": {
+                "covered_relations": [{"relation": "covered", "description": "边界与概率流的关系"}],
+                "missing_relations": [],
+                "contradictions": [],
+                "unsupported_claims": [],
+                "recommended_probe": "你提到边界条件，它们在推导中确定了什么？",
+            },
+        }
+    )
+    graph = _graph(gateway)
+    conversation_id: UUID | None = None
+    last_request: TeachingTurnInput | None = None
+    captured: list[dict[str, Any]] = []
+
+    async def turn(
+        message: str,
+        submission: LearningNativeSubmission | None = None,
+        science: RectangularBarrierRequest | None = None,
+    ) -> TeachingTurnResult:
+        nonlocal conversation_id, last_request
+        last_request = TeachingTurnInput(
+            mode=TeachingMode.LEARN_CONCEPTS,
+            conversation_id=conversation_id,
+            message=message,
+            learning_native=submission,
+            scientific_request=science,
+            client_request_id=str(uuid4()),
+        )
+        async with golden_loop_database() as session:
+            result = await graph.run(
+                session=session,
+                actor=seed.actor,
+                curriculum_edition_id=seed.edition_id,
+                request=last_request,
+            )
+            assert isinstance(result, TeachingTurnResult)
+            conversation_id = result.conversation_id
+            captured.append(
+                {
+                    "input": last_request.model_dump(mode="json"),
+                    "result": result.model_dump(mode="json"),
+                }
+            )
+            await session.commit()
+            return result
+
+    initial = await turn("请引导我判断有限矩形势垒为什么存在隧穿。")
+    assert initial.learning_native is not None
+    assert initial.learning_native.phase is LearningPhase.COMMITMENT_REQUIRED
+    await turn(
+        "我的预测。",
+        LearningNativeSubmission(
+            commitment=CognitiveCommitment(
+                gate_decision=CommitmentGateDecision.ATTEMPT_REQUIRED,
+                attempt_required=True,
+                attempt_type=CommitmentKind.PREDICTION,
+                candidate_prompt="能量不够，波函数为零，改变宽度T也为零。",
+                reason_summary="",
+                accepted=False,
+            ),
+            confidence=0.6,
+        ),
+    )
+    revised = await turn("我移项发现ψ''与ψ成正比，E<V0并不要求ψ为零。我想进一步检验。")
+    assert revised.learning_native is not None
+    assert revised.learning_native.phase is LearningPhase.AWAITING_REVISION
+    scientific = RectangularBarrierRequest(
+        energy_eV=5, barrier_height_eV=10, barrier_width_m=0.1e-9, particle_mass_kg=9.1093837015e-31
+    )
+    calculated = await turn("现在计算并核验透射率。", science=scientific)
+    assert calculated.scientific_results
+    reconstruction = (
+        "我修正原判断：势垒区为两个指数项的组合，两端连续条件决定振幅，概率流比给出非零T。"
+    )
+    reconstructed = await turn(
+        "我的重构。",
+        LearningNativeSubmission(teach_back=TeachBackSubmission(reconstruction=reconstruction)),
+    )
+    assert reconstructed.learning_native is not None
+    assert reconstructed.learning_native.phase is LearningPhase.RECONSTRUCTION_REQUIRED
+    explanation = (
+        "我向你解释：经典禁区仍可有非零波函数，边界条件连接到右侧透射波，透射率由概率流比决定。"
+    )
+    probed = await turn(
+        "学生教AI。",
+        LearningNativeSubmission(teach_back=TeachBackSubmission(reconstruction=explanation)),
+    )
+    assert probed.learning_native is not None
+    assert probed.learning_native.phase is LearningPhase.RECONSTRUCTION_REQUIRED
+    clarified = await turn(
+        "学生澄清。",
+        LearningNativeSubmission(
+            teach_back=TeachBackSubmission(
+                reconstruction=(
+                    "两端各匹配波函数及导数，得到四个线性方程，确定反射和透射振幅相对入射振幅的比值。"
+                )
+            )
+        ),
+    )
+    assert clarified.learning_native is not None
+    assert clarified.learning_native.phase is LearningPhase.TRANSFER_REQUIRED
+    task = clarified.learning_native.transfer
+    assert task is not None
+    changed = scientific.model_copy(update={"barrier_width_m": 0.15e-9})
+    value = ScientificToolbox().verify(changed).metrics["T"]
+    await turn(
+        "迁移作答。",
+        LearningNativeSubmission(
+            transfer_attempt=TransferAttemptSubmission(
+                transfer_task_id=task.task_id, response=f"T={value}，加宽势垒使衰减增强。"
+            )
+        ),
+    )
+    armed = await turn("开始独立任务。", LearningNativeSubmission(request_transfer_task=True))
+    assert armed.learning_native is not None
+    assert armed.learning_native.phase is LearningPhase.SOLO_ACTIVE
+    complete = await turn(
+        "独立作答。",
+        LearningNativeSubmission(
+            solo_attempt=SoloAttemptSubmission(
+                response="势垒更宽使衰减距离变长，传出振幅减小，因此透射更低。"
+            )
+        ),
+    )
+    assert complete.learning_native is not None
+    assert complete.learning_native.phase is LearningPhase.COMPLETE
+    async with golden_loop_database() as session:
+        conv = await session.get(TeachingConversation, conversation_id)
+        assert conv is not None and conv.learning_phase_json is not None
+        assert conv.learning_phase_json["reconstruction"] == reconstruction
+        assert conv.learning_phase_json["teach_back_explanation"] == explanation
+        clarifications = conv.learning_phase_json["teach_back_clarifications"]
+        assert isinstance(clarifications, list) and len(clarifications) == 1
+        rows = (
+            await session.scalars(
+                select(LearningEvidence)
+                .join(TeachingTurn)
+                .where(TeachingTurn.conversation_id == conversation_id)
+            )
+        ).all()
+        before = {item.id for item in rows}
+        assert any(row.evidence_json.get("student_text") == reconstruction for row in rows)
+        assert last_request is not None
+        replay = await graph.run(
+            session=session,
+            actor=seed.actor,
+            curriculum_edition_id=seed.edition_id,
+            request=last_request,
+        )
+        assert isinstance(replay, TeachingTurnResult)
+        assert replay.turn_id == complete.turn_id
+        after = (
+            await session.scalars(
+                select(LearningEvidence)
+                .join(TeachingTurn)
+                .where(TeachingTurn.conversation_id == conversation_id)
+            )
+        ).all()
+        assert {item.id for item in after} == before
+
+    capture_dir = os.environ.get("QA_EPISODE_CAPTURE_DIR")
+    if capture_dir:
+        destination = Path(capture_dir)
+        await asyncio.to_thread(destination.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(
+            (destination / "episode.json").write_text,
+            json.dumps(
+                {
+                    "kind": "offline integration fixture",
+                    "models": "FakeModelGateway; scripted content, not live inference",
+                    "sources": "test fixtures; not real course pages or teacher approval",
+                    "execution": (
+                        "real TutorGraph, SQLite persistence, deterministic scientific oracle"
+                    ),
+                    "sandbox": "not executed by this test",
+                    "turns": captured,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+
+async def test_qualitative_solo_records_separate_semantic_and_reference_evidence(
+    golden_loop_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from quantum_agent.science import ScientificToolbox
+    from quantum_agent.science.models import RectangularBarrierRequest
+    from quantum_agent.teaching.barrier_trend import BarrierTrendEvaluation
+    from quantum_agent.tutor import nodes
+
+    baseline = RectangularBarrierRequest(
+        energy_eV=4,
+        barrier_height_eV=12,
+        barrier_width_m=0.12e-9,
+        particle_mass_kg=9.1093837015e-31,
+    )
+    changed = baseline.model_copy(update={"barrier_width_m": 0.18e-9})
+    expected = ScientificToolbox().verify(changed).metrics["T"]
+    async with golden_loop_database() as session:
+        seed = await _seed_actor(session)
+        conversation_id = await _seed_conversation(
+            session,
+            seed,
+            phase="solo_active",
+            extra_phase={
+                "loop_required": True,
+                "solo_assistance_locked": True,
+                "active_transfer_task_id": str(uuid4()),
+                "active_transfer_task_prompt": "宽度从0.12增至0.18 nm，说明趋势及依据，无需数值。",
+                "transfer_verification": {
+                    "scientific_request": changed.model_dump(mode="json"),
+                    "baseline_request": baseline.model_dump(mode="json"),
+                    "metric_name": "T",
+                    "expected_value": expected,
+                    "evaluation_mode": "barrier_trend",
+                },
+            },
+        )
+    answer = "透射率降低，因为禁阻区衰减距离变长，传出振幅更小。"
+
+    async def evaluation_mock(response: str, **kwargs: Any) -> Any:
+        if response == "我不知道":
+            return None
+        return BarrierTrendEvaluation(
+            trend="decreases",
+            trend_quote="透射率降低",
+            mechanism="evanescent_width_dependence",
+            mechanism_quote="衰减距离变长",
+            contradictions=[],
+            rationale="描述了更长禁阻区到更小振幅的因果关系。",
+        )
+
+    monkeypatch.setattr(nodes, "evaluate_barrier_trend", evaluation_mock)
+    graph = _graph()
+    for text, expected_phase in [
+        ("我不知道", LearningPhase.SOLO_ACTIVE),
+        (answer, LearningPhase.COMPLETE),
+    ]:
+        async with golden_loop_database() as session:
+            result = await graph.run(
+                session=session,
+                actor=seed.actor,
+                curriculum_edition_id=seed.edition_id,
+                request=TeachingTurnInput(
+                    mode=TeachingMode.LEARN_CONCEPTS,
+                    conversation_id=conversation_id,
+                    message="提交独立尝试。",
+                    learning_native=LearningNativeSubmission(
+                        solo_attempt=SoloAttemptSubmission(response=text),
+                    ),
+                ),
+            )
+            assert isinstance(result, TeachingTurnResult)
+            assert result.learning_native is not None
+            assert result.learning_native.phase is expected_phase
+            await session.commit()
+    async with golden_loop_database() as session:
+        records = (
+            await session.scalars(
+                select(LearningEvidence).where(
+                    LearningEvidence.kind == LearningEvidenceKind.TRANSFER_VERIFIED,
+                )
+            )
+        ).all()
+        record = next(row for row in records if row.evidence_json.get("response") == answer)
+        payload = record.evidence_json
+        assert payload["evaluation_mode"] == "barrier_trend"
+        assert payload["semantic_evaluation"]["trend_quote"] == "透射率降低"
+        assert len(payload["reference_comparison"]) == 2
+        assert payload["reference_comparison"][0]["metrics"]["T"] == pytest.approx(0.1046605190)
+        assert payload["reference_comparison"][1]["metrics"]["T"] == pytest.approx(0.01912986602)
+
+
+async def test_ordinary_revision_keeps_scientific_source_scope(
+    golden_loop_database: async_sessionmaker[AsyncSession],
+) -> None:
+    from quantum_agent.knowledge.barrier_scope import task_is_barrier
+    from quantum_agent.science.models import RectangularBarrierRequest
+
+    observed: list[str] = []
+
+    class ScopeRetriever(_TunnelingRetriever):
+        async def retrieve(self, scope: RetrievalScope, query: str) -> EvidencePacket:
+            assert task_is_barrier()
+            assert "0<E<V0" in query
+            observed.append(query)
+            return await super().retrieve(scope, query)
+
+    async with golden_loop_database() as session:
+        seed = await _seed_actor(session)
+        conversation = await _seed_conversation(
+            session,
+            seed,
+            phase="awaiting_revision",
+            extra_phase={
+                "loop_required": True,
+                "pending_scientific_request": RectangularBarrierRequest(
+                    energy_eV=5,
+                    barrier_height_eV=10,
+                    barrier_width_m=1e-10,
+                    particle_mass_kg=9.1093837015e-31,
+                ).model_dump(mode="json"),
+            },
+        )
+    async with golden_loop_database() as session:
+        result = await _graph(retriever=ScopeRetriever()).run(
+            session=session,
+            actor=seed.actor,
+            curriculum_edition_id=seed.edition_id,
+            request=TeachingTurnInput(
+                mode=TeachingMode.REVIEW_DERIVATIONS,
+                conversation_id=conversation,
+                message="请补边界条件这一步。",
+                student_attempt="两端的波函数和导数都应该连续。",
+            ),
+        )
+        assert isinstance(result, TeachingTurnResult)
+        assert observed
+
+
+@pytest.mark.parametrize("phase", ["awaiting_revision", "commitment_required", "solo_active"])
+async def test_explicit_reference_execution_preserves_gates(
+    golden_loop_database: async_sessionmaker[AsyncSession], phase: str,
+) -> None:
+    from quantum_agent.science.models import RectangularBarrierRequest
+
+    async with golden_loop_database() as session:
+        seed = await _seed_actor(session)
+        conversation = await _seed_conversation(session, seed, phase=phase)
+    async with golden_loop_database() as session:
+        result = await _graph().run(
+            session=session, actor=seed.actor, curriculum_edition_id=seed.edition_id,
+            request=TeachingTurnInput(
+                conversation_id=conversation, mode=TeachingMode.RUN_EXPERIMENTS,
+                message="按当前合同作确定性参考计算。", scientific_execution="reference_only",
+                scientific_request=RectangularBarrierRequest(
+                    energy_eV=3.7, barrier_height_eV=9.2, barrier_width_m=1.37e-10,
+                    particle_mass_kg=9.1093837015e-31,
+                ),
+            ),
+        )
+        assert isinstance(result, TeachingTurnResult)
+        assert result.code_artifact is None
+        if phase == "awaiting_revision":
+            assert result.scientific_results[0].status.value == "pass"
+            assert result.scientific_results[0].metrics["energy_eV"] == 3.7
+        else:
+            assert result.scientific_results == []

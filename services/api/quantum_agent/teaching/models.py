@@ -292,6 +292,7 @@ class TeachingTurnInput(BaseModel):
     student_attempt: str | None = Field(default=None, max_length=12000)
     attachment_ids: list[UUID] = Field(default_factory=list, max_length=8)
     scientific_request: ScientificVerificationRequest | None = None
+    scientific_execution: Literal["generate_code", "reference_only"] = "generate_code"
     learning_native: LearningNativeSubmission | None = None
     # PRD V3.0 P1-2: client-generated idempotency key.  When the browser
     # retries a turn after a lost response, the same ``client_request_id``
@@ -300,6 +301,17 @@ class TeachingTurnInput(BaseModel):
     # idempotent replay, so a retry cannot create duplicate AgentTrace /
     # LearningEvidence rows or duplicate phase transitions.
     client_request_id: str | None = Field(default=None, max_length=128)
+
+    @model_validator(mode="after")
+    def reference_execution_has_explicit_contract(self) -> TeachingTurnInput:
+        if self.scientific_execution == "reference_only" and (
+            self.mode is not TeachingMode.RUN_EXPERIMENTS
+            or self.scientific_request is None
+            or self.scientific_request.kind != "rectangular_barrier_tunnelling"
+            or self.learning_native is not None
+        ):
+            raise ValueError("reference_only requires an explicit barrier experiment contract")
+        return self
 
     @field_validator("message")
     @classmethod
@@ -360,7 +372,7 @@ class TeachBackSubmission(BaseModel):
 
 
 class TransferAttemptSubmission(BaseModel):
-    """A student attempt at a transfer task, submitted inside Solo Mode."""
+    """A task-correlated aided transfer attempt, submitted before Solo Mode."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -601,6 +613,8 @@ class TransferVerificationSpec(BaseModel):
     metric_name: str = Field(default="", max_length=80)
     expected_value: float | None = None
     absolute_tolerance: float = Field(default=1e-6, gt=0, le=0.1)
+    evaluation_mode: Literal["numeric", "barrier_trend"] = "numeric"
+    baseline_request: dict[str, object] = Field(default_factory=dict)
 
 
 class DurableLearningPhase(BaseModel):
@@ -626,6 +640,11 @@ class DurableLearningPhase(BaseModel):
     completed_stages: list[LearningStage] = Field(default_factory=list, max_length=12)
     pending_scientific_request: dict[str, object] = Field(default_factory=dict)
     transfer_verification: TransferVerificationSpec | None = None
+    aided_transfer_verified: bool = False
+    reconstruction: str = Field(default="", max_length=12000)
+    teach_back_explanation: str = Field(default="", max_length=12000)
+    teach_back_probe: str = Field(default="", max_length=2000)
+    teach_back_clarifications: list[str] = Field(default_factory=list, max_length=20)
 
 
 class ConceptStateLabel(StrEnum):

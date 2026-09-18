@@ -62,7 +62,7 @@ export function CommitmentCard({
   disabled: boolean;
   pending: boolean;
   error: string | null;
-  onSubmit: (submission: LearningNativeSubmission) => void;
+  onSubmit: (submission: LearningNativeSubmission, studentResponse?: string) => void;
 }) {
   const [attemptType, setAttemptType] = useState<CommitmentKind>(
     commitment.attempt_type ?? "prediction",
@@ -167,14 +167,16 @@ export function CommitmentCard({
 
 export function TeachBackCard({
   analysis,
+  reconstructing = false,
   disabled,
   pending,
   onSubmit,
 }: {
   analysis: TeachBackAnalysis;
+  reconstructing?: boolean;
   disabled: boolean;
   pending: boolean;
-  onSubmit: (submission: LearningNativeSubmission) => void;
+  onSubmit: (submission: LearningNativeSubmission, studentResponse?: string) => void;
 }) {
   const [reconstruction, setReconstruction] = useState("");
 
@@ -206,13 +208,13 @@ export function TeachBackCard({
       <header>
         <span><PenLine aria-hidden="true" /></span>
         <div>
-          <p className={styles.kicker}>TEACH-BACK RECONSTRUCTION</p>
-          <h2>用自己的话重新解释这个结论</h2>
+          <p className={styles.kicker}>{reconstructing ? "RECONSTRUCTION" : "TEACH-BACK · CLARIFICATION"}</p>
+          <h2>{reconstructing ? "修正原来的判断，补写关键一步" : "现在请你教我，并回答追问"}</h2>
         </div>
         <em>{analysis.is_model_inference ? "MODEL REVIEW" : "OBSERVATION"}</em>
       </header>
       {findings.length > 0 ? (
-        <ul className={styles.teachBackFindings}>
+        <ul className={styles.teachBackFindings} tabIndex={0} aria-label="回讲关系评价（可滚动）">
           {findings.slice(0, 8).map((finding, index) => (
             <li key={`${finding.relation}-${index}`} data-relation={finding.relation}>
               <Check aria-hidden="true" />
@@ -240,7 +242,7 @@ export function TeachBackCard({
         <small>系统只标注你覆盖或遗漏的关系，不会给出分数。</small>
         <button type="button" onClick={submit} disabled={disabled || pending || !reconstruction.trim()}>
           {pending ? <span className={styles.spin}>…</span> : <Check />}
-          {pending ? "提交中" : "提交重构"}
+          {pending ? "提交中" : reconstructing ? "提交修订" : "提交解释 / 澄清"}
         </button>
       </footer>
     </section>
@@ -258,7 +260,7 @@ export function TransferCard({
   solo: SoloMode | null;
   disabled: boolean;
   pending: boolean;
-  onSubmit: (submission: LearningNativeSubmission) => void;
+  onSubmit: (submission: LearningNativeSubmission, studentResponse?: string) => void;
 }) {
   const [response, setResponse] = useState("");
   const [confidence, setConfidence] = useState(70);
@@ -271,8 +273,8 @@ export function TransferCard({
       commitment: null,
       confidence: confidence / 100,
       teach_back: null,
-      transfer_attempt: null,
-      solo_attempt: { response: trimmed, confidence: confidence / 100 },
+      transfer_attempt: isSoloActive ? null : { transfer_task_id: transfer.task_id, response: trimmed, confidence: confidence / 100 },
+      solo_attempt: isSoloActive ? { response: trimmed, confidence: confidence / 100 } : null,
       request_transfer: false,
       request_solo_exit: false,
       request_teach_back: false,
@@ -319,6 +321,7 @@ export function TransferCard({
           <span>AI 辅助暂时不可用 · 你需要独立完成</span>
         </div>
       ) : null}
+      {solo?.unlock_reason ? <p role="status">{solo.unlock_reason}</p> : null}
       <textarea
         value={response}
         onChange={(event) => setResponse(event.target.value)}
@@ -344,7 +347,7 @@ export function TransferCard({
       <footer>
         <small>
           {transfer.verifiable
-            ? "提交后系统会用确定性工具检查你的答案。"
+            ? "提交后按题目要求评价；解释评价与参考数值核验分别记录。"
             : "提交后系统记录你的迁移证据。"}
         </small>
         <div style={{ display: "flex", gap: 8 }}>
@@ -452,7 +455,7 @@ function MinimalInterventionCard({
 }: {
   state: LearningNativeTurnState;
   pending: boolean;
-  onSubmit: (submission: LearningNativeSubmission) => void;
+  onSubmit: (submission: LearningNativeSubmission, studentResponse?: string) => void;
 }) {
   const [response, setResponse] = useState("");
 
@@ -469,7 +472,7 @@ function MinimalInterventionCard({
       request_solo_exit: false,
       request_teach_back: false,
       request_transfer_task: false,
-    });
+    }, trimmed);
   }
 
   const probe =
@@ -514,7 +517,7 @@ export function LearningNativeSurface({
 }: {
   state: LearningNativeTurnState;
   pending: boolean;
-  onSubmit: (submission: LearningNativeSubmission) => void;
+  onSubmit: (submission: LearningNativeSubmission, studentResponse?: string) => void;
 }) {
   const soloActive = state.solo?.status === "active";
   if (state.phase === "complete" || state.phase === "aborted") return null;
@@ -548,12 +551,13 @@ export function LearningNativeSurface({
       </>
     );
   }
-  if (state.teach_back) {
+  if (state.teach_back && state.phase !== "transfer_required") {
     return (
       <>
         <LearningActionBadge state={state} />
         <TeachBackCard
           analysis={state.teach_back}
+          reconstructing={state.phase === "awaiting_revision"}
           disabled={false}
           pending={pending}
           onSubmit={onSubmit}
@@ -565,6 +569,11 @@ export function LearningNativeSurface({
     return (
       <>
         <LearningActionBadge state={state} />
+        {state.evidence_persisted.includes("transfer_verified") ? (
+          <p role="status">迁移数值已核验；本次为有支架表现。接下来进入新的 Solo 任务。</p>
+        ) : state.evidence_persisted.includes("transfer_failed") ? (
+          <p role="status">迁移尚未通过核验。请检查数值与理由后重新提交。</p>
+        ) : null}
         <TransferCard
           transfer={state.transfer}
           solo={state.solo}

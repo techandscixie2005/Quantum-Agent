@@ -24,7 +24,11 @@ import {
 const TRACE_ID_PATTERN = /^[a-zA-Z0-9._:-]{1,128}$/;
 const SAFE_WORKFLOW_FAILURES = new Set([
   "CONVERSATION_CONFLICT",
+  "ATTACHMENT_NOT_FOUND",
+  "ATTACHMENT_NOT_READY",
   "RETRIEVAL_UNAVAILABLE",
+  "RECORDING_BUDGET_UNAVAILABLE",
+  "WORKFLOW_UNAVAILABLE",
 ]);
 
 export function teachingError(
@@ -247,7 +251,7 @@ export function makeStreamingValidator(): StreamingValidator {
       // Comment-only keepalive blocks: forward verbatim (browsers silently
       // consume ``:`` lines per the SSE spec; we still forward so any
       // non-browser client and the dev-tools network panel see activity).
-      if (trimmed.startsWith(":")) {
+      if (trimmed.split("\n").every((line) => !line.trim() || line.startsWith(":"))) {
         return { kind: "forward", chunk: `${block}\n\n` };
       }
       let parsed: ParsedSse | null;
@@ -290,6 +294,7 @@ export function makeStreamingValidator(): StreamingValidator {
             throw new TeachingContractError("conversation id changed across the turn");
           }
         } catch {
+          finished = true;
           return { kind: "error", chunk: encodeSse("workflow.failed", { code: "INVALID_UPSTREAM_CONTRACT" }) };
         }
         finished = true;
@@ -305,6 +310,7 @@ export function makeStreamingValidator(): StreamingValidator {
             throw new TeachingContractError("conversation id changed at the HITL boundary");
           }
         } catch {
+          finished = true;
           return { kind: "error", chunk: encodeSse("workflow.failed", { code: "INVALID_UPSTREAM_CONTRACT" }) };
         }
         finished = true;

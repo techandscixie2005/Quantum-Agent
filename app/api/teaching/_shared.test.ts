@@ -132,6 +132,33 @@ test("streaming validator rejects a terminal before workflow.started", async () 
   assert.match(out.chunk, /INVALID_UPSTREAM_CONTRACT/);
 });
 
+for (const code of ["ATTACHMENT_NOT_FOUND", "ATTACHMENT_NOT_READY", "WORKFLOW_UNAVAILABLE"]) {
+  test(`stream preserves backend attachment failure ${code} without forwarding details`, async () => {
+    const validator = makeStreamingValidator();
+    await validator.handleBlock(startedBlock(), TEST_CONTEXT);
+    const result = await validator.handleBlock(
+      `event: workflow.failed\ndata: ${JSON.stringify({ code, detail: "private upstream detail" })}`,
+      TEST_CONTEXT,
+    );
+    assert.equal(result.kind, "terminal");
+    assert.match(result.chunk, new RegExp(code));
+    assert.doesNotMatch(result.chunk, /private upstream detail/);
+    assert.equal(validator.finished, true);
+  });
+}
+
+test("a comment prefix cannot bypass terminal validation", async () => {
+  const validator = makeStreamingValidator();
+  await validator.handleBlock(startedBlock(), TEST_CONTEXT);
+  const result = await validator.handleBlock(
+    ': heartbeat\nevent: workflow.completed\ndata: {"status":"completed"}', TEST_CONTEXT,
+  );
+  assert.equal(result.kind, "error");
+  assert.equal(validator.finished, true);
+  const later = await validator.handleBlock(failedBlock("RETRIEVAL_UNAVAILABLE"), TEST_CONTEXT);
+  assert.equal(later.chunk, "");
+});
+
 test("streaming validator rejects a second workflow.started", async () => {
   const v = makeStreamingValidator();
   await v.handleBlock(startedBlock(), TEST_CONTEXT);
@@ -171,4 +198,14 @@ test("streaming validator rejects an invalid workflow.completed payload", async 
   );
   assert.equal(out.kind, "error");
   assert.match(out.chunk, /INVALID_UPSTREAM_CONTRACT/);
+});
+
+test("streaming validator preserves a recording budget failure as the terminal", async () => {
+  const validator = makeStreamingValidator();
+  await validator.handleBlock(startedBlock(), TEST_CONTEXT);
+  const output = await validator.handleBlock(failedBlock("RECORDING_BUDGET_UNAVAILABLE"), TEST_CONTEXT);
+  assert.equal(output.kind, "terminal");
+  assert.match(output.chunk, /RECORDING_BUDGET_UNAVAILABLE/);
+  assert.doesNotMatch(output.chunk, /INVALID_UPSTREAM_CONTRACT/);
+  assert.equal(validator.finished, true);
 });

@@ -363,3 +363,47 @@ test.describe("Golden Learning Loop · /agent", () => {
     );
   });
 });
+
+test("minimal intervention sends the student's actual reply", async ({ page }) => {
+  await interceptAgentApis(page, baseResult({
+    learning_native: {
+      commitment: null, learning_action: "give_hint", teach_back: null,
+      transfer: null, solo: null, cognitive_mirror: null, evidence_persisted: [],
+      phase: "attempt_received", current_stage: "explain", completed_stages: ["predict"],
+      required_action: "revision", loop_required: true,
+      minimal_intervention_prompt: "二阶导数与波函数有什么关系？",
+    },
+  }));
+  await submitAndAssertCard(page, "为什么会隧穿？", "minimal-intervention-card", async () => {
+    const submit = page.getByRole("button", { name: "提交下一步", exact: true });
+    await expect(submit).toBeDisabled();
+    const response = "我仍不知道负号怎么处理，请只提示移项这一步。";
+    await page.getByLabel("最小干预回复").fill(response);
+    const sent = page.waitForRequest(request => request.url().includes("/api/teaching/turns/stream")
+      && request.method() === "POST");
+    await submit.click();
+    const payload = (await sent).postDataJSON();
+    expect(payload.message).toBe(response);
+    expect(payload.student_attempt).toBe(response);
+  });
+});
+
+test("completed teach-back feedback does not hide the assigned transfer task", async ({ page }) => {
+  await interceptAgentApis(page, baseResult({ learning_native: {
+    commitment: null, learning_action: "give_hint",
+    teach_back: { covered_relations: [], missing_relations: [], contradictions: [],
+      unsupported_claims: [], recommended_probe: "", verified: false, is_model_inference: true },
+    transfer: { task_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", transfer_type: "parameter",
+      prompt: "保持能量与高度，宽度改为 0.15 nm，求透射率并说明理由。",
+      source_concept_ids: [], key_parameters: ["a=0.15 nm"],
+      expected_observable: "transmission coefficient T", verifiable: true },
+    solo: null, cognitive_mirror: null, evidence_persisted: ["teach_back"],
+    phase: "transfer_required", current_stage: "transfer",
+    completed_stages: ["predict", "diagnose", "explore", "verify", "explain", "teach_back"],
+    required_action: "none", loop_required: true,
+  }}));
+  await submitAndAssertCard(page, "提交我的回讲。", "transfer-card", async () => {
+    await expect(page.getByLabel("迁移尝试")).toBeVisible();
+    await expect(page.getByTestId("teach-back-card")).toHaveCount(0);
+  });
+});

@@ -73,6 +73,7 @@ export type TeachingTurnRequest = Readonly<{
   student_attempt: string | null;
   attachment_ids: readonly string[];
   scientific_request: SupportedScientificRequest | null;
+  scientific_execution?: "generate_code" | "reference_only";
   learning_native: LearningNativeSubmission | null;
   // PRD V3.0 P1-2: client-generated idempotency key.  The browser sends the
   // same key on a retry so the backend can return the original completed
@@ -894,6 +895,7 @@ export function parseTeachingTurnRequest(value: unknown): TeachingTurnRequest {
       "student_attempt",
       "attachment_ids",
       "scientific_request",
+      "scientific_execution",
       "learning_native",
       "client_request_id",
     ],
@@ -933,6 +935,9 @@ export function parseTeachingTurnRequest(value: unknown): TeachingTurnRequest {
         ? null
         : parseLearningNativeSubmission(input.learning_native, "turnRequest.learning_native"),
     client_request_id: clientRequestId || null,
+    ...(input.scientific_execution === undefined ? {} : {
+      scientific_execution: oneOf(input.scientific_execution, ["generate_code", "reference_only"] as const, "turnRequest.scientific_execution"),
+    }),
   };
 }
 
@@ -2381,8 +2386,8 @@ export function parseTeachingTurnResult(value: unknown): TeachingTurnResult {
 
 function parseCodeArtifactRun(value: unknown): CodeArtifactRun | null {
   if (value === undefined || value === null) return null;
-  // Fail-closed: a malformed artifact is dropped rather than failing the
-  // whole turn, so a Coding Agent hiccup can never break the Golden Loop.
+  // A malformed execution record must surface a contract error, not disappear
+  // beside a surviving green scientific result.
   try {
     const input = record(value, "turnResult.code_artifact");
     const artifact = record(input.artifact, "turnResult.code_artifact.artifact");
@@ -2395,7 +2400,7 @@ function parseCodeArtifactRun(value: unknown): CodeArtifactRun | null {
         purpose: text(artifact.purpose, "turnResult.code_artifact.artifact.purpose", 600),
         code: text(artifact.code, "turnResult.code_artifact.artifact.code", 20_000),
         expected_outputs: strings(artifact.expected_outputs, "turnResult.code_artifact.artifact.expected_outputs", 8, 200),
-        verification_plan: text(artifact.verification_plan, "turnResult.code_artifact.artifact.verification_plan", 600),
+        verification_plan: boundedTextAllowEmpty(artifact.verification_plan ?? "", "turnResult.code_artifact.artifact.verification_plan", 600),
       },
       execution: {
         completed: bool(execution.completed, "turnResult.code_artifact.execution.completed"),
@@ -2419,7 +2424,7 @@ function parseCodeArtifactRun(value: unknown): CodeArtifactRun | null {
         return {
           attempt_number: integer(r.attempt_number, `turnResult.code_artifact.repairs[${index}].attempt_number`),
           failure_summary: text(r.failure_summary, `turnResult.code_artifact.repairs[${index}].failure_summary`, 1_000),
-          stderr_excerpt: text(r.stderr_excerpt, `turnResult.code_artifact.repairs[${index}].stderr_excerpt`, 1_000),
+          stderr_excerpt: boundedTextAllowEmpty(r.stderr_excerpt ?? "", `turnResult.code_artifact.repairs[${index}].stderr_excerpt`, 1_000),
         };
       }),
       progress: oneOf(input.progress, ["planning", "writing", "running", "verifying", "result"] as const, "turnResult.code_artifact.progress"),
@@ -2429,7 +2434,7 @@ function parseCodeArtifactRun(value: unknown): CodeArtifactRun | null {
           : text(input.figure_png_base64, "turnResult.code_artifact.figure_png_base64", 200_000),
     };
   } catch {
-    return null;
+    throw new Error("计算产物不符合后端合同，无法显示核验结论；请重试。");
   }
 }
 

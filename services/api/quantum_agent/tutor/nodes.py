@@ -8,6 +8,7 @@ state machine (B0) and the graph (B1) exercise identical logic.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -37,7 +38,9 @@ from quantum_agent.science.models import (
     CodeTestRequest,
     RectangularBarrierRequest,
 )
+from quantum_agent.science.toolbox import ScientificToolbox, _digest_request
 from quantum_agent.teaching.agents import DiagnosisAgent, DiagnosisInput, EvidenceAgent
+from quantum_agent.teaching.barrier_trend import evaluate_barrier_trend
 from quantum_agent.teaching.hitl import (
     HitlAction,
     HitlEvent,
@@ -66,7 +69,6 @@ from quantum_agent.teaching.models import (
     CommitmentGateDecision,
     DiagnosisOutput,
     DiagnosisStatus,
-    DurableLearningPhase,
     LearningPhase,
     LearningPolicyAction,
     LearningStage,
@@ -153,7 +155,8 @@ async def interpret_node(
     runtime: Runtime[TutorContext],
 ) -> dict[str, Any]:
     request = state["request"]
-    model_gateway = runtime.context.model_gateway
+    model_gateway = (None if request.scientific_execution == "reference_only"
+                     else runtime.context.model_gateway)
     interpretation, degraded = await interpret_turn(
         request=request,
         model_gateway=model_gateway,
@@ -214,8 +217,12 @@ async def retrieve_evidence_node(
     # topic. Carry the scoped, persisted task into retrieval, especially in
     # Solo where model-generated concept hints are intentionally unavailable.
     task_context = ""
-    if request.learning_native is not None:
-        durable = runtime.context.started_turn.durable_phase
+    durable = runtime.context.started_turn.durable_phase
+    continuing_task = request.learning_native is not None or (
+        durable.loop_required
+        and durable.phase not in {LearningPhase.OPEN, LearningPhase.COMPLETE, LearningPhase.ABORTED}
+    )
+    if continuing_task:
         kind = durable.pending_scientific_request.get("kind", "")
         task_context = " ".join([
             durable.active_transfer_task_prompt,
@@ -224,8 +231,7 @@ async def retrieve_evidence_node(
     scientific = (
         request.scientific_request.model_dump(mode="json")
         if request.scientific_request is not None
-        else (runtime.context.started_turn.durable_phase.pending_scientific_request
-              if request.learning_native is not None else {})
+        else (durable.pending_scientific_request if continuing_task else {})
     )
     if scientific.get("kind") == "rectangular_barrier_tunnelling":
         task_context += " finite rectangular barrier"
@@ -278,6 +284,26 @@ async def diagnose_node(
 ) -> dict[str, Any]:
     request = state["request"]
     model_gateway = runtime.context.model_gateway
+    computation_only = (
+        request.mode.value == "run_experiments"
+        and request.scientific_request is not None
+        and runtime.context.started_turn.durable_phase.phase is LearningPhase.AWAITING_REVISION
+    )
+    dedicated_assessment = (
+        request.learning_native is not None
+        and runtime.context.started_turn.durable_phase.phase in {
+            LearningPhase.RECONSTRUCTION_REQUIRED,
+            LearningPhase.TRANSFER_REQUIRED,
+            LearningPhase.SOLO_ACTIVE,
+        }
+        and any((request.learning_native.teach_back,
+                 request.learning_native.transfer_attempt,
+                 request.learning_native.solo_attempt))
+    )
+    if dedicated_assessment or computation_only:
+        # Native submissions have task-bound evaluators later in this same graph.
+        # Do not run a second generic diagnosis or infer success here.
+        model_gateway = None
     if runtime.context.use_specialist_agents:
         diagnosis, degraded = await DiagnosisAgent(model_gateway).diagnose(
             diagnosis_input=DiagnosisInput(
@@ -297,12 +323,21 @@ async def diagnose_node(
             packet=state["evidence_packet"],
             model_gateway=model_gateway,
         )
+    if dedicated_assessment or computation_only:
+        diagnosis = diagnosis.model_copy(update={
+            "summary": "已记录当前任务作答；评价由任务合同对应的核验与关系评价完成。",
+            "reason": "Dedicated task assessment follows; generic diagnosis was not requested.",
+        })
+        degraded = False
     trace = list(state.get("trace", []))
     trace.append(
         WorkflowStep(
             name=WorkflowStepName.DIAGNOSE_PROGRESS,
-            status=(WorkflowStepStatus.DEGRADED if degraded else WorkflowStepStatus.COMPLETED),
-            detail=f"Diagnosis is explicitly labeled {diagnosis.status.value}.",
+            status=(WorkflowStepStatus.SKIPPED if dedicated_assessment or computation_only else
+                    WorkflowStepStatus.DEGRADED if degraded else WorkflowStepStatus.COMPLETED),
+            detail=("Task-bound assessment replaces generic diagnosis for this submission."
+                    if dedicated_assessment or computation_only else
+                    f"Diagnosis is explicitly labeled {diagnosis.status.value}."),
         )
     )
     return {"diagnosis": diagnosis, "diagnosis_degraded": degraded, "trace": trace}
@@ -412,7 +447,7 @@ async def scientific_tools_node(
     # (generation still honours the release level).
     durable_phase = runtime.context.started_turn.durable_phase
     solo_verification_due = (
-        durable_phase.phase is LearningPhase.SOLO_ACTIVE
+        durable_phase.phase in {LearningPhase.SOLO_ACTIVE, LearningPhase.TRANSFER_REQUIRED}
         and durable_phase.transfer_verification is not None
         and bool(durable_phase.transfer_verification.scientific_request)
         and request.scientific_request is not None
@@ -473,6 +508,7 @@ async def scientific_tools_node(
             and coding_task is not None
             and not isinstance(request.scientific_request, CodeTestRequest)
             and not coding_disabled_for_solo
+            and request.scientific_execution != "reference_only"
         ):
             oracle_outcome, coding_outcome = await asyncio.gather(
                 oracle_coro,
@@ -528,6 +564,8 @@ async def scientific_tools_node(
             f"{tool_result.method.value} verification completed with "
             f"status={tool_result.status.value}."
         )
+        if request.scientific_execution == "reference_only":
+            detail += " Fixed deterministic reference solver; no Coding Agent or generated code."
         if coding_detail:
             detail = f"{detail} {coding_detail}"
         tool_step = WorkflowStep(
@@ -618,6 +656,19 @@ async def learning_native_pre_node(
     # text — so the same promotion applies there.
     phase_at_start = durable_phase.phase
     if (
+        phase_at_start is LearningPhase.TRANSFER_REQUIRED
+        and durable_phase.aided_transfer_verified
+        and submission is not None
+        and submission.request_transfer_task
+    ):
+        # The conversation row is locked by start_turn. Evidence reads acquire
+        # that same row lock, so concurrent tabs wait for this transition.
+        durable_phase = durable_phase.model_copy(update={"solo_assistance_locked": True})
+        runtime.context.started_turn.durable_phase = durable_phase
+        await TeachingRepository(runtime.context.session).save_durable_learning_phase(
+            conversation=runtime.context.started_turn.conversation, phase=durable_phase,
+        )
+    if (
         phase_at_start
         in {
             LearningPhase.ATTEMPT_RECEIVED,
@@ -632,7 +683,7 @@ async def learning_native_pre_node(
     # A Solo attempt is verified against the exact persisted transfer oracle,
     # never against an unrelated client-selected tool request.
     if (
-        durable_phase.phase is LearningPhase.SOLO_ACTIVE
+        durable_phase.phase in {LearningPhase.SOLO_ACTIVE, LearningPhase.TRANSFER_REQUIRED}
         and submission is not None
         and (submission.solo_attempt is not None or submission.transfer_attempt is not None)
         and durable_phase.transfer_verification is not None
@@ -664,7 +715,7 @@ async def learning_native_pre_node(
     # — the Golden Loop could not close.  The promotion also replaces any
     # client-supplied ``student_attempt``, so an unrelated typed attempt
     # cannot ride along inside a Solo turn.
-    if solo_active and solo_submission:
+    if (solo_active or durable_phase.phase is LearningPhase.TRANSFER_REQUIRED) and solo_submission:
         assert submission is not None
         solo_artefact = submission.solo_attempt or submission.transfer_attempt
         assert solo_artefact is not None
@@ -1217,6 +1268,58 @@ async def generate_response_node(
         }
 
     request = state["request"]
+    # A submitted reconstruction is evaluated by the dedicated relation evaluator
+    # below. Generating another full tutor explanation first both delays feedback
+    # and gives away help while the student is reconstructing their own reasoning.
+    if (
+        (request.learning_native is not None
+        and (
+            (runtime.context.started_turn.durable_phase.phase
+             is LearningPhase.RECONSTRUCTION_REQUIRED
+             and request.learning_native.teach_back is not None)
+            or (runtime.context.started_turn.durable_phase.phase
+                is LearningPhase.TRANSFER_REQUIRED
+                and request.learning_native.transfer_attempt is not None)
+            or (runtime.context.started_turn.durable_phase.phase
+                is LearningPhase.SOLO_ACTIVE
+                and (request.learning_native.solo_attempt is not None
+                     or request.learning_native.transfer_attempt is not None))
+        ))
+        or (request.mode.value == "run_experiments"
+            and request.scientific_request is not None
+            and runtime.context.started_turn.durable_phase.phase
+            is LearningPhase.AWAITING_REVISION)
+    ):
+        from quantum_agent.teaching.models import ResponseStatus, TeachingResponse
+
+        trace.append(WorkflowStep(
+            name=WorkflowStepName.GENERATE_RESPONSE,
+            status=WorkflowStepStatus.SKIPPED,
+            detail="Reconstruction submitted; dedicated relation evaluation supplies feedback.",
+        ))
+        trace.append(WorkflowStep(
+            name=WorkflowStepName.VALIDATE_RESPONSE,
+            status=WorkflowStepStatus.COMPLETED,
+            detail="Receipt contains no scientific or course claims.",
+        ))
+        trace.append(WorkflowStep(
+            name=WorkflowStepName.RECORD_LEARNING_EVIDENCE,
+            status=WorkflowStepStatus.COMPLETED,
+            detail="Record the submitted reconstruction and separate relation evaluation.",
+        ))
+        return {
+            "response": TeachingResponse(
+                status=ResponseStatus.GROUNDED,
+                orientation="已收到你的提交，评价结果与下一步见当前任务卡。",
+                claims=[], next_question="根据评价补充你的解释；已记录不等于通过。",
+                limitations=["这是后端流程提示；关系评价单独标记为模型判断。"],
+            ),
+            "validation": ValidationReport(
+                passed=True, citation_ids_valid=True, literal_course_claims_valid=True,
+                scientific_references_valid=True, warnings=[],
+            ),
+            "generation_degraded": False, "trace": trace,
+        }
     packet = state["evidence_packet"]
     diagnosis = state["diagnosis"]
     release_level = state["release"].release_level
@@ -1623,6 +1726,16 @@ def _tunnelling_transfer_contract(
         return None
     if not isinstance(original, RectangularBarrierRequest):
         return None
+    solo_trend = runtime.context.started_turn.durable_phase.solo_assistance_locked
+    if solo_trend:
+        # Avoid reusing the E/V pair if this course already practised it.
+        energy, height = (3, 11) if (
+            original.energy_eV == 4 and original.barrier_height_eV == 12
+        ) else (4, 12)
+        original = RectangularBarrierRequest(
+            energy_eV=energy, barrier_height_eV=height, barrier_width_m=0.12e-9,
+            particle_mass_kg=9.1093837015e-31,
+        )
     changed_width = min(original.barrier_width_m * 1.5, 1e-3)
     changed = original.model_copy(update={"barrier_width_m": changed_width})
     oracle = runtime.context.scientific_toolbox.verify(changed)
@@ -1632,11 +1745,18 @@ def _tunnelling_transfer_contract(
     ):
         return None
     prompt = (
-        "近迁移（独立完成）：保持粒子能量 "
+        "参数迁移：保持粒子能量 "
         f"E={changed.energy_eV:g} eV 与势垒高度 V₀={changed.barrier_height_eV:g} eV，"
         f"把势垒宽度改为 a={changed.barrier_width_m * 1e9:.4g} nm。"
         "先判断透射率相对原情形如何变化，再计算透射系数 T；给出数值和物理理由。"
     )
+    if solo_trend:
+        prompt = (
+            "Solo · 电子从左侧入射有限矩形势垒，两侧零势能、同质量、无吸收。"
+            f"保持 E={changed.energy_eV:g} eV、V₀={changed.barrier_height_eV:g} eV，"
+            "完整宽度从 0.12 nm 增至 0.18 nm。"
+            "说明透射率如何变化及其物理依据，不要求精确数值。"
+        )
     return (
         TransferProposal(
             transfer_type=TransferType.PARAMETER,
@@ -1646,13 +1766,17 @@ def _tunnelling_transfer_contract(
                 f"V0={changed.barrier_height_eV:g} eV",
                 f"a={changed.barrier_width_m * 1e9:.4g} nm",
             ],
-            expected_observable="transmission coefficient T",
+            expected_observable=(
+                "qualitative width trend" if solo_trend else "transmission coefficient T"
+            ),
         ),
         TransferVerificationSpec(
             scientific_request=changed.model_dump(mode="json"),
             metric_name="T",
             expected_value=float(expected),
-            absolute_tolerance=5e-3,
+            absolute_tolerance=max(abs(float(expected)) * 0.01, 1e-12),
+            evaluation_mode="barrier_trend" if solo_trend else "numeric",
+            baseline_request=original.model_dump(mode="json") if solo_trend else {},
         ),
     )
 
@@ -1819,40 +1943,59 @@ async def learning_native_node(
             ][:6]
             proposal = await propose_teach_back_analysis(
                 reconstruction=reconstruction,
+                prior_explanation=durable_phase.teach_back_explanation,
+                tutor_probe=durable_phase.teach_back_probe,
+                prior_clarifications=durable_phase.teach_back_clarifications,
                 target_concept_names=target_names,
                 model_gateway=model_gateway,
+                task_context=json.dumps({
+                    "scientific_contract": durable_phase.pending_scientific_request,
+                    "course_evidence": [
+                        {"id": str(item.evidence_id), "text": item.evidence_snippet}
+                        for item in evidence_packet.evidence[:3]
+                    ],
+                }, ensure_ascii=False),
             )
             teach_back, teach_back_evidence = policy.analyze_teach_back(
                 submission_text=reconstruction,
                 proposal=proposal,
             )
-            # Length alone never advances the loop.  The reconstruction passes
-            # only when the analysis covers at least one relation and reports
-            # no contradictions.  When the model is unavailable (proposal is
-            # None) OR the model degenerated to an entirely empty analysis on
-            # a substantial reconstruction (a live USTC round-trip observed
-            # exactly this: covered=0/missing=0/contradictions=0 on a 50-char
-            # reconstruction, which would otherwise deadlock the loop at
-            # reconstruction_required), the reconstruction advances
-            # deterministically so a model outage cannot deadlock the Golden
-            # Loop — the same guarantee force-armed transfers provide.  The
-            # substantial-text bar matches the analysis-entry bar (24 chars):
-            # a reconstruction that reaches the model can fall back when the
-            # model produces nothing; a trivial one still cannot pass.
-            reconstruction_acceptable = bool(
-                teach_back.covered_relations
-            ) and not teach_back.contradictions
-            model_degenerate_analysis = (
-                proposal is not None
-                and not teach_back.covered_relations
+            # Model failure or absent relations are missing evidence, never success.
+            # Keep explanation and clarification as distinct student artefacts.
+            prior_probe = durable_phase.teach_back_probe
+            if not durable_phase.teach_back_explanation:
+                probe = (teach_back.recommended_probe if proposal is not None else "") or (
+                    f"你刚才说‘{reconstruction[:80]}’。其中哪一步依赖适用条件？"
+                    "请指出那一步，并解释条件的作用。"
+                )
+                durable_phase = durable_phase.model_copy(update={
+                    "teach_back_explanation": reconstruction,
+                    "teach_back_probe": probe,
+                })
+                teach_back = teach_back.model_copy(update={"recommended_probe": probe})
+            else:
+                durable_phase = durable_phase.model_copy(update={
+                    "teach_back_clarifications": [
+                        *durable_phase.teach_back_clarifications, reconstruction,
+                    ][-20:],
+                })
+            reconstruction_acceptable = (
+                bool(prior_probe)
+                and bool(teach_back.covered_relations)
                 and not teach_back.missing_relations
                 and not teach_back.contradictions
                 and not teach_back.unsupported_claims
             )
-            model_unavailable_fallback = (
-                proposal is None or model_degenerate_analysis
-            ) and len(reconstruction) >= 24
-            if reconstruction_acceptable or model_unavailable_fallback:
+            for observation in teach_back_evidence:
+                observation.evidence_json.update({
+                    "student_text": reconstruction,
+                    "explanation": durable_phase.teach_back_explanation,
+                    "probe": prior_probe or durable_phase.teach_back_probe,
+                    "is_clarification": bool(prior_probe),
+                    "pedagogical_complete": reconstruction_acceptable,
+                    "scientifically_verified": False,
+                })
+            if reconstruction_acceptable:
                 teach_back_satisfied = True
                 assert_phase_transition(
                     phase_at_start,
@@ -2062,6 +2205,7 @@ async def learning_native_node(
             durable_phase = durable_phase.model_copy(
                 update={
                     "phase": LearningPhase.RECONSTRUCTION_REQUIRED,
+                    "reconstruction": submission.teach_back.reconstruction.strip(),
                     "completed_stages": _append_learning_stages(
                         durable_phase.completed_stages,
                         LearningStage.DIAGNOSE,
@@ -2075,6 +2219,16 @@ async def learning_native_node(
                     ),
                 }
             )
+            teach_back_evidence.append(LearningNativeEvidence(
+                kind=LearningEvidenceKind.STUDENT_ATTEMPT,
+                observation="学生提交了计算后的推理重构；尚未完成 Teach-Back。",
+                evidence_json={
+                    "stage": "reconstruction",
+                    "student_text": submission.teach_back.reconstruction.strip(),
+                    "release_level": state["release"].release_level.value,
+                    "unaided": False,
+                },
+            ))
             teach_back = TeachBackAnalysis(
                 covered_relations=[],
                 missing_relations=[],
@@ -2220,11 +2374,39 @@ async def learning_native_node(
             assert transfer_attempt is not None
             attempt_text = transfer_attempt.response
             attempt_confidence = transfer_attempt.confidence
-        verified = _attempt_verified(
-            state,
-            attempt_text,
-            durable_phase.transfer_verification,
+        spec = durable_phase.transfer_verification
+        semantic_evaluation: dict[str, object] | None = None
+        task_matches = (
+            transfer_attempt is None
+            or transfer_attempt.transfer_task_id == durable_phase.active_transfer_task_id
         )
+        if spec is not None and spec.evaluation_mode == "barrier_trend":
+            evaluation = await evaluate_barrier_trend(
+                attempt_text, prompt=durable_phase.active_transfer_task_prompt,
+                gateway=model_gateway,
+            ) if task_matches and _correlated_scientific_pass(state, spec) else None
+            semantic_evaluation = (
+                evaluation.model_dump(mode="json") if evaluation is not None
+                else {"status": "inconclusive", "rationale": "解释评价不可用或参考计算未通过。"}
+            )
+            verified = evaluation is not None and evaluation.accepted(attempt_text)
+        else:
+            verified = task_matches and _attempt_verified(state, attempt_text, spec)
+        if semantic_evaluation is not None:
+            solo = solo.model_copy(update={
+                "unlock_reason": "本次解释评价（模型判断）：" + str(
+                    semantic_evaluation.get("rationale", "评价不可用。")
+                ),
+            })
+        reference_comparison: list[dict[str, object]] = []
+        if verified and spec is not None and spec.evaluation_mode == "barrier_trend":
+            for payload in (spec.baseline_request, spec.scientific_request):
+                reference = runtime.context.scientific_toolbox.verify(
+                    runtime.context.scientific_toolbox.validate_request(payload)
+                )
+                reference_comparison.append(reference.model_dump(mode="json"))
+            # Both independently checked reference points must remain valid.
+            verified = all(item["status"] == "pass" for item in reference_comparison)
         task_id = (
             str(durable_phase.active_transfer_task_id)
             if durable_phase.active_transfer_task_id
@@ -2235,7 +2417,7 @@ async def learning_native_node(
                 status=SoloModeStatus.EXITED,
                 active_transfer=None,
                 assistance_locked=False,
-                unlock_reason="学生提交了通过确定性验证的迁移尝试，Solo Mode 解除。",
+                unlock_reason="学生提交已通过当前任务评价，Solo Mode 解除。",
             )
             assert_phase_transition(
                 durable_phase.phase,
@@ -2256,11 +2438,18 @@ async def learning_native_node(
                 LearningNativeEvidence(
                     kind=LearningEvidenceKind.TRANSFER_VERIFIED,
                     observation=(
-                        "学生在 Solo Mode 下提交迁移尝试并通过确定性验证；"
+                        "学生在 Solo Mode 下提交迁移尝试并通过当前任务评价；"
                         "Solo Mode 解除，迁移任务完成。"
                     ),
                     evidence_json={
+                        "evaluation_mode": spec.evaluation_mode if spec else "unavailable",
+                        "semantic_evaluation": semantic_evaluation,
+                        "reference_comparison": reference_comparison,
+                        "reference_verified": bool(
+                            spec and _correlated_scientific_pass(state, spec)
+                        ),
                         "response_length": len(attempt_text),
+                        "response": attempt_text,
                         "verified": True,
                         "confidence": attempt_confidence,
                         "outcome": "TRANSFER_VERIFIED",
@@ -2286,11 +2475,18 @@ async def learning_native_node(
                 LearningNativeEvidence(
                     kind=LearningEvidenceKind.TRANSFER_ATTEMPTED,
                     observation=(
-                        "学生在 Solo Mode 下提交迁移尝试，但未通过确定性验证；"
+                        "学生在 Solo Mode 下提交迁移尝试，但尚未通过当前任务评价；"
                         "Solo Mode 保持激活。"
                     ),
                     evidence_json={
+                        "evaluation_mode": spec.evaluation_mode if spec else "unavailable",
+                        "semantic_evaluation": semantic_evaluation,
+                        "reference_comparison": reference_comparison,
+                        "reference_verified": bool(
+                            spec and _correlated_scientific_pass(state, spec)
+                        ),
                         "response_length": len(attempt_text),
+                        "response": attempt_text,
                         "verified": False,
                         "confidence": attempt_confidence,
                         "outcome": "TRANSFER_ATTEMPTED_NOT_VERIFIED",
@@ -2340,11 +2536,50 @@ async def learning_native_node(
                 model_gateway=model_gateway,
             )
         transfer = policy.build_transfer_task(transfer_proposal, source_concept_ids)
+        durable_phase = durable_phase.model_copy(update={
+            "active_transfer_task_id": transfer.task_id,
+            "active_transfer_task_prompt": transfer.prompt,
+            "transfer_verification": (
+                deterministic_contract[1] if deterministic_contract is not None else None
+            ),
+        })
+
+    elif (
+        submission is not None
+        and submission.transfer_attempt is not None
+        and phase_at_start is LearningPhase.TRANSFER_REQUIRED
+    ):
+        attempt = submission.transfer_attempt
+        verified = (
+            attempt.transfer_task_id == durable_phase.active_transfer_task_id
+            and _attempt_verified(state, attempt.response, durable_phase.transfer_verification)
+        )
+        durable_phase = durable_phase.model_copy(update={
+            "aided_transfer_verified": verified,
+            "completed_stages": (
+                _append_learning_stages(durable_phase.completed_stages, LearningStage.TRANSFER)
+                if verified else durable_phase.completed_stages
+            ),
+        })
+        transfer_evidence = [LearningNativeEvidence(
+            kind=(LearningEvidenceKind.TRANSFER_VERIFIED if verified
+                  else LearningEvidenceKind.TRANSFER_FAILED),
+            observation=(
+                "有支架迁移作答已核验。" if verified
+                else "迁移尚未通过核验，请重新尝试。"
+            ),
+            evidence_json={
+                "response": attempt.response, "confidence": attempt.confidence,
+                "active_transfer_task_id": str(attempt.transfer_task_id),
+                "verified": verified, "unaided": False,
+            },
+        )]
 
     elif (
         submission is not None
         and submission.request_transfer_task
         and phase_at_start is LearningPhase.TRANSFER_REQUIRED
+        and durable_phase.aided_transfer_verified
     ):
         source_concept_ids = [
             node.id for node in evidence_packet.graph_nodes[:6]
@@ -2353,7 +2588,9 @@ async def learning_native_node(
             node.name for node in evidence_packet.graph_nodes[:6]
         ]
         deterministic_contract = _tunnelling_transfer_contract(
-            durable_phase.pending_scientific_request,
+            (durable_phase.transfer_verification.scientific_request
+             if durable_phase.transfer_verification is not None
+             else durable_phase.pending_scientific_request),
             runtime,
         )
         transfer_verification: TransferVerificationSpec | None = None
@@ -2381,7 +2618,7 @@ async def learning_native_node(
                 LearningPhase.SOLO_ACTIVE,
                 cause="transfer_armed",
             )
-            durable_phase = DurableLearningPhase(
+            durable_phase = durable_phase.model_copy(update=dict(
                 phase=LearningPhase.SOLO_ACTIVE,
                 active_transfer_task_id=transfer.task_id,
                 active_transfer_task_prompt=transfer.prompt,
@@ -2396,6 +2633,15 @@ async def learning_native_node(
                 ),
                 pending_scientific_request=durable_phase.pending_scientific_request,
                 transfer_verification=transfer_verification,
+            ))
+
+    if durable_phase.phase is LearningPhase.TRANSFER_REQUIRED and transfer is None:
+        if durable_phase.active_transfer_task_id is not None:
+            transfer = TransferTask(
+                task_id=durable_phase.active_transfer_task_id,
+                transfer_type=TransferType.PARAMETER,
+                prompt=durable_phase.active_transfer_task_prompt,
+                verifiable=durable_phase.transfer_verification is not None,
             )
 
     # Persist the durable phase so the next turn in this conversation
@@ -2419,6 +2665,7 @@ async def learning_native_node(
         diagnosis=diagnosis,
         evidence_packet=evidence_packet,
         current_turn_evidence=all_evidence,
+        conversation_id=conversation.id,
     )
 
     evidence_kinds = [item.kind.value for item in all_evidence]
@@ -2493,7 +2740,8 @@ def _state_solo(state: TutorState) -> SoloMode | None:
 
 
 _NUMERIC_PATTERN = re.compile(
-    r"[-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?"
+    r"(?:(?<![A-Za-z0-9_])T|透射率|透射系数)\s*(?:=|≈|为|是|约为|约等于)\s*"
+    r"([-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?)\s*(%)?"
 )
 
 
@@ -2502,42 +2750,39 @@ def _attempt_verified(
     response: str,
     verification: TransferVerificationSpec | None,
 ) -> bool:
-    """Deterministic verification of a Solo transfer attempt.
-
-    PRD V3.3 root-cause #5 fix: this is NO LONGER a substring match against
-    passing scientific observations (an accidental phrase could close the
-    loop).  The decisive check is a *numeric* match against the persisted
-    ``transfer_verification`` oracle: we extract every number from the
-    student's free-text response and require at least one to equal
-    ``expected_value`` within ``absolute_tolerance``.  A correlated scientific
-    PASS for this turn is still required as a secondary signal so a bare
-    number without a supporting computation cannot pass.  The LLM never
-    asserts verification on its own.
-
-    When ``verification`` is None (legacy conversation with no persisted
-    oracle) we fail closed: the loop cannot close without a deterministic
-    contract to verify against.
-    """
-
+    """Accept an explicitly labelled metric only against this task's oracle."""
     if verification is None or verification.expected_value is None:
         return False
-
-    # Secondary signal: a scientific tool result for this turn must have PASSed.
-    scientific_results = state.get("scientific_results") or []
-    has_pass = any(
-        result.status is ScientificVerificationStatus.PASS
-        for result in scientific_results
-    )
-    if not has_pass:
+    if not _correlated_scientific_pass(state, verification):
         return False
 
     expected = float(verification.expected_value)
     tolerance = float(verification.absolute_tolerance)
+    bare = re.fullmatch(r"\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(%)?\s*", response)
+    if bare:
+        value = float(bare.group(1)) / (100 if bare.group(2) else 1)
+        return abs(value - expected) <= tolerance
+    values: list[float] = []
     for match in _NUMERIC_PATTERN.finditer(response):
         try:
-            value = float(match.group())
+            value = float(match.group(1)) / (100 if match.group(2) else 1)
         except ValueError:
             continue
-        if abs(value - expected) <= tolerance:
-            return True
-    return False
+        values.append(value)
+    return bool(values) and all(abs(value - expected) <= tolerance for value in values)
+
+
+def _correlated_scientific_pass(
+    state: TutorState, verification: TransferVerificationSpec,
+) -> bool:
+    try:
+        request = ScientificToolbox.validate_request(verification.scientific_request)
+    except (ValueError, TypeError):
+        return False
+    digest = _digest_request(request)
+    return any(
+        result.status is ScientificVerificationStatus.PASS
+        and result.inputs_sha256 == digest
+        and result.kind == request.kind
+        for result in state.get("scientific_results", [])
+    )

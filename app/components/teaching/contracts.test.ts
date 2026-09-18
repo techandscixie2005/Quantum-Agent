@@ -642,3 +642,23 @@ test("rejects a Learning-Native submission with an invalid commitment kind", () 
   );
 });
 
+
+test("preserves a failed calculation with valid empty repair stderr", () => {
+  const raw = validResult();
+  raw.code_artifact = {
+    artifact: { language: "python", purpose: "Barrier calculation", code: "print(0)",
+      expected_outputs: [], verification_plan: "" },
+    execution: { completed: true, exit_code: 0, timed_out: false, truncated: false,
+      stdout_bounded: "0", stderr_bounded: "", duration_seconds: .1 },
+    verification: { status: "fail", oracle_kind: "rectangular_barrier_tunnelling",
+      agent_metrics: { T: 0 }, oracle_metrics: { T: .33 },
+      observations: ["Generated value does not match the independent reference"], tolerance: 1e-6 },
+    repairs: [{ attempt_number: 1, failure_summary: "Wrong numerical value", stderr_excerpt: "" }],
+    progress: "result", figure_png_base64: null,
+  };
+  const parsed = parseTeachingTurnResult(raw);
+  assert.equal(parsed.code_artifact?.verification.status, "fail");
+  assert.equal(parsed.code_artifact?.repairs[0]?.stderr_excerpt, "");
+  raw.code_artifact = { artifact: { code: 7 } };
+  assert.throws(() => parseTeachingTurnResult(raw), /计算产物不符合后端合同/);
+});

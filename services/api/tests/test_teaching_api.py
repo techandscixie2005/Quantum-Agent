@@ -445,6 +445,8 @@ async def test_conversation_state_redacts_transfer_oracle(
     payload must show ``transfer_verification: null`` even when the
     persisted durable phase carries a live oracle.
     """
+    from quantum_agent.db_models import TeachingTurn, TeachingTurnStatus
+
     async with teaching_api_database() as session:
         seeded = await _seed(session)
         student_user_id = await session.scalar(
@@ -469,6 +471,10 @@ async def test_conversation_state_redacts_transfer_oracle(
                 "phase": "solo_active",
                 "loop_required": True,
                 "solo_assistance_locked": True,
+                "reconstruction": "previous worked answer",
+                "teach_back_explanation": "previous explanation",
+                "teach_back_probe": "previous probe",
+                "teach_back_clarifications": ["previous clarification"],
                 "transfer_verification": {
                     "scientific_request": {"metric": "transmission"},
                     "metric_name": "transmission_coefficient",
@@ -478,6 +484,19 @@ async def test_conversation_state_redacts_transfer_oracle(
             },
         )
         session.add(conversation)
+        await session.flush()
+        historical_id = uuid4()
+        session.add(TeachingTurn(
+            id=historical_id, conversation_id=conversation.id, sequence_number=1,
+            user_message="计算", student_attempt="我的预测",
+            status=TeachingTurnStatus.COMPLETED,
+            completed_at=datetime.now(UTC), response_json={"orientation": "previous worked answer"},
+            scientific_results_json={"__result_snapshot": {
+                "learning_native": {"phase": "awaiting_revision"},
+                "scientific_results": [{"status": "pass", "T": 0.123}],
+                "response": {"orientation": "previous worked answer"},
+            }},
+        ))
         await session.commit()
 
     app = create_app(
@@ -504,6 +523,39 @@ async def test_conversation_state_redacts_transfer_oracle(
             f"{base}/teaching/threads/{conversation.id}/state",
             headers=student_headers,
         )
+        review = await client.get(
+            f"{base}/teaching/threads/{conversation.id}/state?review_stage=verify",
+            headers=student_headers,
+        )
+        async with teaching_api_database() as session:
+            stored = await session.get(TeachingConversation, conversation.id)
+            assert stored is not None
+            stored.learning_phase_json = {
+                "phase": "complete", "solo_assistance_locked": False,
+                "completed_stages": ["verify"],
+            }
+            await session.commit()
+        history = await client.get(
+            f"{base}/teaching/threads/{conversation.id}/state?review_stage=verify",
+            headers=student_headers,
+        )
+        unavailable = await client.get(
+            f"{base}/teaching/threads/{conversation.id}/state?review_stage=teach_back",
+            headers=student_headers,
+        )
+        wrong_scope = await client.get(
+            f"/api/v1/courses/{seeded.course_id}/editions/{uuid4()}"
+            f"/teaching/threads/{conversation.id}/state?review_stage=verify",
+            headers=student_headers,
+        )
+    assert history.status_code == 200
+    assert history.json()["turn_id"] == str(historical_id)
+    assert history.json()["student_attempt"] == "我的预测"
+    assert unavailable.status_code == 409
+    assert wrong_scope.status_code == 404
+    assert state.json()["result"] is None
+    assert review.status_code == 423
+    assert "expected_value" not in review.text
 
     assert state.status_code == 200
     durable_phase = state.json()["durable_phase"]
@@ -515,3 +567,61 @@ async def test_conversation_state_redacts_transfer_oracle(
     assert durable_phase["transfer_verification"] is None
     assert "expected_value" not in json.dumps(state.json())
     assert "metric_name" not in json.dumps(state.json())
+    assert durable_phase["reconstruction"] == ""
+    assert durable_phase["teach_back_clarifications"] == []
+    assert state.json()["learning_evidence"] == []
+    assert "previous worked answer" not in json.dumps(state.json())
+
+
+@pytest.mark.parametrize("failure_kind,expected_code", [
+    ("budget", "RECORDING_BUDGET_UNAVAILABLE"),
+    ("unexpected", "WORKFLOW_UNAVAILABLE"),
+    ("timeout", "WORKFLOW_UNAVAILABLE"),
+])
+async def test_workflow_failure_emits_terminal_without_private_details(
+    teaching_api_database: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+    expected_code: str,
+) -> None:
+    from quantum_agent.api import teaching
+    from quantum_agent.llm.recording_budget import RecordingBudgetError
+
+    async with teaching_api_database() as session:
+        seeded = await _seed(session)
+
+    app = create_app(Settings(
+        _env_file=None, ENVIRONMENT="test", DATABASE_URL="sqlite+aiosqlite:///:memory:",
+        USTC_API=None, NEO4J_PASSWORD=None,
+    ))
+    app.state.teaching_state_machine = TeachingStateMachine(
+        evidence_retriever=EmptyRetriever(), model_gateway=None,
+    )
+
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        async with teaching_api_database() as session:
+            yield session
+
+    async def unavailable(*args: object, **kwargs: object) -> None:
+        if failure_kind == "unexpected":
+            raise RuntimeError("private-ledger-path-and-provider-details")
+        if failure_kind == "timeout":
+            raise TimeoutError("private-ledger-path-and-provider-details")
+        raise RecordingBudgetError("private-ledger-path-and-provider-details")
+
+    app.dependency_overrides[session_dependency] = override_session
+    monkeypatch.setattr(teaching, "_run_with_heartbeats", unavailable)
+    base = f"/api/v1/courses/{seeded.course_id}/editions/{seeded.edition_id}/teaching"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test",
+    ) as client:
+        response = await client.post(
+            f"{base}/turns/stream",
+            headers={"Authorization": f"Bearer {seeded.student_token}"},
+            json={"mode": "learn_concepts", "message": "解释量子隧穿。"},
+        )
+    assert response.status_code == 200
+    assert response.text.count("event: workflow.failed") == 1
+    assert expected_code in response.text
+    assert "workflow.completed" not in response.text
+    assert "private-ledger" not in response.text

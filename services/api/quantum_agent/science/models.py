@@ -227,15 +227,15 @@ class RectangularBarrierRequest(_RequestBase):
     Models the stationary scattering of a non-relativistic particle of mass
     ``particle_mass_kg`` and kinetic energy ``energy_eV`` incident on a barrier
     of height ``barrier_height_eV`` and width ``barrier_width_m``.  The
-    verifier computes the transmission coefficient ``T`` and reflection
-    coefficient ``R`` from the analytically correct rectangular-barrier
-    formula and checks ``abs(R + T - 1) <= conservation_tolerance``.
+    verifier cross-checks analytic transmission ``T`` with an independent
+    boundary-matching solver. Reflection ``R`` comes from its reflected amplitude;
+    flux conservation is checked independently of the analytic formula.
 
     The Golden Loop case ``E < V0`` uses the tunnelling formula:
 
         kappa = sqrt(2 m (V0 - E)) / hbar
         T = [1 + V0**2 * sinh**2(kappa * a) / (4 E (V0 - E))] ** -1
-        R = 1 - T
+        (R is independently calculated from boundary matching.)
 
     All parameters carry explicit SI units so the result is reproducible
     without any unit convention ambiguity.

@@ -5,9 +5,11 @@ import Editor from "@monaco-editor/react";
 export default function AgentCodeEditor({
   value,
   onChange,
+  readOnly = false,
 }: {
   value: string;
   onChange: (value: string) => void;
+  readOnly?: boolean;
 }) {
   return (
     <Editor
@@ -18,6 +20,7 @@ export default function AgentCodeEditor({
       theme="vs-light"
       options={{
         automaticLayout: true,
+        readOnly,
         fontSize: 13,
         lineHeight: 20,
         minimap: { enabled: false },

@@ -1,6 +1,7 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
+import { EpisodeEvidence } from "./EpisodeEvidence";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Atom,
@@ -31,7 +32,7 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
 
 import {
   assertHitlScope,
@@ -62,6 +63,7 @@ import {
   CognitiveMirrorPanel,
   LearningNativeSurface,
 } from "./LearningNative";
+import { StageReview } from "./StageReview";
 import { LearningJourney } from "./LearningJourney";
 import styles from "./agent.module.css";
 
@@ -115,6 +117,7 @@ type TurnRequest = Readonly<{
   attempt: string;
   attachmentIds: readonly string[];
   scientificRequest: Record<string, unknown> | null;
+  scientificExecution?: "generate_code" | "reference_only";
   learningNative: LearningNativeSubmission | null;
   clientRequestId: string | null;
 }>;
@@ -250,7 +253,7 @@ async function consumeTeachingStream(
         } catch {
           // already cancelled
         }
-        if (failure) throw new Error(`教学工作流中止（${failure}）。`);
+        if (failure) throw workflowFailure(failure);
         if (terminal === undefined || terminalCount !== 1) {
           throw new Error("教学工作流没有返回唯一的完成或暂停记录。");
         }
@@ -260,11 +263,24 @@ async function consumeTeachingStream(
   }
   // Flush any trailing partial block.
   if (buffer.trim()) flushBlock(buffer);
-  if (failure) throw new Error(`教学工作流中止（${failure}）。`);
+  if (failure) throw workflowFailure(failure);
   if (terminal === undefined || terminalCount !== 1) {
     throw new Error("教学工作流没有返回唯一的完成或暂停记录。");
   }
   return terminal;
+}
+
+function workflowFailure(code: string): Error {
+  const messages: Record<string, string> = {
+    RECORDING_BUDGET_UNAVAILABLE: "录制运行额度未就绪或已到期。输入已保留，请联系演示管理员检查运行账本。",
+    ATTACHMENT_NOT_FOUND: "本轮材料不存在或当前无权访问。请重新选择可用材料后提交。",
+    ATTACHMENT_NOT_READY: "本轮材料尚未处理完成，请确认转录并等待材料就绪后重试。",
+    RETRIEVAL_UNAVAILABLE: "课程检索暂时不可用。输入已保留，请稍后重试。",
+    WORKFLOW_UNAVAILABLE: "本轮执行失败，未产生完成结论。输入已保留，请恢复学习记录后重试。",
+    CONVERSATION_CONFLICT: "学习记录已被另一次操作更新。请刷新恢复当前进度，再提交保留的输入。",
+    INVALID_UPSTREAM_CONTRACT: "服务返回的数据未通过校验，本轮没有显示为完成。请恢复学习记录后重试。",
+  };
+  return new Error(messages[code] ?? `教学工作流中止（${code}）。`);
 }
 
 async function responseMessage(response: Response, fallback: string): Promise<string> {
@@ -384,13 +400,13 @@ function EvidenceSpine({
         item.state === "ready" &&
         item.remote?.extraction?.status !== "needs_confirmation",
     );
-  const reviewed = result ?? interrupt?.artifacts ?? null;
+  const reviewed = progressStep ? null : result ?? interrupt?.artifacts ?? null;
   const stages = [
     { label: "输入", graphStages: [] as readonly string[], done: uploads.length > 0 || Boolean(reviewed), detail: uploads.length ? `${uploads.length} 个附件` : "文本" },
     { label: "感知", graphStages: ["interpret"] as readonly string[], done: perceptionReady, detail: uploads.length ? "结构化提取" : "无需调用" },
     { label: "证据", graphStages: ["retrieve"] as readonly string[], done: Boolean(reviewed), detail: reviewed ? reviewed.evidence_packet.coverage : "课程检索" },
     { label: "诊断", graphStages: ["commitment_gate", "diagnose"] as readonly string[], done: Boolean(reviewed), detail: reviewed ? reviewed.diagnosis.status : "首错定位" },
-    { label: "验证", graphStages: ["scientific_tools", "coding", "sandbox", "verification"] as readonly string[], done: Boolean(reviewed), detail: reviewed?.scientific_results.length ? "工具证据" : "按需运行" },
+    { label: "验证", graphStages: ["scientific_tools", "coding", "sandbox", "verification"] as readonly string[], done: Boolean(reviewed?.scientific_results.length), detail: reviewed?.scientific_results.length ? "工具证据" : "按需运行" },
     { label: "提示", graphStages: ["policy", "generate", "learning_native", "assemble"] as readonly string[], done: Boolean(result), detail: interrupt ? "等待人工确认" : result?.release.release_level ?? "政策门控" },
   ];
   // While a turn is running, each step's state comes from the latest real
@@ -403,7 +419,7 @@ function EvidenceSpine({
     if (currentIndex < 0) return "idle";
     const stageIndexes = stage.graphStages.map((step) => PROGRESS_ORDER.indexOf(step));
     if (stageIndexes.some((stepIndex) => stepIndex === currentIndex)) return "active";
-    if (stageIndexes.some((stepIndex) => stepIndex >= 0 && stepIndex < currentIndex)) return "done";
+
     return index === 0 && progressStep ? "done" : "idle";
   };
   return (
@@ -479,7 +495,7 @@ function HitlReviewCard({
           <span key={reason}>{HITL_REASON_LABELS[reason] ?? reason}</span>
         ))}
       </div>
-      <p className={styles.hitlPrompt}>{interrupt.interrupt.prompt}</p>
+      <p className={styles.hitlPrompt}>{interrupt.interrupt.reasons.includes("insufficient_coverage") ? "当前课程缺少经审核、适用于本任务的依据。请联系教师补齐来源；本轮不会释放答案或计算结论。" : interrupt.interrupt.prompt}</p>
       <p className={styles.hitlExplanation}>
         {canConfirm
           ? "系统不会自动修正低置信度符号。请核对下面的推导文本；确认后会在同一线程重新运行诊断、验证器与政策门。"
@@ -525,13 +541,15 @@ function SourcePreview({
   evidence,
   scope,
   close,
+  offline = false,
 }: {
+  offline?: boolean;
   evidence: TeachingEvidence;
   scope: TeachingScope;
   close: () => void;
 }) {
-  const href = sourceHref(scope, evidence);
-  const isPdf = evidence.source_file_name.toLowerCase().endsWith(".pdf");
+  const href = offline ? "/offline/handout.pdf" : sourceHref(scope, evidence);
+  const isPdf = offline || evidence.source_file_name.toLowerCase().endsWith(".pdf");
   return (
     <Dialog.Portal>
       <Dialog.Overlay className={styles.dialogOverlay} />
@@ -544,12 +562,14 @@ function SourcePreview({
           <div>
             <Dialog.Title>{evidence.document_title}</Dialog.Title>
             <Dialog.Description id="source-preview-description">
-              {sourceLocator(evidence)} · v{evidence.document_version} · 完整性已由后端校验
+              {sourceLocator(evidence)} · v{evidence.document_version} · {offline ? "离线演示讲义，预设来源" : "检索片段；原件打开时重新校验权限与完整性"}
             </Dialog.Description>
+            <a href={`${href}#page=${evidence.locator.physical_page ?? 1}`} target="_blank" rel="noopener noreferrer">在新标签页打开原件</a>
           </div>
           <Dialog.Close onClick={close} aria-label="关闭原文预览"><X size={18} /></Dialog.Close>
         </header>
-        {isPdf ? (
+        <blockquote className={styles.sourceExcerpt}>{evidence.evidence_snippet}</blockquote>
+        {offline ? <div style={{overflow:"auto",maxHeight:"70vh"}}><p>PDF 第1页 · 从本地讲义实际预渲染</p><Image src="/offline/handout-page.png" alt="离线讲义 PDF 原文预览" width={1131} height={1600} unoptimized style={{width:"100%",height:"auto"}} /></div> : isPdf ? (
           <iframe src={`${href}#page=${evidence.locator.physical_page ?? 1}`} title={`${evidence.document_title} 原文`} />
         ) : (
           <div className={styles.downloadSource}>
@@ -635,11 +655,15 @@ function SessionRequiredView({
   );
 }
 
-export function AgentExperience() {
+export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: () => string; reset?: () => void } } = {}) {
+  const agentFetch = demo?.fetch ?? fetch;
+  const offline = Boolean(demo);
+  const storage = useCallback(() => offline ? window.sessionStorage : window.localStorage, [offline]);
+  const storageKey = useCallback((name: string) => offline ? name.replace("qa_", "qa_offline_") : name, [offline]);
   const contextQuery = useQuery({
-    queryKey: ["agent-course-context"],
+    queryKey: ["agent-course-context", demo ? "offline" : "live"],
     queryFn: async () => {
-      const response = await fetch("/api/agent/context", { cache: "no-store" });
+      const response = await agentFetch("/api/agent/context", { cache: "no-store" });
       if (!response.ok) throw new Error(await responseMessage(response, "无法读取课程范围。"));
       return parseStudentCourseContext(await response.json());
     },
@@ -653,6 +677,7 @@ export function AgentExperience() {
   const [attempt, setAttempt] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [result, setResult] = useState<TeachingTurnResult | null>(null);
+  const [restoreError, setRestoreError] = useState("");
   const [interrupt, setInterrupt] = useState<HitlInterruptResponse | null>(null);
   const [confirmedTranscription, setConfirmedTranscription] = useState("");
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
@@ -678,7 +703,7 @@ export function AgentExperience() {
   const [rabiFrequency, setRabiFrequency] = useState(1);
   const [detuning, setDetuning] = useState(0);
   const [duration, setDuration] = useState(8);
-  const [goldenTunnelling, setGoldenTunnelling] = useState(false);
+  const [goldenTunnelling, setGoldenTunnelling] = useState(true);
   const [barrierEnergy, setBarrierEnergy] = useState(5);
   const [barrierHeight, setBarrierHeight] = useState(10);
   const [barrierWidth, setBarrierWidth] = useState(1e-10);
@@ -695,7 +720,7 @@ export function AgentExperience() {
   useEffect(() => {
     if (!courseKey && courses[0]) {
       let stored: string | null = null;
-      try { stored = window.localStorage.getItem("qa_course_key"); } catch { /* unavailable */ }
+      try { stored = storage().getItem(storageKey("qa_course_key")); } catch { /* unavailable */ }
       const restored = courses.find(
         (course) => `${course.course_id}:${course.curriculum_edition_id}` === stored,
       );
@@ -703,11 +728,11 @@ export function AgentExperience() {
       setCourseKey(`${selected.course_id}:${selected.curriculum_edition_id}`);
       if (stored && !restored) setConversationId(null);
     }
-  }, [courseKey, courses]);
+  }, [courseKey, courses, storage, storageKey]);
   useEffect(() => {
     if (!courseKey) return;
-    try { window.localStorage.setItem("qa_course_key", courseKey); } catch { /* unavailable */ }
-  }, [courseKey]);
+    try { storage().setItem(storageKey("qa_course_key"), courseKey); } catch { /* unavailable */ }
+  }, [courseKey, storage, storageKey]);
   // PRD V3.0 P0-2: persist the conversation ID across refresh / new tab so
   // Solo Mode and the durable Learning Phase survive a page reload.  The
   // backend is the source of truth; this only restores the thread identity.
@@ -720,7 +745,7 @@ export function AgentExperience() {
   const hasConversationRef = useRef(false);
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem("qa_conversation_id");
+      const stored = storage().getItem(storageKey("qa_conversation_id"));
       if (stored && !conversationId) {
         setConversationId(stored);
       }
@@ -733,20 +758,20 @@ export function AgentExperience() {
     if (conversationId) {
       hasConversationRef.current = true;
       try {
-        window.localStorage.setItem("qa_conversation_id", conversationId);
+        storage().setItem(storageKey("qa_conversation_id"), conversationId);
       } catch {
         // localStorage may be unavailable (private mode); fail silently.
       }
     } else if (hasConversationRef.current) {
       // Explicit "new thread": clear the stored id only after we had one.
       try {
-        window.localStorage.removeItem("qa_conversation_id");
+        storage().removeItem(storageKey("qa_conversation_id"));
       } catch {
         // ignore
       }
       hasConversationRef.current = false;
     }
-  }, [conversationId]);
+  }, [conversationId, storage, storageKey]);
   const activeCourse =
     courses.find(
       (course) => `${course.course_id}:${course.curriculum_edition_id}` === courseKey,
@@ -770,7 +795,7 @@ export function AgentExperience() {
     // No AbortController — same rationale as the state restore below:
     // `scope` changes identity every render and the ref makes re-entry
     // impossible, so a cleanup abort would only kill a live fetch.
-    fetch(`/api/teaching/threads/${conversationId}/interrupt?${query.toString()}`, {
+    agentFetch(`/api/teaching/threads/${conversationId}/interrupt?${query.toString()}`, {
       headers: { Accept: "application/json" },
     })
       .then(async (response) => {
@@ -784,7 +809,7 @@ export function AgentExperience() {
         setConfirmedTranscription(interruptTranscription(pause));
       })
       .catch(() => undefined);
-  }, [scope, conversationId, interrupt]);
+  }, [scope, conversationId, interrupt, agentFetch]);
 
   // §13 refresh restoration: after a reload the persisted conversation_id is
   // restored above; this re-reads the durable learning state from the
@@ -795,7 +820,7 @@ export function AgentExperience() {
   // result already rendered in this session.
   const stateRestoreRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!scope || !conversationId) return;
+    if (!scope || !conversationId || result) return;
     if (stateRestoreRef.current === conversationId) return;
     stateRestoreRef.current = conversationId;
     const courseId = scope.courseId;
@@ -808,15 +833,18 @@ export function AgentExperience() {
     // impossible, and `scope` is a new object identity every render — an
     // effect cleanup here would abort the in-flight fetch before its
     // response is ever applied (the restore would silently never happen).
-    fetch(`/api/teaching/threads/${conversationId}/state?${query.toString()}`, {
-      headers: { Accept: "application/json" },
+    const controller = new AbortController();
+    setRestoreError("");
+    agentFetch(`/api/teaching/threads/${conversationId}/state?${query.toString()}`, {
+      headers: { Accept: "application/json" }, signal: controller.signal,
     })
       .then(async (response) => {
-        if (!response.ok) return;
+        if (!response.ok) throw new Error("学习过程恢复失败，请重试；不会用示例记录替代。");
         const parsed = (await response.json()) as {
           mode?: string;
           result?: unknown;
         };
+        if (controller.signal.aborted) return;
         if (parsed.mode === "learn_concepts" || parsed.mode === "review_derivations" || parsed.mode === "run_experiments" || parsed.mode === "work_on_projects") {
           setMode(parsed.mode);
         }
@@ -827,11 +855,27 @@ export function AgentExperience() {
             // Functional guard: never overwrite a fresher turn result that
             // rendered while the fetch was in flight.
             setResult((current) => current ?? restored);
+            const restoredBarrier = restored.scientific_results.find(
+              (item) => item.kind === "rectangular_barrier_tunnelling",
+            );
+            if (restoredBarrier) {
+              const { energy_eV, barrier_height_eV, barrier_width_m } = restoredBarrier.metrics;
+              if (typeof energy_eV === "number" && typeof barrier_height_eV === "number" && typeof barrier_width_m === "number") {
+                setGoldenTunnelling(true);
+                setBarrierEnergy(energy_eV); setBarrierHeight(barrier_height_eV); setBarrierWidth(barrier_width_m);
+              }
+            }
           }
         }
       })
-      .catch(() => undefined);
-  }, [scope, conversationId]);
+      .catch(() => { if (!controller.signal.aborted) setRestoreError("学习过程恢复失败，请重试；不会用示例记录替代。"); });
+    return () => {
+      controller.abort();
+      stateRestoreRef.current = null;
+    };
+  // Course identifiers, not the freshly allocated scope object, govern recovery.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope?.courseId, scope?.curriculumEditionId, conversationId, agentFetch]);
 
   useEffect(() => () => {
     for (const previewUrl of previewUrlsRef.current) URL.revokeObjectURL(previewUrl);
@@ -846,6 +890,7 @@ export function AgentExperience() {
         student_attempt: input.attempt || null,
         attachment_ids: input.attachmentIds,
         scientific_request: input.scientificRequest,
+        ...(input.scientificExecution ? { scientific_execution: input.scientificExecution } : {}),
         learning_native: input.learningNative,
         client_request_id: input.clientRequestId,
       });
@@ -859,7 +904,7 @@ export function AgentExperience() {
         detail: "教学流程已启动",
         elapsed_seconds: 0,
       });
-      const response = await fetch(`/api/teaching/turns/stream?${query.toString()}`, {
+      const response = await agentFetch(`/api/teaching/turns/stream?${query.toString()}`, {
         method: "POST",
         headers: { Accept: "text/event-stream", "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -917,7 +962,7 @@ export function AgentExperience() {
         course_id: input.scope.courseId,
         curriculum_edition_id: input.scope.curriculumEditionId,
       });
-      const response = await fetch(
+      const response = await agentFetch(
         `/api/teaching/threads/${input.conversationId}/resume?${query.toString()}`,
         {
           method: "POST",
@@ -966,7 +1011,7 @@ export function AgentExperience() {
     const body = new FormData();
     body.set("file", record.file, record.file.name);
     try {
-      const response = await fetch(`/api/agent/attachments?${query.toString()}`, {
+      const response = await agentFetch(`/api/agent/attachments?${query.toString()}`, {
         method: "POST",
         body,
       });
@@ -1032,7 +1077,7 @@ export function AgentExperience() {
     addFiles([...event.dataTransfer.files]);
   }
 
-  function submit() {
+  function submit(scientificExecution: "generate_code" | "reference_only" = "generate_code") {
     if (!scope || interrupt || turnMutation.isPending || resumeMutation.isPending) return;
     if (bridgeDetailsRef.current) bridgeDetailsRef.current.open = false;
     const ready = uploads.filter((item) => item.remote && item.state === "ready");
@@ -1081,19 +1126,20 @@ export function AgentExperience() {
       attempt: combinedAttempt,
       attachmentIds: ready.flatMap((item) => (item.remote ? [item.remote.id] : [])),
       scientificRequest,
+      scientificExecution,
       learningNative: null,
       clientRequestId: newClientRequestId(),
     });
   }
 
-  function submitLearningNative(submission: LearningNativeSubmission) {
+  function submitLearningNative(submission: LearningNativeSubmission, studentResponse?: string) {
     if (!scope || interrupt || turnMutation.isPending || resumeMutation.isPending) return;
     turnMutation.mutate({
       scope,
       mode,
       conversationId,
-      message: message.trim() || "继续 Learning-Native 学习循环。",
-      attempt: "",
+      message: studentResponse?.trim() || message.trim() || "继续 Learning-Native 学习循环。",
+      attempt: studentResponse?.trim() || "",
       attachmentIds: [],
       scientificRequest: null,
       learningNative: submission,
@@ -1103,6 +1149,7 @@ export function AgentExperience() {
 
   function startGoldenTunnelingLoop() {
     if (!scope || interrupt || turnMutation.isPending) return;
+    if (demo) { setMessage(demo.next()); return; }
     setMessage("我想学习量子隧穿：为什么 E<V0 时粒子仍可能透射？请用 Learning-Native 循环引导我。");
     setMode("run_experiments");
     setGoldenTunnelling(true);
@@ -1133,6 +1180,25 @@ export function AgentExperience() {
 
   const equations = useMemo(() => extractedEquations(uploads), [uploads]);
   const uploading = uploads.some((item) => item.state === "uploading");
+  const [reviewStage, setReviewStage] = useState<string | null>(null);
+  const [historyPresence, setHistoryPresence] = useState<{ episode: string; bridge: boolean; sources: boolean } | null>(null);
+  useEffect(() => {
+    if (!scope || !conversationId || !result || result.learning_native?.solo?.status === "active") return;
+    const controller = new AbortController();
+    const query = new URLSearchParams({ course_id: scope.courseId, curriculum_edition_id: scope.curriculumEditionId });
+    agentFetch(`/api/teaching/threads/${conversationId}/state?${query}`, { signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) return;
+        const body = await response.json();
+        if (!controller.signal.aborted && body.conversation_id === conversationId) {
+          setHistoryPresence({ episode: conversationId, bridge: body.historical_content?.bridge === true, sources: body.historical_content?.sources === true });
+        }
+      }).catch(() => {});
+    return () => controller.abort();
+  // Only scope identifiers and persisted turn identity trigger this read.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, result?.turn_id, scope?.courseId, scope?.curriculumEditionId, agentFetch]);
+
   const reviewed = result ?? interrupt?.artifacts ?? null;
   const evidencePacket = reviewed?.evidence_packet ?? null;
   const diagnosis = reviewed?.diagnosis ?? null;
@@ -1140,7 +1206,16 @@ export function AgentExperience() {
   const scientificResults = reviewed?.scientific_results ?? [];
   const validation = reviewed?.validation ?? null;
   const interpretation = reviewed?.interpretation ?? null;
-  const reviewedVisualSpec = scientificResults.find((item) => item.visualization)?.visualization;
+  const barrierResult = scientificResults.find((item) => item.kind === "rectangular_barrier_tunnelling");
+  const displayedBarrierMetrics = barrierResult?.metrics ?? result?.code_artifact?.verification.oracle_metrics;
+  const barrierInputsChanged = Boolean(mode === "run_experiments" && goldenTunnelling && typeof displayedBarrierMetrics?.energy_eV === "number" && (
+    displayedBarrierMetrics.energy_eV !== barrierEnergy ||
+    displayedBarrierMetrics.barrier_height_eV !== barrierHeight ||
+    Math.abs(Number(displayedBarrierMetrics.barrier_width_m) - barrierWidth) > 1e-22
+  ));
+  const calculationPending = turnMutation.isPending || resumeMutation.isPending;
+  const calculationStale = barrierInputsChanged || calculationPending;
+  const reviewedVisualSpec = calculationStale ? null : scientificResults.find((item) => item.visualization)?.visualization;
   const activeMode = MODES.find((item) => item.id === mode) ?? MODES[0]!;
   // PRD V3.3: the answer is withheld whenever the authoritative durable
   // LearningPhase requires a student action the turn has not satisfied.  This
@@ -1149,16 +1224,24 @@ export function AgentExperience() {
   // complete only when the backend says so via ``learning_loop_completed`` —
   // never inferred from the SSE ``workflow.completed`` lifecycle event.
   const nativeState = result?.learning_native ?? null;
+  const independentWorkspace = nativeState?.phase === "solo_active" || nativeState?.phase === "transfer_required";
+  const focusedReconstruction = nativeState?.phase === "reconstruction_required";
   const requiredAction = nativeState?.required_action ?? "none";
-  const answerWithheldByGate =
-    requiredAction !== "none" && nativeState?.phase !== "complete";
+  const answerWithheldByGate = requiredAction === "commitment";
   const loopDone = result?.learning_loop_completed === true;
 
   // Phase-driven Stage title + tag.  The Stage itself is the visual center;
   // this quiet label is the only orienting text.  Everything else is the
   // scientific object (equation / plot / code / verification / evidence).
   const stageTitle = useMemo(() => {
-    if (interrupt) return "等待确认转录";
+    if (reviewStage && !independentWorkspace && conversationId) {
+      const labels: Record<string, string> = { predict: "材料与判断", sources: "课程依据",
+        bridge: "推导补桥", verify: "科学计算", explain: "解释与重建",
+        teach_back: "Teach-Back", transfer: "Transfer", solo: "Solo", evidence: "学习证据" };
+      return `${labels[reviewStage] ?? reviewStage} · 回看`;
+    }
+    if (interrupt) return interrupt.interrupt.reasons.includes("insufficient_coverage")
+      ? "课程依据不足 · 等待教师复核" : "等待复核";
     if (loopDone) return "学习闭环 · Cognitive Mirror";
     if (nativeState?.solo?.status === "active") return "Solo Mode · 独立迁移";
     if (nativeState?.transfer) return "迁移任务";
@@ -1167,10 +1250,13 @@ export function AgentExperience() {
     if (nativeState?.phase === "attempt_received" || nativeState?.phase === "intervention") {
       return "已收到你的尝试 · 最小干预";
     }
+    if (nativeState?.phase === "awaiting_revision") return "解释与重建 · 补上你的推理";
+    if (mode === "run_experiments" && goldenTunnelling) return "有限矩形势垒 · 把推导变成计算";
     if (result) return result.interpretation.relevant_concepts.join(" · ") || "课程辅导";
-    return activeMode.short;
-  }, [interrupt, loopDone, nativeState, result, activeMode.short]);
+    return "先说说你的判断";
+  }, [interrupt, loopDone, nativeState, result, reviewStage, independentWorkspace, conversationId, mode, goldenTunnelling]);
   const stagePhaseLabel = useMemo(() => {
+    if (reviewStage && !independentWorkspace && conversationId) return "REVIEW";
     if (interrupt) return "PAUSED";
     if (loopDone) return "COMPLETE";
     if (nativeState) {
@@ -1190,7 +1276,7 @@ export function AgentExperience() {
       return map[nativeState.phase] ?? nativeState.phase.toUpperCase();
     }
     return activeMode.label.toUpperCase();
-  }, [interrupt, loopDone, nativeState, activeMode.label]);
+  }, [interrupt, loopDone, nativeState, activeMode.label, reviewStage, independentWorkspace, conversationId]);
 
   if (contextQuery.isPending) {
     return <main className={styles.boot}><Atom /><p>正在建立课程边界与证据索引…</p></main>;
@@ -1204,12 +1290,13 @@ export function AgentExperience() {
 
   return (
     <div className={styles.agentShell} data-testid="agent-experience">
+      {demo ? <button className="offline-next" disabled={nativeState?.solo?.status === "active" || loopDone} onClick={() => setMessage(demo.next())}>填入下一步样例</button> : null}
       <a className={styles.skipLink} href="#agent-main">跳到教学工作区</a>
       <header className={styles.topbar}>
         <button className={styles.mobileButton} onClick={() => setLeftOpen(true)} aria-label="打开课程导航"><Menu /></button>
         <div className={styles.brand}><span><Atom /></span></div>
         <div className={styles.courseTitle}>
-          <strong>{activeCourse.edition_title}</strong>
+          <strong>Quantum Agent</strong><span>{activeCourse.edition_title}</span>
         </div>
         <div className={styles.topActions}>
           <button className={styles.cmdHint} onClick={() => setCmdOpen(true)} aria-label="打开命令面板">
@@ -1271,7 +1358,8 @@ export function AgentExperience() {
         <div className={styles.railSpacer} />
         <button
           className={styles.railIconButton}
-          onClick={() => { setConversationId(null); setResult(null); setInterrupt(null); setConfirmedTranscription(""); }}
+          onClick={() => { if (demo?.reset) { demo.reset(); location.reload(); return; } setReviewStage(null); setConversationId(null); setResult(null); setInterrupt(null); setConfirmedTranscription(""); setAttempt(""); setMessage(""); setRestoreError(""); }}
+          disabled={turnMutation.isPending || resumeMutation.isPending || independentWorkspace}
           aria-label="新建学习记录"
           title="新建学习记录"
         >
@@ -1286,7 +1374,37 @@ export function AgentExperience() {
             <span className={styles.phaseTag}><i />{stagePhaseLabel}</span>
           </section>
 
-          <LearningJourney state={nativeState} />
+          <LearningJourney state={nativeState} hasSources={Boolean(evidencePacket?.evidence.length) || (historyPresence?.episode === conversationId && historyPresence?.sources === true)} hasBridge={Boolean(result?.response.derivation_bridge) || (historyPresence?.episode === conversationId && historyPresence?.bridge === true)}
+            selected={independentWorkspace ? null : reviewStage}
+            onReview={!demo && conversationId && !calculationPending ? setReviewStage : undefined} />
+
+          {reviewStage === "evidence" && !independentWorkspace && conversationId ?
+            <section className={styles.historyStage}>
+              <p>{loopDone ? "本次过程已完成。" : "本次过程尚未完成，下面仅展示已保存的行动证据。"}</p>
+              <EpisodeEvidence key={conversationId} scope={scope} conversationId={conversationId} />
+              <button onClick={() => setReviewStage(null)}>返回当前任务</button>
+            </section> : reviewStage && !independentWorkspace && conversationId ? <StageReview
+            key={`${conversationId}:${reviewStage}`} scope={scope} conversationId={conversationId}
+            stage={reviewStage} onSource={setSelectedSource} onReturn={() => setReviewStage(null)}
+          /> : null}
+          <div hidden={Boolean(reviewStage && !independentWorkspace && conversationId)}>
+
+          {restoreError ? <p role="alert">{restoreError} <button onClick={() => window.location.reload()}>重试恢复</button></p> : null}
+          {!result && !interrupt && !conversationId ? (
+            <section className={styles.courseTask} aria-label="量子隧穿课程任务">
+              <p className={styles.kicker}>量子隧穿 / 有限矩形势垒</p>
+              <h2>势垒变宽，透射率怎样变化？</h2>
+              <p>电子从左侧入射，E = 5 eV，V₀ = 10 eV，完整宽度 a = 0.10 nm。两侧零势能、同质量、无吸收。</p>
+              <p>先写下你的预测和依据，也可以明确说“我还不知道”。提交后系统会根据你的实际尝试提供帮助。</p>
+              <button type="button" disabled={calculationPending} onClick={() => {
+                setMode("run_experiments"); setGoldenTunnelling(true);
+                setBarrierEnergy(5); setBarrierHeight(10); setBarrierWidth(1e-10);
+                setAttempt("");
+                setMessage("有限矩形势垒：电子左侧入射，E=5 eV，V0=10 eV，完整宽度 a=0.10 nm，两侧零势能、同质量、无吸收。势垒加宽时透射率怎样变化？请先让我做出预测，再按我的回答提供帮助。");
+              }}>加载课程任务</button>
+            </section>
+          ) : null}
+          {barrierInputsChanged ? <p role="status" className={styles.calculationNotice}>参数已改变：上一任务的曲线与核验已失效。提交当前参数重新计算。</p> : null}
 
           {nativeState ? (
             <span
@@ -1302,7 +1420,7 @@ export function AgentExperience() {
             </span>
           ) : null}
 
-          <EvidenceSpine
+          {!loopDone ? <EvidenceSpine
             uploads={uploads}
             result={result}
             interrupt={interrupt}
@@ -1311,7 +1429,7 @@ export function AgentExperience() {
                 ? stageProgress?.step ?? null
                 : null
             }
-          />
+          /> : null}
 
           {interrupt ? (
             <HitlReviewCard
@@ -1324,14 +1442,14 @@ export function AgentExperience() {
             />
           ) : null}
 
-          {mode === "review_derivations" && equations.length ? (
+          {!loopDone && !independentWorkspace && mode === "review_derivations" && equations.length ? (
             <section className={styles.derivationSheet}>
               <header><div><p className={styles.kicker}>VISION TRANSCRIPTION</p><h2>学生推导转录</h2></div><span>{equations.length} steps</span></header>
-              <ol>{equations.map((equation, index) => <li key={`${equation}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><AgentEquation latex={equation} /><i>{diagnosis?.first_error?.step_index === index ? <CircleAlert /> : <Check />}</i></li>)}</ol>
+              <ol>{equations.map((equation, index) => <li key={`${equation}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><AgentEquation latex={equation} /><i>{diagnosis?.first_error?.step_index === index ? <CircleAlert /> : "转录"}</i></li>)}</ol>
             </section>
           ) : null}
 
-          {mode === "run_experiments" ? (
+          {!loopDone && !answerWithheldByGate && !independentWorkspace && !focusedReconstruction && !interrupt && mode === "run_experiments" ? (
             <section className={styles.experimentGrid}>
               <div className={styles.parameterPanel}>
                 <p className={styles.kicker}>NUMERICAL INPUT</p>
@@ -1351,12 +1469,18 @@ export function AgentExperience() {
                     <h2>矩势垒散射</h2>
                     <label>粒子能量 E (eV) <strong>{barrierEnergy.toFixed(2)}</strong><input type="range" min="0.5" max="9" step="0.1" value={barrierEnergy} onChange={(event) => setBarrierEnergy(Number(event.target.value))} /></label>
                     <label>势垒高度 V₀ (eV) <strong>{barrierHeight.toFixed(2)}</strong><input type="range" min="1" max="20" step="0.1" value={barrierHeight} onChange={(event) => setBarrierHeight(Number(event.target.value))} /></label>
-                    <label>势垒宽度 a (nm) <strong>{(barrierWidth * 1e9).toFixed(3)}</strong><input type="range" min="0.05" max="5" step="0.05" value={barrierWidth * 1e9} onChange={(event) => setBarrierWidth(Number(event.target.value) * 1e-9)} /></label>
+                    <label>势垒宽度 a (nm) <strong>{(barrierWidth * 1e9).toFixed(3)}</strong><input type="range" min="0.05" max="5" step="0.001" value={barrierWidth * 1e9} onChange={(event) => setBarrierWidth(Number(event.target.value) * 1e-9)} /></label>
                     <small data-testid="tunnelling-regime-hint">
-                      {barrierEnergy < barrierHeight
-                        ? "E < V₀：量子隧穿区（解析 T 公式）"
-                        : "E > V₀：自由传播区（振荡 T 公式）"}
+                      {Math.abs(barrierEnergy - barrierHeight) <= 1e-9 * barrierHeight
+                        ? "E ≈ V₀：当前求解合同不支持该退化区，请调整能量。"
+                        : barrierEnergy < barrierHeight
+                          ? "E < V₀：量子隧穿区（解析式与独立边界匹配）"
+                          : "E > V₀：传播区（振荡式与独立边界匹配）"}
                     </small>
+                    <button type="button" className={styles.phaseButton} disabled={calculationPending || !nativeState?.completed_stages.includes("predict")} onClick={() => submit("reference_only")}>
+                      确定性参考重算
+                    </button>
+                    <small>复用固定求解器并做独立边界匹配，不调用 Coding Agent。需要重新生成代码时使用下方“发送 / 运行”。</small>
                   </>
                 ) : (
                   <>
@@ -1369,25 +1493,32 @@ export function AgentExperience() {
               </div>
               <div className={styles.plotPanel}>
                 <p className={styles.kicker}>VERIFIED PLOT</p>
-                {reviewedVisualSpec ? <AgentPlot spec={reviewedVisualSpec} /> : <div className={styles.plotEmpty}><FlaskConical /><strong>先预测，再运行数值验证</strong><small>图像解释将与真实计算结果并列显示。</small></div>}
+                {!calculationStale && barrierResult && <p className={styles.plotMetrics} data-testid="plot-current-metrics">
+                  <strong>T = {Number(barrierResult.metrics.T).toPrecision(6)}</strong>
+                  <span>R = {Number(barrierResult.metrics.R).toPrecision(6)}</span>
+                  <span data-status={barrierResult.status}>{barrierResult.status.toUpperCase()}</span>
+                </p>}
+                {scientificResults.length > 0 && !result?.code_artifact && <small>固定确定性求解器结果 · 本轮未生成代码；参考一致性由独立边界匹配核验。</small>}
+                {reviewedVisualSpec ? <AgentPlot spec={reviewedVisualSpec} current={barrierResult && typeof barrierResult.metrics.T === "number" && typeof barrierResult.metrics.barrier_width_m === "number" ? { x: barrierResult.metrics.barrier_width_m, y: barrierResult.metrics.T } : undefined} /> : <div className={styles.plotEmpty}><FlaskConical /><strong>先预测，再运行数值验证</strong><small>图像解释将与真实计算结果并列显示。</small></div>}
               </div>
             </section>
           ) : null}
 
-          {mode === "work_on_projects" ? (
-            <section className={styles.codePanel}><header><div><p className={styles.kicker}>MILESTONE ARTIFACT</p><h2>当前可运行片段</h2></div><span>Python</span></header><AgentCodeEditor value={projectCode} onChange={setProjectCode} /></section>
+          {!loopDone && !independentWorkspace && mode === "work_on_projects" ? (
+            <section className={styles.codePanel}><header><div><p className={styles.kicker}>MILESTONE ARTIFACT</p><h2>当前可运行片段</h2></div><span>Python</span></header>{demo ? <textarea aria-label="离线项目示例代码" value={projectCode} onChange={(event) => setProjectCode(event.target.value)} style={{width:"100%",height:250,fontFamily:"monospace",fontSize:18,padding:20}} /> : <AgentCodeEditor value={projectCode} onChange={setProjectCode} />}</section>
           ) : null}
 
-          {result?.response.derivation_bridge && nativeState?.solo?.status !== "active" && !loopDone ? (
+          {result?.response.derivation_bridge && !independentWorkspace && !focusedReconstruction && !loopDone ? (
             <DerivationBridgePanel bridge={result.response.derivation_bridge} evidence={result.evidence_packet} />
           ) : null}
 
-          {result?.code_artifact ? (
+          {!loopDone && result?.code_artifact && !calculationStale && !independentWorkspace && !focusedReconstruction ? (
             <CodingArtifactPanel run={result.code_artifact} />
           ) : null}
 
           {result?.learning_native ? (
             <LearningNativeSurface
+              key={result.turn_id}
               state={result.learning_native}
               pending={turnMutation.isPending || resumeMutation.isPending}
               onSubmit={submitLearningNative}
@@ -1398,10 +1529,13 @@ export function AgentExperience() {
             <section className={styles.learningNativeActions} aria-label="Learning-Native 完成">
               <div className={styles.phaseButton} data-testid="learning-loop-complete">
                 <Check size={13} />
-                学习闭环完成：承诺 → 解释 → 重构 → 迁移 → Solo 均已通过确定性验证。
+                学习流程已完成。数值核验与解释反馈分别记录；解释反馈不代表科学证明。
               </div>
               {result?.learning_native?.cognitive_mirror ? (
                 <CognitiveMirrorPanel mirror={result.learning_native.cognitive_mirror} />
+              ) : null}
+              {!demo && scope && conversationId ? (
+                <EpisodeEvidence key={conversationId} scope={scope} conversationId={conversationId} />
               ) : null}
             </section>
           ) : result && (result.learning_native?.solo?.status ?? "inactive") !== "active" ? (
@@ -1416,26 +1550,26 @@ export function AgentExperience() {
                   data-testid="request-teach-back-button"
                 >
                   <PenLine size={13} />
-                  进入 Teach-Back
+                  重构原来的推理
                 </button>
               ) : null}
-              {nativeState?.phase === "transfer_required" ? (
+              {nativeState?.phase === "transfer_required" && nativeState.completed_stages.includes("transfer") ? (
                 <button
                   type="button"
                   className={styles.phaseButton}
                   onClick={() => submitLearningNative({ commitment: null, confidence: null, teach_back: null, transfer_attempt: null, solo_attempt: null, request_transfer: false, request_solo_exit: false, request_teach_back: false, request_transfer_task: true })}
                   disabled={turnMutation.isPending || resumeMutation.isPending}
-                  aria-label="请求迁移任务并进入 Solo Mode"
+                  aria-label="请求新任务并进入 Solo Mode"
                   data-testid="request-transfer-button"
                 >
                   <Target size={13} />
-                  进入迁移 / Solo
+                  进入独立 Solo
                 </button>
               ) : null}
             </section>
           ) : null}
 
-          {!result && !interrupt ? (
+          {!result && !interrupt && calculationPending ? (
             <section className={styles.emptyCanvas}>
               <ModeMark mode={mode} />
               <h2>{mode === "review_derivations" ? "上传手写推导，先确认转录，再定位首错。" : mode === "run_experiments" ? "先预测，再用数值不变量约束解释。" : mode === "work_on_projects" ? "提交当前里程碑的下一步。" : "从一个困惑或一张截图开始。"}</h2>
@@ -1463,7 +1597,7 @@ export function AgentExperience() {
                 </button>
               )}
             </section>
-          ) : result ? (
+          ) : !loopDone && result && (!barrierResult || mode !== "run_experiments") && !calculationStale && !independentWorkspace && !focusedReconstruction ? (
             <article className={styles.tutorRecord} tabIndex={-1} data-testid="agent-tutor-result">
               <header><span><Atom /></span><div><small>QUANTUM AGENT · GROUNDED TURN</small><strong>{result.interpretation.relevant_concepts.join(" · ") || "课程辅导"}</strong></div><em>{result.release.release_level.replaceAll("_", " ")}</em></header>
               <div className={styles.orientation}><span>本轮方向</span><h2><MathText text={result.response.orientation} /></h2></div>
@@ -1518,7 +1652,7 @@ export function AgentExperience() {
             </article>
           ) : null}
 
-          {scientificResults.length ? (
+          {!loopDone && scientificResults.length && !calculationStale && !independentWorkspace && !focusedReconstruction ? (
             <section className={styles.stageVerification} aria-label="科学验证结果">
               <p className={styles.kicker}>DETERMINISTIC VERIFICATION</p>
               {scientificResults.map((tool) => {
@@ -1545,6 +1679,7 @@ export function AgentExperience() {
           ) : null}
 
           <section
+            hidden={loopDone}
             className={`${styles.composer} ${dragging ? styles.dragging : ""}`}
             data-disabled={interrupt ? "true" : "false"}
             onDragEnter={(event) => { event.preventDefault(); if (!interrupt) setDragging(true); }}
@@ -1605,7 +1740,7 @@ export function AgentExperience() {
               </div>
               <button
                 className={styles.sendButton}
-                onClick={submit}
+                onClick={() => submit()}
                 disabled={Boolean(interrupt) || turnMutation.isPending || resumeMutation.isPending || uploading || (!message.trim() && uploads.length === 0 && !(mode === "review_derivations" && bridgeSource.trim() && bridgeTarget.trim()))}
               >
                 {turnMutation.isPending || resumeMutation.isPending ? <LoaderCircle className={styles.spin} /> : <Send />}
@@ -1614,12 +1749,14 @@ export function AgentExperience() {
             </footer>
             {turnMutation.error ? <p className={styles.composerError}><CircleAlert /> {turnMutation.error.message}</p> : null}
           </section>
+          </div>
         </div>
       </main>
 
+      {!independentWorkspace ? (
       <aside className={`${styles.rightPanel} ${rightOpen ? styles.panelOpen : ""}`}>
         <div className={styles.mobilePanelTitle}><strong>证据与验证</strong><button onClick={() => setRightOpen(false)}><X /></button></div>
-        <header className={styles.evidenceHead}><div><p className={styles.kicker}>EVIDENCE DESK</p><h2>本轮依据</h2></div><span><i /> LIVE</span></header>
+        <header className={styles.evidenceHead}><div><p className={styles.kicker}>EVIDENCE DESK</p><h2>本轮依据</h2></div><span><i /> {demo ? "OFFLINE" : "LIVE"}</span></header>
         {!loopDone && result?.learning_native?.cognitive_mirror ? (
           <CognitiveMirrorPanel mirror={result.learning_native.cognitive_mirror} />
         ) : null}
@@ -1668,9 +1805,10 @@ export function AgentExperience() {
           <div className={styles.sideEmpty}><Network /><h3>证据会在这里聚合</h3><p>课程原文、页码、知识图谱关系、公式与验证器结果不会混入聊天气泡。</p></div>
         )}
       </aside>
+      ) : null}
 
-      <Dialog.Root open={selectedSource !== null} onOpenChange={(open) => { if (!open) setSelectedSource(null); }}>
-        {selectedSource ? <SourcePreview evidence={selectedSource} scope={scope} close={() => setSelectedSource(null)} /> : null}
+      <Dialog.Root open={!independentWorkspace && selectedSource !== null} onOpenChange={(open) => { if (!open) setSelectedSource(null); }}>
+        {!independentWorkspace && selectedSource ? <SourcePreview offline={Boolean(demo)} evidence={selectedSource} scope={scope} close={() => setSelectedSource(null)} /> : null}
       </Dialog.Root>
 
       <Dialog.Root open={cmdOpen} onOpenChange={(open) => { if (!open) { setCmdOpen(false); setCmdQuery(""); } }}>
@@ -1753,11 +1891,11 @@ export function AgentExperience() {
                   onClick={() => { startGoldenTunnelingLoop(); setCmdOpen(false); setCmdQuery(""); }}
                 >
                   <FlaskConical size={15} />
-                  <span><strong>启动黄金学习循环</strong><small>量子隧穿 · 真实模型与验证</small></span>
+                  <span><strong>启动黄金学习循环</strong><small>{demo ? "量子隧穿 · 离线预设样例" : "量子隧穿 · 真实模型与验证"}</small></span>
                 </button>
                 <button
                   className={styles.cmdItem}
-                  onClick={() => { setConversationId(null); setResult(null); setInterrupt(null); setConfirmedTranscription(""); setCmdOpen(false); setCmdQuery(""); }}
+                  onClick={() => { if (demo?.reset) { demo.reset(); location.reload(); return; } setReviewStage(null); setConversationId(null); setResult(null); setInterrupt(null); setConfirmedTranscription(""); setAttempt(""); setMessage(""); setRestoreError(""); setCmdOpen(false); setCmdQuery(""); }}
                 >
                   <Plus size={15} />
                   <span><strong>新建学习记录</strong><small>清空当前会话</small></span>

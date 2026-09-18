@@ -13,6 +13,7 @@ from typing import Any, Protocol, cast
 
 from pydantic import TypeAdapter
 
+from quantum_agent.science.barrier_reference import boundary_probabilities
 from quantum_agent.science.models import (
     CodeTestRequest,
     LineVisualizationRequest,
@@ -582,9 +583,9 @@ def _verify_rectangular_barrier(
         T = [1 + V0**2 * sinh**2(kappa * a) / (4 E (V0 - E))] ** -1
 
     For ``E > V0`` (the free-propagation regime) we use the standard
-    textbook formula with ``sin`` instead of ``sinh``.  The verifier
-    explicitly checks ``abs(R + T - 1) <= conservation_tolerance`` and
-    rejects any non-finite or out-of-bounds result.
+    textbook formula with ``sin`` instead of ``sinh``. A separately maintained
+    four-equation boundary solver supplies independent T and R. PASS requires
+    reference agreement and flux conservation, not the identity R = 1 - T.
     """
 
     import numpy as np
@@ -612,7 +613,7 @@ def _verify_rectangular_barrier(
         if delta_e_j > 0:
             # Tunnelling regime (E < V0).
             arg = k_inside * a
-            if arg > 700.0:
+            if arg > 300.0:
                 # sinh(arg) overflows for opaque barriers; use the asymptotic
                 # form T ~ 16 E (V0-E) / V0**2 * exp(-2 kappa a) which is the
                 # standard opaque-barrier limit.
@@ -674,9 +675,26 @@ def _verify_rectangular_barrier(
             error_code="TRANSMISSION_OUT_OF_BOUNDS",
         )
 
-    r_value = 1.0 - t_value
-    conservation_error = abs(r_value + t_value - 1.0)
-    verified = conservation_error <= request.conservation_tolerance
+    try:
+        reference_t, r_value = boundary_probabilities(
+            request.energy_eV, request.barrier_height_eV, width, mass,
+        )
+    except (ValueError, ArithmeticError, np.linalg.LinAlgError):
+        return _result(
+            request, method=ScientificVerificationMethod.NUMERICAL,
+            status=ScientificVerificationStatus.INCONCLUSIVE,
+            tool=_tool("boundary-matching", "1"),
+            observations=["Independent boundary matching could not verify this parameter range."],
+            limitations=["No plot or PASS is released outside the verified float64 range."],
+            error_code="BARRIER_REFERENCE_UNAVAILABLE",
+        )
+    conservation_error = abs(r_value + reference_t - 1.0)
+    reference_error = abs(t_value - reference_t)
+    verified = (
+        conservation_error <= request.conservation_tolerance
+        and math.isclose(t_value, reference_t, rel_tol=1e-8, abs_tol=1e-12)
+        and 0 <= r_value <= 1 + request.conservation_tolerance
+    )
 
     # Build a small T-vs-width visualization so the frontend can render the
     # tunnelling curve alongside the student's prediction.
@@ -686,7 +704,7 @@ def _verify_rectangular_barrier(
         try:
             arg_w = k_inside * float(w)
             if delta_e_j > 0:
-                if arg_w > 700.0:
+                if arg_w > 300.0:
                     exp_arg = -2.0 * arg_w
                     if exp_arg < -745.0:
                         t_w = 0.0
@@ -701,9 +719,18 @@ def _verify_rectangular_barrier(
                 sin_sq_w = math.sin(arg_w) ** 2
                 denom_w = 1.0 + (v0_j * v0_j * sin_sq_w) / (4.0 * energy_j * (energy_j - v0_j))
                 t_w = 1.0 / denom_w
-            t_series.append(float(max(0.0, min(1.0, t_w))))
+            if not math.isfinite(t_w) or not 0 <= t_w <= 1 or arg_w > 300:
+                raise ValueError("Curve outside verified range")
+            t_series.append(float(t_w))
         except (OverflowError, ValueError, ZeroDivisionError):
-            t_series.append(0.0)
+            return _result(
+                request, method=ScientificVerificationMethod.NUMERICAL,
+                status=ScientificVerificationStatus.INCONCLUSIVE,
+                tool=_tool("boundary-matching", "1"),
+                observations=["Width scan exceeds the verified numerical range."],
+                limitations=["Curve omitted; failed samples are never replaced with zero."],
+                error_code="BARRIER_SCAN_UNAVAILABLE",
+            )
 
     plot_request = LineVisualizationRequest(
         title="Rectangular barrier transmission vs width",
@@ -735,13 +762,17 @@ def _verify_rectangular_barrier(
         limitations=[
             "Stationary scattering calculation; does not model wave-packet dispersion "
             "or finite-time effects.",
-            "Uses the analytic rectangular-barrier formula; the E≈V0 degenerate band "
-            "is rejected by the request validator.",
+            "Analytic T is cross-checked against independent boundary matching; "
+            "R is obtained from the reflected amplitude, not defined as 1-T. "
+            "The E≈V0 band and scans outside the verified float64 range are unsupported.",
         ],
         metrics={
             "T": t_value,
             "R": r_value,
             "conservation_error": conservation_error,
+            "reference_T": reference_t,
+            "reference_error": reference_error,
+            "reference_method": "independent_boundary_matching_v1",
             "conservation_tolerance": request.conservation_tolerance,
             "energy_eV": request.energy_eV,
             "barrier_height_eV": request.barrier_height_eV,

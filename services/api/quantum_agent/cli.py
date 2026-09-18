@@ -648,7 +648,11 @@ async def _seed_demo_account_async(arguments: argparse.Namespace) -> int:
                 await session.execute(
                     select(Course, CurriculumEdition)
                     .join(CurriculumEdition, CurriculumEdition.course_id == Course.id)
-                    .where(CurriculumEdition.status == CurriculumEditionStatus.PUBLISHED)
+                    .where(
+                        CurriculumEdition.status == CurriculumEditionStatus.PUBLISHED,
+                        *([Course.id == UUID(arguments.course_id)]
+                          if getattr(arguments, "course_id", None) else []),
+                    )
                     .order_by(
                         (Course.status == CourseStatus.ACTIVE).desc(),
                         CurriculumEdition.published_at.desc(),
@@ -804,6 +808,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="seed the competition login student account for /api/v1/auth/login",
     )
     demo.add_argument("--activate-course", action="store_true")
+    demo.add_argument("--course-id", help="explicit demo course; does not change other memberships")
     demo.set_defaults(handler=_seed_demo_account)
     # Backward-compatible alias for callers that still use the old name.
     demo_legacy = commands.add_parser(
@@ -811,6 +816,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="alias for seed-login-account (deprecated)",
     )
     demo_legacy.add_argument("--activate-course", action="store_true")
+    demo_legacy.add_argument("--course-id")
     demo_legacy.set_defaults(handler=_seed_demo_account)
     return parser
 

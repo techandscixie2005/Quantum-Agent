@@ -12,9 +12,15 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "test-results/**",
+    "playwright-report/**",
     // Ephemeral workflow worktrees (Demo Closure Sprint etc.) contain full
     // repo copies including dist/ builds that blow the eslint heap.
     ".claude/worktrees/**",
+    // Archived bundles and immutable recording snapshots are not source.
+    "defense/**/dist/**",
+    "defense/**/deployed-dist/**",
+    "defense/demo60/scripted/revisions/baseline/**",
   ]),
 ]);
 
