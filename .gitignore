@@ -3,6 +3,7 @@
 # dependencies
 /node_modules
 /.venv/
+/services/api/.venv
 **/__pycache__/
 *.py[cod]
 .pytest_cache/

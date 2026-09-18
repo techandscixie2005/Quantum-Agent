@@ -1,0 +1,23 @@
+schema_version = 1
+course_key = "quantum-barrier-demo-20260918"
+course_title = "量子隧穿工作台 · 自编演示课程"
+knowledge_root = "knowledge"
+[governance]
+canonical_curriculum_edition = "barrier-demo-v1"
+student_visibility_rule = "published_document_and_approved_knowledge_only"
+unmatched_extraction_status = "REVIEW_REQUIRED"
+chapter_merge_rule = "never_merge_by_number_alone"
+[[curriculum_editions]]
+key = "barrier-demo-v1"
+title = "有限矩形势垒 · 自编演示讲义 v1"
+chapter_count = 1
+canonical = true
+[[sources]]
+path = "barrier_demo/自编演示讲义-有限矩形势垒-v1.pdf"
+sha256 = "530ab542811eb36095fa32121dbaeb0ffadde7c9c3bb785c63a469936fdc125c"
+kind = "self_authored_demo_lecture"
+authority = "course_reference"
+priority = 90
+curriculum_edition = "barrier-demo-v1"
+locator = "physical_pdf_page"
+claim_scope = "self_authored_demo_finite_electron_barrier_subbarrier_only"

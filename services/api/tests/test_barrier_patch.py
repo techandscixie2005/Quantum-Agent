@@ -287,3 +287,20 @@ def test_review_ranges_are_explicit_and_legacy_approval_does_not_expand() -> Non
         assert not task_matches(expanded)
     with pytest.raises(ValueError):
         BarrierSourceReview.model_validate(review.model_dump() | {"width_range_m": [1.0, -1.0]})
+
+
+async def test_schema_diagnostics_never_log_model_input(caplog: pytest.LogCaptureFixture) -> None:
+    from pydantic import BaseModel, ValidationError
+
+    class Result(BaseModel):
+        count: int
+
+    @traced_call
+    async def invalid(*, task: str) -> Result:
+        return Result.model_validate({"count": "PRIVATE_MODEL_CONTENT"})
+
+    caplog.set_level(logging.INFO, logger="quantum_agent.capability_events")
+    with pytest.raises(ValidationError):
+        await invalid(task="schema_test")
+    assert "schema_int_parsing" in caplog.text
+    assert "PRIVATE_MODEL_CONTENT" not in caplog.text

@@ -1,0 +1,15 @@
+# Use after the repository-root compose.yaml. Does not publish or seed answers.
+services:
+  api:
+    environment:
+      QUANTUM_AGENT_BARRIER_REVIEWS: /workspace/barrier-demo-reviews.json
+      QUANTUM_AGENT_BARRIER_REVIEWS_SHA256: db7c165df9a8e256b5c313d1e2730ad790b1279d9a0a1fa7145ed2a19cabd92f
+    volumes:
+      - type: bind
+        source: ./content/barrier_demo
+        target: /workspace/content/barrier_demo
+        read_only: true
+      - type: bind
+        source: ./content/barrier_demo/reviews.json
+        target: /workspace/barrier-demo-reviews.json
+        read_only: true

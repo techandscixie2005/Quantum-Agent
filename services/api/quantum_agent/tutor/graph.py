@@ -493,7 +493,6 @@ class TutorGraph:
                 "completed turn replay is missing its result snapshot; "
                 "the turn predates the idempotency-key feature"
             )
-        result = TeachingTurnResult.model_validate(snapshot)
         # Re-authorise the replay against the current actor.
         if (
             started.conversation.student_user_id != actor.user_id
@@ -501,7 +500,14 @@ class TutorGraph:
             or curriculum_edition_id != started.conversation.curriculum_edition_id
         ):
             raise HitlConflictError("replay actor does not own the completed turn")
-        return result
+        if started.durable_phase.solo_assistance_locked:
+            from quantum_agent.teaching.models import LearningPhase
+            from quantum_agent.teaching.solo_visibility import solo_visible_snapshot
+
+            if (snapshot.get("learning_native") or {}).get("phase") != LearningPhase.SOLO_ACTIVE:
+                raise HitlConflictError("Solo locks historical answer replay")
+            snapshot = solo_visible_snapshot(snapshot)
+        return TeachingTurnResult.model_validate(snapshot)
 
     async def _inspect_interrupt(
         self,

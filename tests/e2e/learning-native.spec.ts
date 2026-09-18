@@ -407,3 +407,21 @@ test("completed teach-back feedback does not hide the assigned transfer task", a
     await expect(page.getByTestId("teach-back-card")).toHaveCount(0);
   });
 });
+
+// Explicit API mock: presentation regression, not live model acceptance.
+test("model degradation is visible and retains the student's input", async ({ page }) => {
+  const result = baseResult({
+    response: {
+      orientation: "只显示当前可用的课程材料。",
+      claims: [], next_question: "请稍后重试。", status: "model_degraded",
+      limitations: ["模型生成不可用或未通过证据校验；仅展示课程材料原文。"],
+    },
+  });
+  await interceptAgentApis(page, result);
+  await submitAndAssertCard(page, "请帮我连接这两步推导", "model-degraded-notice", async () => {
+    await expect(page.getByTestId("model-degraded-notice")).toContainText("未返回的诊断、推导桥不计为完成");
+    await expect(page.getByLabel("给 Quantum Agent 的问题")).toHaveValue("请帮我连接这两步推导");
+    await expect(page.getByTestId("learning-loop-complete")).toHaveCount(0);
+    await expect(page.getByTestId("derivation-bridge")).toHaveCount(0);
+  });
+});

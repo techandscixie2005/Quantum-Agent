@@ -705,12 +705,18 @@ async def get_teaching_conversation_state(
             turn_id = turn.id
             workflow_version = str(raw_snapshot.get("workflow_version", "")) or None
     if durable_phase.solo_assistance_locked and snapshot is not None:
+        from quantum_agent.teaching.solo_visibility import solo_visible_snapshot
+
         snapshot_native = snapshot.get("learning_native") or {}
         if snapshot_native.get("phase") != "solo_active":
             # An in-flight/failed arming turn must not restore the previous answer.
             snapshot = None
             turn_id = None
             workflow_version = None
+        else:
+            snapshot = TeachingTurnResult.model_validate(
+                solo_visible_snapshot(snapshot)
+            ).model_dump(mode="json")
     learning_evidence: list[dict[str, Any]] = []
     if not durable_phase.solo_assistance_locked and durable_phase.phase.value != "solo_active":
         observations = (await session.execute(

@@ -1271,6 +1271,7 @@ async def propose_teach_back_analysis(
     target_concept_names: Sequence[str],
     model_gateway: ModelGateway | None,
     task_context: str = "",
+    initial_reconstruction: str = "",
     prior_explanation: str = "",
     tutor_probe: str = "",
     prior_clarifications: Sequence[str] = (),
@@ -1325,6 +1326,7 @@ async def propose_teach_back_analysis(
                 ),
                 Message(role="user", content=(
                     f"Assigned task context: {task_context[:6000]}\n"
+                    f"Initial student reconstruction: {initial_reconstruction[:8000]}\n"
                     f"Earlier student explanation: {prior_explanation[:4000]}\n"
                     f"Earlier student clarifications: {'; '.join(prior_clarifications)[-8000:]}\n"
                     f"System tutor_probe (not a student claim): {tutor_probe[:1000]}\n"

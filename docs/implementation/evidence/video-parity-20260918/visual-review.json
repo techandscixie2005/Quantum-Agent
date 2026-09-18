@@ -1,0 +1,104 @@
+{
+  "episode": "5f7dad0c-29a8-4647-9db7-5082054f6acb",
+  "kind": "historical_stage_review",
+  "reports": [
+    {
+      "width": 1920,
+      "stage": "restored",
+      "milliseconds": 1008
+    },
+    {
+      "width": 1920,
+      "stage": "sources",
+      "milliseconds": 82,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "original-source",
+      "openAndFetchMs": 72,
+      "status": 200,
+      "type": "application/pdf",
+      "bytes": 411629
+    },
+    {
+      "width": 1920,
+      "stage": "bridge",
+      "milliseconds": 116,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "verify",
+      "milliseconds": 892,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "teach_back",
+      "milliseconds": 66,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "transfer",
+      "milliseconds": 79,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "solo",
+      "milliseconds": 75,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "restored",
+      "milliseconds": 276
+    },
+    {
+      "width": 1366,
+      "stage": "sources",
+      "milliseconds": 86,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "original-source",
+      "openAndFetchMs": 78,
+      "status": 200,
+      "type": "application/pdf",
+      "bytes": 411629
+    },
+    {
+      "width": 1366,
+      "stage": "bridge",
+      "milliseconds": 87,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "verify",
+      "milliseconds": 1027,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "teach_back",
+      "milliseconds": 74,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "transfer",
+      "milliseconds": 71,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "solo",
+      "milliseconds": 75,
+      "overflow": false
+    }
+  ]
+}

@@ -1431,6 +1431,29 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
             }
           /> : null}
 
+          {result?.response.status === "model_degraded" && !loopDone && !independentWorkspace && !reviewStage ? (
+            <section className={styles.degradedNotice} role="status" data-testid="model-degraded-notice">
+              <CircleAlert size={18} aria-hidden="true" />
+              <div>
+                <strong>本轮模型帮助未就绪</strong>
+                {result.response.limitations.map((limitation, index) => <p key={index}>{limitation}</p>)}
+                <p>下方保留可用的课程原文或确定性工具结果。当前未返回的诊断、推导桥不计为完成；你可以保留输入，稍后重新发送。</p>
+                {evidencePacket?.evidence.length ? (
+                  <details className={styles.fallbackExcerpt}>
+                    <summary>查看可用课程来源（{evidencePacket.evidence.length}）</summary>
+                    {evidencePacket.evidence.map(evidence => (
+                      <p key={evidence.evidence_id}>
+                        <button type="button" className={styles.basisLink} onClick={() => setSelectedSource(evidence)}>
+                          {evidence.document_title} · {sourceLocator(evidence)} · 打开原文
+                        </button>
+                      </p>
+                    ))}
+                  </details>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
           {interrupt ? (
             <HitlReviewCard
               interrupt={interrupt}
@@ -1509,7 +1532,7 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
           ) : null}
 
           {result?.response.derivation_bridge && !independentWorkspace && !focusedReconstruction && !loopDone ? (
-            <DerivationBridgePanel bridge={result.response.derivation_bridge} evidence={result.evidence_packet} />
+            <DerivationBridgePanel bridge={result.response.derivation_bridge} evidence={result.evidence_packet} nextQuestion={result.response.next_question} />
           ) : null}
 
           {!loopDone && result?.code_artifact && !calculationStale && !independentWorkspace && !focusedReconstruction ? (
@@ -1597,9 +1620,9 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
                 </button>
               )}
             </section>
-          ) : !loopDone && result && (!barrierResult || mode !== "run_experiments") && !calculationStale && !independentWorkspace && !focusedReconstruction ? (
+          ) : !loopDone && result && result.response.status !== "model_degraded" && (!result.response.derivation_bridge || result.response.claims.length > 0) && (!barrierResult || mode !== "run_experiments") && !calculationStale && !independentWorkspace && !focusedReconstruction ? (
             <article className={styles.tutorRecord} tabIndex={-1} data-testid="agent-tutor-result">
-              <header><span><Atom /></span><div><small>QUANTUM AGENT · GROUNDED TURN</small><strong>{result.interpretation.relevant_concepts.join(" · ") || "课程辅导"}</strong></div><em>{result.release.release_level.replaceAll("_", " ")}</em></header>
+              <header><span><Atom /></span><div><small>QUANTUM AGENT · 课程辅导</small><strong>{result.interpretation.relevant_concepts.join(" · ") || "课程辅导"}</strong></div><em>{result.release.release_level.replaceAll("_", " ")}</em></header>
               <div className={styles.orientation}><span>本轮方向</span><h2><MathText text={result.response.orientation} /></h2></div>
               <div className={styles.claims}>{result.response.claims.map((claim, index) => {
                 const linkedEvidence = evidencePacket?.evidence.filter((evidence) => claim.evidence_ids.includes(evidence.evidence_id)) ?? [];

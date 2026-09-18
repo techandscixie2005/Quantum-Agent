@@ -57,13 +57,20 @@ async def evaluate_barrier_trend(
                         "an explanation. Reject claims that E<V0 makes the wavefunction "
                         "identically "
                         "zero, that kappa increases solely because width increases, or that energy "
-                        "is lost in an absorbing barrier. Mark ambiguous/partial "
+                        "is lost in this non-absorbing barrier. Mark ambiguous/partial "
                         "statements uncertain "
                         "or missing; list actual contradictions. Quote exact student "
                         "spans supporting "
                         "each classification, or use an empty quote when absent. "
                         "Rationale in Chinese. "
-                        "Do not give a mastery score or claim a scientific proof."
+                        "Do not give a mastery score or claim a scientific proof. "
+                        "Return one flat JSON object with ONLY these six fields: "
+                        "trend, trend_quote, mechanism, mechanism_quote, contradictions, "
+                        "rationale. trend must be decreases, increases, unchanged or uncertain. "
+                        "mechanism must be evanescent_width_dependence, incorrect, missing or "
+                        "uncertain. Both quote fields and rationale are strings; contradictions "
+                        "is an array of strings (empty when none). Do not nest classifications, "
+                        "rename fields, include a verdict, or return a teaching response."
                     )),
                     Message(role="user", content=json.dumps(
                         {"task": prompt, "student_answer": response}, ensure_ascii=False,

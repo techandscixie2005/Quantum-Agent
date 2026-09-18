@@ -1,0 +1,19 @@
+{
+  "historyStatus": 423,
+  "sourceStatus": 409,
+  "blockedRequests": [
+    {
+      "status": 200,
+      "turn": "f8639ed8-655a-4974-9a68-ff826294a8e3",
+      "phase": "solo_active"
+    },
+    {
+      "status": 200,
+      "turn": "b0ec60c8-663e-4c8f-9592-2e12ffaf032a",
+      "phase": "solo_active"
+    }
+  ],
+  "replayStatus": 200,
+  "replayTerminal": "workflow.failed / CONVERSATION_CONFLICT",
+  "answerContentAbsent": true
+}
