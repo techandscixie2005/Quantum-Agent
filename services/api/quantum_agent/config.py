@@ -69,6 +69,13 @@ class Settings(BaseSettings):
         validation_alias="USTC_BASE_URL",
     )
     ustc_api: SecretStr | None = Field(default=None, validation_alias="USTC_API")
+    ustc_text_thinking_mode: Literal["enabled", "disabled"] | None = Field(
+        default=None, validation_alias="USTC_TEXT_THINKING_MODE",
+    )
+    ustc_text_model_override: str | None = Field(
+        default=None, min_length=1, pattern=r"^\S+$",
+        validation_alias="USTC_TEXT_MODEL_OVERRIDE",
+    )
     ustc_model: str = Field(default="deepseek-v4-pro", validation_alias="USTC_MODEL")
     ustc_vision_model: str = Field(default="qwen3.8-chat", validation_alias="USTC_VISION_MODEL")
     ustc_quick_model: str = Field(

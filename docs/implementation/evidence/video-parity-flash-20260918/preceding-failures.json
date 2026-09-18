@@ -1,0 +1,20 @@
+[
+  {
+    "episode": "578411c2-538d-4633-bdde-087bafdba989",
+    "complete": false,
+    "stage": "02-diagnosis",
+    "failure": "AssertionError [ERR_ASSERTION]: Diagnosis model unavailable"
+  },
+  {
+    "episode": "608de468-9ac0-4038-83f2-e02a96f80baa",
+    "complete": false,
+    "stage": "05-computation",
+    "failure": "Error: Coding verification did not pass"
+  },
+  {
+    "episode": "d79039a6-f1e9-4174-868c-672a793be500",
+    "complete": false,
+    "stage": "08-clarification",
+    "failure": "Error: Teach-back requires additional clarification; do not fake completion"
+  }
+]

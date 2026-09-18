@@ -1,0 +1,152 @@
+{
+  "complete": true,
+  "fullJourneyAccepted": true,
+  "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+  "timings": [
+    {
+      "name": "01-commitment",
+      "milliseconds": 6840,
+      "status": 200
+    },
+    {
+      "name": "02-diagnosis",
+      "milliseconds": 32439,
+      "status": 200
+    },
+    {
+      "name": "04-revision",
+      "milliseconds": 7486,
+      "status": 200
+    },
+    {
+      "name": "04b-bridge",
+      "milliseconds": 7948,
+      "status": 200
+    },
+    {
+      "name": "05-computation",
+      "milliseconds": 15447,
+      "status": 200
+    },
+    {
+      "name": "05b-request-reconstruction",
+      "milliseconds": 9833,
+      "status": 200
+    },
+    {
+      "name": "06-reconstruction",
+      "milliseconds": 5880,
+      "status": 200
+    },
+    {
+      "name": "07-teachback",
+      "milliseconds": 5998,
+      "status": 200
+    },
+    {
+      "name": "08-clarification",
+      "milliseconds": 2905,
+      "status": 200
+    },
+    {
+      "name": "09-transfer",
+      "milliseconds": 17691,
+      "status": 200
+    },
+    {
+      "name": "10-solo",
+      "milliseconds": 1285,
+      "status": 200
+    },
+    {
+      "name": "10b-solo-incorrect",
+      "milliseconds": 3148,
+      "status": 200
+    },
+    {
+      "name": "11-solo-answer",
+      "milliseconds": 2672,
+      "status": 200
+    }
+  ],
+  "turns": [
+    {
+      "name": "01-commitment",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "4ff018ae-4c62-46b2-9dd8-1a5f3b241486",
+      "phase": "commitment_required"
+    },
+    {
+      "name": "02-diagnosis",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "e416a455-a6f4-456f-bbf3-a119abc65246",
+      "phase": "attempt_received"
+    },
+    {
+      "name": "04-revision",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "aeefa5a5-3689-46c8-92e1-ee1453c76998",
+      "phase": "awaiting_revision"
+    },
+    {
+      "name": "04b-bridge",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "631498b1-4271-4af9-8651-5ff580cd5b0c",
+      "phase": "awaiting_revision"
+    },
+    {
+      "name": "05-computation",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "b5826007-1f19-4889-b77d-ad586e1cc1c0",
+      "phase": "awaiting_revision"
+    },
+    {
+      "name": "05b-request-reconstruction",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "24b2f2e2-e118-4d2c-8c6b-dbe69e7e09a3",
+      "phase": "awaiting_revision"
+    },
+    {
+      "name": "06-reconstruction",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "c7acdd58-d34f-436c-b125-1b6573f4bccf",
+      "phase": "reconstruction_required"
+    },
+    {
+      "name": "07-teachback",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "783dc3a5-7789-454d-ab0a-d19116218f3e",
+      "phase": "reconstruction_required"
+    },
+    {
+      "name": "08-clarification",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "77910e9a-b9c7-4b64-a23b-d8a65f008a95",
+      "phase": "transfer_required"
+    },
+    {
+      "name": "09-transfer",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "03d29611-53fe-4ba2-b561-6b4e3f324eef",
+      "phase": "transfer_required"
+    },
+    {
+      "name": "10-solo",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "b1b58b7f-f388-41c8-9afa-61fa915efce8",
+      "phase": "solo_active"
+    },
+    {
+      "name": "10b-solo-incorrect",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "f9076328-27cc-4952-b8a8-60909fd93fdf",
+      "phase": "solo_active"
+    },
+    {
+      "name": "11-solo-answer",
+      "episode": "f96687cd-ae82-43f9-98c1-4fc5c89c5932",
+      "turnId": "b3f31ccb-1f23-442b-bb18-4e6bd2575947",
+      "phase": "complete"
+    }
+  ]
+}

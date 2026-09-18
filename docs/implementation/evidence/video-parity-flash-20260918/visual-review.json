@@ -1,0 +1,104 @@
+{
+  "episode": "966ef7e3-71ba-4b72-8c48-ad7a918d137a",
+  "kind": "historical_stage_review",
+  "reports": [
+    {
+      "width": 1920,
+      "stage": "restored",
+      "milliseconds": 3995
+    },
+    {
+      "width": 1920,
+      "stage": "sources",
+      "milliseconds": 1903,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "original-source",
+      "openAndFetchMs": 166,
+      "status": 200,
+      "type": "application/pdf",
+      "bytes": 411629
+    },
+    {
+      "width": 1920,
+      "stage": "bridge",
+      "milliseconds": 177,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "verify",
+      "milliseconds": 1503,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "teach_back",
+      "milliseconds": 72,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "transfer",
+      "milliseconds": 79,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "solo",
+      "milliseconds": 84,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "restored",
+      "milliseconds": 358
+    },
+    {
+      "width": 1366,
+      "stage": "sources",
+      "milliseconds": 108,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "original-source",
+      "openAndFetchMs": 88,
+      "status": 200,
+      "type": "application/pdf",
+      "bytes": 411629
+    },
+    {
+      "width": 1366,
+      "stage": "bridge",
+      "milliseconds": 91,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "verify",
+      "milliseconds": 1226,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "teach_back",
+      "milliseconds": 81,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "transfer",
+      "milliseconds": 120,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "solo",
+      "milliseconds": 80,
+      "overflow": false
+    }
+  ]
+}

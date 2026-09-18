@@ -8,7 +8,7 @@ import random
 import time
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
-from typing import Any, Protocol, TypeVar
+from typing import Any, Literal, Protocol, TypeVar
 
 import httpx
 import httpx2
@@ -253,6 +253,7 @@ class PydanticAIModelGateway:
         base_url: str = "https://api.llm.ustc.edu.cn/v1",
         default_model: str = "deepseek-v4-pro",
         small_model: str | None = None,
+        thinking_mode: Literal["enabled", "disabled"] | None = None,
         timeout_seconds: float = 60.0,
         max_retries: int = 2,
         transient_retry_attempts: int = 4,
@@ -278,6 +279,7 @@ class PydanticAIModelGateway:
         self._base_url = base_url.rstrip("/")
         self._default_model = default_model
         self._small_model = small_model or default_model
+        self._thinking_mode = thinking_mode
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
         self._transient_retry_attempts = max(1, transient_retry_attempts)
@@ -359,9 +361,14 @@ class PydanticAIModelGateway:
             )
 
             async def _run() -> Any:
-                return await agent.run(conversation, model_settings=(
-                    {"max_tokens": budget.limits()[1]} if budget else None
-                ))
+                from pydantic_ai.settings import ModelSettings
+
+                settings = ModelSettings(temperature=0)
+                if budget:
+                    settings["max_tokens"] = budget.limits()[1]
+                if self._thinking_mode is not None:
+                    settings["extra_body"] = {"thinking": {"type": self._thinking_mode}}
+                return await agent.run(conversation, model_settings=settings or None)
 
             # PRD V3.1 P1-2: enforce a per-call retry deadline so a single
             # gateway call cannot burn the turn budget.  The deadline is

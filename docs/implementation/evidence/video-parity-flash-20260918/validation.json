@@ -1,0 +1,24 @@
+{
+  "pytest": {
+    "passed": 468,
+    "skipped": 2,
+    "seconds": 352.28,
+    "skips": [
+      "opt-in live multimodal",
+      "opt-in live infrastructure"
+    ]
+  },
+  "ruff": "passed",
+  "mypy": {
+    "passed": true,
+    "files": 142
+  },
+  "freshRealJourneys": 2,
+  "firstRunRequests": 36,
+  "repeatRunRequests": 35,
+  "firstRunLimit": 41,
+  "repeatRunLimit": 41,
+  "totalModelRequestsIncludingFailedRunsAndVariants": 142,
+  "mockedFirstPartyApis": false,
+  "fixtureUpdate": "Historical-context assertions retained for contextual evaluations; added standalone current-position assertions and partial-answer fixtures."
+}

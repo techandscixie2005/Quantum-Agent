@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import httpx2
@@ -41,15 +41,25 @@ def _chat_response(content: str) -> dict[str, Any]:
     }
 
 
-async def test_structured_generation_is_validated_through_current_pydantic_ai() -> None:
+@pytest.mark.parametrize("thinking_mode", [None, "disabled", "enabled"])
+async def test_structured_generation_is_validated_through_current_pydantic_ai(
+    thinking_mode: Literal["disabled", "enabled"] | None,
+) -> None:
     async def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.url.path.endswith("/chat/completions")
+        body = json.loads(request.content)
+        assert body["temperature"] == 0
+        if thinking_mode is None:
+            assert "thinking" not in body
+        else:
+            assert body["thinking"] == {"type": thinking_mode}
         assert request.headers["authorization"] == "Bearer backend-test-token"
         return httpx2.Response(200, json=_chat_response('{"value": 7}'))
 
     client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     gateway = PydanticAIModelGateway(
         api_key=SecretStr("backend-test-token"),
+        thinking_mode=thinking_mode,
         model_http_client=client,
         max_retries=0,
     )

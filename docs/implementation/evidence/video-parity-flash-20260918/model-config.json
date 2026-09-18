@@ -1,0 +1,35 @@
+{
+  "text_routes": {
+    "reasoning": [
+      {
+        "model": "deepseek-v4-flash",
+        "thinking": "disabled"
+      }
+    ],
+    "diagnosis": [
+      {
+        "model": "deepseek-v4-flash",
+        "thinking": "disabled"
+      }
+    ],
+    "lightweight": [
+      {
+        "model": "deepseek-v4-flash",
+        "thinking": "disabled"
+      }
+    ],
+    "document_reasoning": [
+      {
+        "model": "deepseek-v4-flash",
+        "thinking": "disabled"
+      }
+    ],
+    "code": [
+      {
+        "model": "deepseek-v4-flash",
+        "thinking": "disabled"
+      }
+    ]
+  },
+  "recording_budget_active": false
+}

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from quantum_agent.coding.agent import CodingAgent
 from quantum_agent.coding.models import (
     CodeArtifact,
@@ -161,6 +163,12 @@ async def test_coding_agent_verification_failure_is_repaired_not_returned() -> N
     assert "verification fail" in run.repairs[0].failure_summary
     # The returned artifact is the repaired program, not the sign-bug one.
     assert "E_j - V0_j" not in run.artifact.code
+    repair_call = next(call for call in gateway.calls if call["task"] == "repair_coding_artifact")
+    repair_messages = repair_call["messages"]
+    assert json.dumps({"code": bad.code}, ensure_ascii=False) in repair_messages[1]["content"]
+    assert "Do NOT import os" in repair_messages[0]["content"]
+    assert "incorrect predictions" in repair_messages[0]["content"]
+
 
 
 async def test_coding_agent_final_verification_failure_returns_honest_fail() -> None:
