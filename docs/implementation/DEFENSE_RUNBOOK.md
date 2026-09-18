@@ -2,6 +2,8 @@
 
 使用真实 `/agent` 工作台。视频参考 `defense/full-demo` 只读，不是产品入口。当前验收服务为 `http://127.0.0.1:14384/agent`，Python API 在 18000；原有 3000/8000 服务和数据卷未覆盖。最终结果见 [验收报告](VIDEO_PARITY_ACCEPTANCE.md)。
 
+最新复核发现模型代码生成上游超时。真实服务会保留 INCONCLUSIVE，不会自动换成演示答案。正式展示前必须重新运行全新 live 主线；此前成功录制只可标注为录屏，不能证明当前模型服务可用。
+
 ## 从干净仓库启动
 
 按 [LOCAL_STACK.md](LOCAL_STACK.md) 配置私有环境；不把密钥写入 Git、浏览器存储或测试产物。

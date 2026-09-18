@@ -1,5 +1,14 @@
 # 视频主线验收 · 2026-09-18
 
+> **后续复核（同日 20:28 起）：不能把先前成功等同于当前稳定全程可用。** 新 episode `63618708-d5aa-47c5-8a13-cd1bff92d758` 的全新真实重跑在代码生成处失败：上游 timeout，Coding Agent 返回 `INCONCLUSIVE`，没有程序、没有 PASS，也没有进入完成阶段。模型服务恢复后仍需重新执行全新 live 主线。见 [失败记录](evidence/video-parity-recheck-20260918/fresh-run-failed.json) 和 [复核结果](evidence/video-parity-recheck-20260918/recheck.json)。
+
+本次还发现并修复了首屏空计算区把发送按钮挤出视口的问题：有限势垒新任务在收到真实轮次结果前不显示空计算区。两种尺寸的新任务检查均通过（[1366](evidence/video-parity-recheck-20260918/1366-new-task.png)、[1920](evidence/video-parity-recheck-20260918/1920-new-task.png)），未调用模型、未拦截 API。新页面回看原完成 episode 的六个历史阶段、真实 PDF 与两种尺寸检查通过，这是恢复验收，不能当作新的全程验收。
+
+科学/学习状态专项 73 项、Node 82 项、类型检查、lint、生产构建与客户端密钥扫描重新通过。失败 episode 在 API 重启前后均为 awaiting_revision、5 条事件，前后各两次并发重放不重复写入；完整状态一致。一次探测早于 API ready 而失败，ready 后才重做恢复并通过。此次模型预算仅使用 14/41 请求，未用尽预算，也未补额；已移除临时预算，正常服务保留真实失败状态。
+
+下文记录的是此前成功验收的事实与边界。
+
+
 **有限矩形势垒的全新真实主线已通过。** 本次 episode：`5f7dad0c-29a8-4647-9db7-5082054f6acb`。不是恢复旧成功记录，不拦截第一方 API，不向产品注入自动作答。测试驱动通过真实 UI 提交明确的测试学生输入。
 
 证据：[全程事件与耗时](evidence/video-parity-20260918/main-run.json)、[数据库学习事件](evidence/video-parity-20260918/episode-evidence.json)、[未经剪辑的实际操作视频](evidence/video-parity-20260918/main-raw.webm)、[录制哈希](evidence/video-parity-20260918/recording.json)。视频约 3.1 分钟；不是原有演示 MP4，也不是 60 秒学习效率承诺。

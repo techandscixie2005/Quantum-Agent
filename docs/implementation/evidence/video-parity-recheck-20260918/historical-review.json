@@ -1,0 +1,104 @@
+{
+  "episode": "5f7dad0c-29a8-4647-9db7-5082054f6acb",
+  "kind": "historical_stage_review",
+  "reports": [
+    {
+      "width": 1920,
+      "stage": "restored",
+      "milliseconds": 2525
+    },
+    {
+      "width": 1920,
+      "stage": "sources",
+      "milliseconds": 195,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "original-source",
+      "openAndFetchMs": 376,
+      "status": 200,
+      "type": "application/pdf",
+      "bytes": 411629
+    },
+    {
+      "width": 1920,
+      "stage": "bridge",
+      "milliseconds": 166,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "verify",
+      "milliseconds": 1584,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "teach_back",
+      "milliseconds": 67,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "transfer",
+      "milliseconds": 74,
+      "overflow": false
+    },
+    {
+      "width": 1920,
+      "stage": "solo",
+      "milliseconds": 89,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "restored",
+      "milliseconds": 336
+    },
+    {
+      "width": 1366,
+      "stage": "sources",
+      "milliseconds": 95,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "original-source",
+      "openAndFetchMs": 84,
+      "status": 200,
+      "type": "application/pdf",
+      "bytes": 411629
+    },
+    {
+      "width": 1366,
+      "stage": "bridge",
+      "milliseconds": 106,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "verify",
+      "milliseconds": 1084,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "teach_back",
+      "milliseconds": 75,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "transfer",
+      "milliseconds": 73,
+      "overflow": false
+    },
+    {
+      "width": 1366,
+      "stage": "solo",
+      "milliseconds": 86,
+      "overflow": false
+    }
+  ]
+}
