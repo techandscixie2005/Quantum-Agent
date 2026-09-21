@@ -4,6 +4,12 @@ QuantumAgent 是面向量子物理教学的工作流驱动智能体，将课程�
 
 作者 **谢翔宇**，独立开发、单人参赛。作品 **QuantumAgent——面向《量子物理》课程的Learning-Native多智能体教学系统** 获得中国科学技术大学 **“一〇七杯”算力与智能体开发大赛智能体赛道研究生组二等奖**。作品名称、获奖队员与奖项可在 [2026 年 9 月 20 日官方公示](https://www.teach.ustc.edu.cn/notice/notice-info/20582.html)中核实。
 
+[观看原始演示](docs/implementation/evidence/video-parity-flash-20260918/main-raw.webm) · [查看验收报告](docs/implementation/VIDEO_PARITY_ACCEPTANCE.md) · [复现运行环境](docs/implementation/LOCAL_STACK.md) · [版本与发布说明](docs/implementation/COMPETITION_RELEASE.md)
+
+![有限矩形势垒工作台：生成代码的执行记录、独立数值核验与透射率曲线](docs/implementation/evidence/video-parity-flash-20260918/1366-verify.png)
+
+*2026-09-18 历史验收截图：回看有限矩形势垒的代码执行与数值核验结果。*
+
 ## 核心实现
 
 当前权威后端是 [`services/api/quantum_agent/`](services/api/quantum_agent/) 中的 Python FastAPI / LangGraph 服务；前端是 [`app/`](app/) 中的 React / TypeScript 工作台，由 Vinext / Vite 运行。PostgreSQL 保存权威业务记录，pgvector 与 Neo4j 提供派生检索索引，Redis 用于临时协调与缓存；科学计算使用 NumPy、SciPy、SymPy 等工具。`lib/`、`worker/`、`db/` 中的遗留 TypeScript 后端仍用于部分离线测试，不是当前并行运行的教学主架构。
@@ -22,7 +28,6 @@ QuantumAgent 是面向量子物理教学的工作流驱动智能体，将课程�
 [视频主线验收报告](docs/implementation/VIDEO_PARITY_ACCEPTANCE.md)顶部的 **2026-09-18 Flash 验收**是本页引用的历史验收记录：两次全新真实模型主线通过，主要覆盖自编讲义上的**有限电子矩形势垒**，包括来源、生成代码、隔离执行、独立数值核验、回讲、迁移、Solo 限制与持久化恢复。输入由测试驱动提交，不是真实学生学习效果研究。
 
 - [原始操作录屏（WebM，约 14.6 MB）](docs/implementation/evidence/video-parity-flash-20260918/main-raw.webm) · [录制哈希与元数据](docs/implementation/evidence/video-parity-flash-20260918/recording.json)。这是历史录屏；GitHub 若不内嵌播放，可下载查看。
-- [计算与核验截图](docs/implementation/evidence/video-parity-flash-20260918/1366-verify.png)。
 - [第一次完整主线 JSON](docs/implementation/evidence/video-parity-flash-20260918/main-run.json) · [第二次独立主线 JSON](docs/implementation/evidence/video-parity-flash-20260918/repeat-run.json) · [恢复检查 JSON](docs/implementation/evidence/video-parity-flash-20260918/recovery.json)。
 - [历史质量记录](docs/implementation/evidence/video-parity-flash-20260918/validation.json)：当时 Python 全量为 **468 passed、2 skipped**，跳过项为 opt-in live 多模态与基础设施入口；两次真实主线另行执行。该数字不是本次测试结果，也不是拟发布提交的 CI 状态。
 - [Flash 切换过程中的失败记录](docs/implementation/evidence/video-parity-flash-20260918/preceding-failures.json)。验收报告也保留更早的成功与超时复核，不据历史成功承诺当前全程可用。
@@ -43,4 +48,4 @@ QuantumAgent 是面向量子物理教学的工作流驱动智能体，将课程�
 
 现有证据不等于已验证整门课程或任意量子物理问题，也不等于生产级多用户教学平台。外部模型服务及环境变化可能影响复现；任务完成与数值核验不等于长期教学效果已经得到证明。
 
-本次仅做文档整理，尚未创建发布版本。检查时的完整 HEAD、历史验收提交关系、建议标签 `competition-final-2026` 与可复制的 Release 说明见 [竞赛结项发布说明](docs/implementation/COMPETITION_RELEASE.md)。
+结项文档已纳入 `main`，尚未创建发布版本。检查时的完整 HEAD、历史验收提交关系、建议标签 `competition-final-2026` 与可复制的 Release 说明见 [竞赛结项发布说明](docs/implementation/COMPETITION_RELEASE.md)。
