@@ -280,13 +280,19 @@ job/polling deployment design before a classroom trial, not a larger hidden retr
 
 ## Isolated reproducibility stack on Windows/WSL
 
-The October 20 verification installed Ubuntu on D using:
+The October 20 verification installed Ubuntu on D, then moved it outside the Git
+checkout with `wsl --manage Ubuntu-24.04 --move D:\WSL\Ubuntu-24.04`. Its registered
+data path is now `D:\WSL\Ubuntu-24.04`, including `ext4.vhdx` and Linux Docker data.
+For a new installation, select that location directly:
 
 ```powershell
-wsl --install Ubuntu-24.04 --no-launch --location D:\QuantumAgent\outputs\linux-runtime\Ubuntu
+wsl --install Ubuntu-24.04 --no-launch --location D:\WSL\Ubuntu-24.04
+wsl -d Ubuntu-24.04
 ```
 
-Its `ext4.vhdx`, Linux Docker data and downloaded runtime archives are on D.
+The initial temporary location was `D:\QuantumAgent\outputs\linux-runtime\Ubuntu`;
+the move preserved the distro and Docker volumes. Downloaded runtime archives
+and safe command logs remain under the ignored `outputs/linux-runtime/` on D.
 The pre-existing Windows WSL launcher remains a Windows system component.
 Virtual disks, image layers and private runtime secrets are excluded from source
 snapshots; versions, digests, commands and test logs are captured separately.

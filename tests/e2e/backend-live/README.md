@@ -102,3 +102,40 @@ archive and canonical SHA256 manifest used by the Linux trial; this digest is a
 source snapshot identifier, not a Git commit.
 Real classroom evaluation still requires the people and procedures in
 `docs/implementation/CLASSROOM_EVALUATION_PROTOCOL.md`.
+
+## Compiled production Compose smoke
+
+The smaller five-check smoke uses the actual compiled web/API containers and
+PostgreSQL/Redis, with only the internal HTTP provider fixture. It does not load
+the applicability-review test registry. It covers login, first-turn replay/status,
+identity isolation, a teacher follow-up, pending-review UI/replay and export.
+The eight-case suite above separately covers Solo and API process crashes.
+
+Use a newly provisioned, disposable trial stack and private environment from
+`scripts/provision-trial-secrets.py`; never point this at a classroom database.
+After installing Python/web dependencies and Chromium:
+
+```bash
+export BUILD_REVISION="$(git rev-parse HEAD)"
+docker compose -p qa-classroom-trial -f compose.yaml -f compose.registry.yaml \
+  -f compose.trial.yaml -f compose.trial-provider.yaml \
+  --env-file /PRIVATE/qa-trial/private.env up --build -d --wait
+umask 077
+mkdir -p /PRIVATE/qa-trial/production-smoke
+PYTHONPATH=services/api python scripts/with-trial-environment.py \
+  --private-env /PRIVATE/qa-trial/private.env -- \
+  python tests/e2e/backend-live/seed.py seed \
+  --manifest /PRIVATE/qa-trial/production-smoke/manifest.json
+node tests/e2e/backend-live/production_smoke.mjs \
+  --manifest /PRIVATE/qa-trial/production-smoke/manifest.json \
+  --output outputs/production-smoke --base-url http://127.0.0.1:3000
+```
+
+Run the seeder again for a fresh roster before each retry: invitations are single
+use. Preserve the prior output separately. The provider override disables external
+embeddings and uses `synthetic-production-smoke-provider`; remove that override
+before configuring actual teaching. Synthetic publication statuses are test setup,
+not actual source-applicability approvals. Raw private manifests contain DSNs and
+invitations and must stay out of shared evidence. The smoke's generic possible
+unknown-version note must be checked against actual persisted turn provenance;
+setting an environment variable alone does not prove that recorded version.
