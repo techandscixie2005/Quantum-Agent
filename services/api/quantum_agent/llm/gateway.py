@@ -44,7 +44,7 @@ class GatewayError(RuntimeError):
 
 
 class PermanentGatewayError(GatewayError):
-    """A gateway failure that retrying cannot fix (401/403/400).
+    """A credential authorization failure (401/403).
 
     The router treats this as a terminal signal: it must NOT attempt the
     next profile, because a permanent error on one credential/profile is
@@ -77,9 +77,8 @@ def _permanent_status(exc: BaseException) -> int | None:
     """Return the permanent HTTP status code carried by ``exc``, if any.
 
     Used by the router to decide whether to short-circuit across profiles.
-    A permanent status (401/403/400) on one profile is almost certainly
-    permanent on every other profile (same upstream auth, same request
-    body), so retrying against the next profile only burns latency.
+    Credential rejection (401/403) applies across profiles using that key.
+    Request/model configuration failures such as 400 remain profile failures.
     """
 
     if isinstance(exc, httpx.HTTPStatusError):
@@ -125,12 +124,13 @@ async def _retry_transient(
     last_exc: BaseException | None = None
     for attempt in range(1, max_attempts + 1):
         budget = attempt_timeout
-        if deadline is not None and budget is not None:
-            # Clamp the wall cap by the remaining budget so a late attempt
-            # cannot overshoot the deadline.  Without an explicit wall cap
-            # the deadline keeps its legacy meaning: it bounds the backoff
-            # sleeps, not the attempts themselves.
-            budget = min(budget, max(deadline - clock(), 0.0))
+        if deadline is not None:
+            remaining = deadline - clock()
+            if remaining <= 0:
+                if last_exc is not None:
+                    raise last_exc
+                raise GatewayError(f"{label} retry budget exhausted")
+            budget = min(budget, remaining) if budget is not None else remaining
         event(label, "transport_group_started", attempt=attempt)
         try:
             if budget is None:
@@ -159,8 +159,10 @@ async def _retry_transient(
                 if last_exc is not None:
                     raise last_exc
                 raise GatewayError(f"{label} retry budget exhausted")
-            delay = min(delay, remaining)
-            if delay <= 0:
+            # A backoff that consumes the whole remaining budget leaves no
+            # opportunity to retry. Do not sleep and then start a late request
+            # merely because a platform timer woke a fraction early.
+            if delay >= remaining:
                 if last_exc is not None:
                     raise last_exc
                 raise GatewayError(f"{label} retry budget exhausted")
@@ -363,9 +365,17 @@ class PydanticAIModelGateway:
             async def _run() -> Any:
                 from pydantic_ai.settings import ModelSettings
 
+                from quantum_agent.teaching.execution_budget import current_execution_budget
+
                 settings = ModelSettings(temperature=0)
                 if budget:
                     settings["max_tokens"] = budget.limits()[1]
+                execution = current_execution_budget()
+                if execution is not None:
+                    settings["max_tokens"] = min(
+                        settings.get("max_tokens", execution.ledger.limits.output_tokens),
+                        execution.ledger.limits.output_tokens,
+                    )
                 if self._thinking_mode is not None:
                     settings["extra_body"] = {"thinking": {"type": self._thinking_mode}}
                 return await agent.run(conversation, model_settings=settings or None)
@@ -411,7 +421,9 @@ class PydanticAIModelGateway:
             cause: BaseException | None = exc
             seen: set[int] = set()
             while cause is not None and id(cause) not in seen:
-                if isinstance(cause, RecordingBudgetError):
+                from quantum_agent.teaching.execution_budget import ExecutionBudgetError
+
+                if isinstance(cause, (RecordingBudgetError, ExecutionBudgetError)):
                     raise cause from None
                 seen.add(id(cause))
                 cause = cause.__cause__ or cause.__context__

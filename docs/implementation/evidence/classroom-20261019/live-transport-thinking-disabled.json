@@ -1,0 +1,19 @@
+{
+  "label": "AUTOMATED TRANSPORT DIAGNOSTIC; NOT CLASSROOM EVIDENCE",
+  "client": "httpx2",
+  "requested_model": "deepseek-flash",
+  "thinking_mode": "disabled",
+  "max_tokens": 32,
+  "deadline_seconds": 90,
+  "http_status": 200,
+  "returned_model": "deepseek-flash",
+  "usage": {
+    "completion_tokens": 2,
+    "prompt_tokens": 8,
+    "total_tokens": 10
+  },
+  "finish_reasons": [
+    "stop"
+  ],
+  "latency_ms": 74547.0
+}

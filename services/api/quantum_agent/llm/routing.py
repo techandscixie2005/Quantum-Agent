@@ -535,7 +535,11 @@ class ModelRouter:
             max_cooldown_seconds=max_cooldown_seconds,
             clock=clock,
         )
-        self._fallback_budget_seconds = max(1.0, fallback_budget_seconds)
+        if not math.isfinite(fallback_budget_seconds) or fallback_budget_seconds <= 0:
+            raise ValueError("model route fallback budget must be a finite positive number")
+        self._fallback_budget_seconds = fallback_budget_seconds
+        self._authorization_cooldown_seconds = cooldown_seconds
+        self._authorization_cooldown_until = 0.0
         self._clock = clock
 
     def _gateway(self, profile: ModelProfile) -> ModelGateway:
@@ -556,6 +560,10 @@ class ModelRouter:
     ) -> T:
         if not messages:
             raise ValueError("At least one message is required")
+        if self._clock() < self._authorization_cooldown_until:
+            # Authorization is credential-wide. A second task must not bypass
+            # the first task's terminal failure by skipping its cooling profile.
+            raise PermanentGatewayError("Model credential is temporarily unavailable")
         capability_task = self._registry.task_for_operation(task, model_tier)
         profiles = self._registry.profiles_for(capability_task)
         if not profiles or profiles[0].transport is not ModelTransport.CHAT_COMPLETIONS:
@@ -573,6 +581,8 @@ class ModelRouter:
         last_exc: BaseException | None = None
         for route_attempt, profile in enumerate(profiles, 1):
             event(task, "route_attempt", attempt=route_attempt)
+            if self._clock() >= deadline:
+                break
             if not await self._health.acquire(profile.profile_id):
                 event(task, "expected_skip:cooldown", attempt=route_attempt)
                 cooling += 1
@@ -581,7 +591,10 @@ class ModelRouter:
             # starting another profile call that cannot complete under
             # the proxy limit.
             if self._clock() >= deadline:
+                await self._health.abandoned(profile.profile_id)
                 break
+            from quantum_agent.versioning import record_model_call
+
             try:
                 output = await asyncio.wait_for(
                     self._gateway(profile).structured_generate(
@@ -596,16 +609,23 @@ class ModelRouter:
                 # the structured-output contract enforced by the router boundary.
                 validated = TypeAdapter(output_type).validate_python(output)
             except PermanentGatewayError as exc:
-                # PRD V3.1 P1-2: 401/403/400 is a permanent configuration or
-                # authorization error.  Retrying against the next profile
+                # PRD V3.1 P1-2: 401/403 is a credential authorization
+                # error. Retrying against the next profile
                 # cannot fix it (same upstream auth, same request body), so
                 # short-circuit and surface the failure to the caller.  This
                 # is the fail-fast classification the Codex review asked for.
                 failures += 1
                 last_exc = exc
+                self._authorization_cooldown_until = (
+                    self._clock() + self._authorization_cooldown_seconds
+                )
+                record_model_call(model=profile.provider_model, task=task,
+                                  profile=profile.profile_id, outcome="failed")
                 await self._health.failed(profile.profile_id)
                 break
             except (GatewayError, ValidationError, TimeoutError) as exc:
+                record_model_call(model=profile.provider_model, task=task,
+                                  profile=profile.profile_id, outcome="failed")
                 category = failure_category(exc)
                 event(task, category, attempt=route_attempt)
                 failures += 1
@@ -618,10 +638,16 @@ class ModelRouter:
                     await self._health.succeeded(profile.profile_id)
                 else:
                     await self._health.failed(profile.profile_id)
-            except BaseException:
+            except BaseException as exc:
+                record_model_call(model=profile.provider_model, task=task,
+                                  profile=profile.profile_id,
+                                  outcome=("cancelled" if isinstance(exc, asyncio.CancelledError)
+                                           else "failed"))
                 await self._health.abandoned(profile.profile_id)
                 raise
             else:
+                record_model_call(model=profile.provider_model, task=task,
+                                  profile=profile.profile_id, outcome="completed")
                 await self._health.succeeded(profile.profile_id)
                 return validated
         if isinstance(last_exc, PermanentGatewayError):

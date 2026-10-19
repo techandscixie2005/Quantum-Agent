@@ -1,7 +1,6 @@
 import {
   assertHitlScope,
   assertTeachingScope,
-  parseHitlInterruptResponse,
   parseStudentHitlResumeRequest,
   parseTeachingWorkflowOutcome,
   redactHitlProposedResponse,
@@ -16,6 +15,7 @@ import {
 } from "@/app/api/agent/_shared";
 import { assertEvidenceDigests } from "@/app/api/teaching/_shared";
 import { parseScope, requireSameOrigin } from "@/app/api/phase1/_shared";
+import { teachingProxyTimeoutMs } from "@/lib/teaching-timeout";
 
 export const dynamic = "force-dynamic";
 
@@ -119,72 +119,26 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     Accept: "application/json",
     Authorization: `Bearer ${token}`,
   };
-
-  let inspectionResponse: Response;
-  try {
-    inspectionResponse = await fetch(
-      new URL(scopedPath(scope, conversationId, "interrupt"), baseUrl),
-      {
-        method: "GET",
-        headers,
-        cache: "no-store",
-        signal: AbortSignal.timeout(20_000),
-      },
-    );
-  } catch {
-    return agentError(503, "HITL_UNAVAILABLE", "无法读取当前转录确认状态。");
-  }
-  const inspectionTraceId = inspectionResponse.headers.get("x-trace-id");
-  let inspectionPayload: unknown;
-  try {
-    inspectionPayload = await boundedJson(inspectionResponse);
-  } catch {
-    return agentError(
-      502,
-      "INVALID_UPSTREAM_RESPONSE",
-      "人工复核状态无法解析。",
-      inspectionTraceId,
-    );
-  }
-  if (!inspectionResponse.ok) {
-    return agentError(
-      inspectionResponse.status,
-      `UPSTREAM_${inspectionResponse.status}`,
-      safeAgentUpstreamMessage(inspectionResponse.status),
-      inspectionTraceId,
-    );
-  }
-  try {
-    const current = parseHitlInterruptResponse(inspectionPayload);
-    assertHitlScope(current, scope, body.mode);
-    if (
-      current.conversation_id !== conversationId ||
-      current.interrupt.interrupt_id !== body.interrupt_id ||
-      !current.interrupt.student_allowed_actions.includes("confirm_transcription")
-    ) {
-      throw new Error("stale or staff-only interrupt");
-    }
-    await assertEvidenceDigests(current.artifacts.evidence_packet);
-  } catch {
-    return agentError(
-      409,
-      "STALE_OR_STAFF_REVIEW",
-      "该暂停状态已变化，或当前原因只能由助教处理；请刷新后再试。",
-      inspectionTraceId,
-    );
+  let timeoutMs: number;
+  try { timeoutMs = teachingProxyTimeoutMs(); } catch {
+    return agentError(503, "INVALID_TIMEOUT_CONFIGURATION", "教学执行与代理时限配置无效。");
   }
 
+  // The scoped backend authenticates ownership and binds this exact interrupt
+  // identity to its durable decision. A preflight GET would reject a valid retry
+  // after the original response was lost and the checkpoint already advanced.
   let upstream: Response;
   try {
     upstream = await fetch(new URL(scopedPath(scope, conversationId, "resume"), baseUrl), {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
+        interrupt_id: body.interrupt_id,
         action: body.action,
         confirmed_student_attempt: body.confirmed_student_attempt,
       }),
       cache: "no-store",
-      signal: AbortSignal.timeout(240_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     return agentError(

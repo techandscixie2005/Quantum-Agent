@@ -26,12 +26,12 @@ COPY --from=uv /uv /uvx /bin/
 
 # Cache the locked third-party environment independently of project source.
 # The second sync installs the project wheel and its CLI entry point.
-COPY pyproject.toml uv.lock ./
+COPY services/api/pyproject.toml services/api/uv.lock ./
 
 RUN --mount=type=cache,id=${UV_CACHE_ID},target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --no-dev --no-install-project
 
-COPY quantum_agent ./quantum_agent
+COPY services/api/quantum_agent ./quantum_agent
 RUN --mount=type=cache,id=${UV_CACHE_ID},target=/root/.cache/uv,sharing=locked \
     UV_COMPILE_BYTECODE=0 uv sync --frozen --no-dev --no-editable
 
@@ -47,6 +47,10 @@ ENV PATH=/opt/venv/bin:$PATH \
     PYTHONPATH=/workspace/services/api \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1 \
     XDG_CACHE_HOME=/tmp/quantum-agent-cache \
     MPLCONFIGDIR=/tmp/matplotlib
 
@@ -67,9 +71,9 @@ RUN apt-get update \
 WORKDIR /workspace/services/api
 
 COPY --from=dependencies /opt/venv /opt/venv
-COPY --chown=10001:10001 pyproject.toml alembic.ini ./
-COPY --chown=10001:10001 alembic ./alembic
-COPY --chown=10001:10001 quantum_agent ./quantum_agent
+COPY --chown=10001:10001 services/api/pyproject.toml services/api/alembic.ini ./
+COPY --chown=10001:10001 services/api/alembic ./alembic
+COPY --chown=10001:10001 services/api/quantum_agent ./quantum_agent
 
 USER 10001:10001
 
@@ -83,7 +87,11 @@ FROM runtime-base AS test
 
 USER 0:0
 COPY --from=test-dependencies /opt/venv /opt/venv
-COPY --chown=10001:10001 tests ./tests
+COPY --chown=10001:10001 services/api/tests ./tests
+# Offline reference tests certify the exact review materials, which are not
+# copied into the runtime stage or ingested as model teaching sources.
+COPY --chown=10001:10001 docs/teacher-packets /workspace/docs/teacher-packets
+COPY --chown=10001:10001 scripts/verify-heldout-barriers.py scripts/investigate-model-latency.py /workspace/scripts/
 USER 10001:10001
 
 CMD ["pytest", "-q"]

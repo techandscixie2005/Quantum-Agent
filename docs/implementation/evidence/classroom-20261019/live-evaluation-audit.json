@@ -1,0 +1,48 @@
+{
+  "kind": "development_agent_output_audit_not_teacher_approval",
+  "label": "AUTOMATED SYNTHETIC EVALUATION; NO CLASSROOM RESULTS OR TEACHER APPROVAL",
+  "contracts": {
+    "report": "live-model-core-before-precision.json",
+    "result": "4 cases passed; 3 actual provider calls, 1 zero-call conservative diagnosis"
+  },
+  "scientific_wording_issue": {
+    "case": "diagnosis_correct",
+    "quoted_model_phrase": "longer decay length",
+    "finding": "At fixed E, V0, m, kappa and the decay length 1/kappa remain fixed; barrier width and traversal/attenuation distance increase.",
+    "context": "The model correctly classified the synthetic answer but used imprecise scientific terminology in its candidate summary.",
+    "release_boundary": "The released guidance contains no scientific claims and asks a question grounded in the exact student answer.",
+    "status": "Requires actual teacher review; the automated contract pass is not full narrative scientific approval.",
+    "source_snapshot": "source-snapshot-core-before-precision.json",
+    "preventive_change": "General diagnostic prompt now preserves physical terminology and parameter dependence; no topic example or automatic wording substitution."
+  },
+  "initial_telemetry_erratum": {
+    "report": "live-model-initial-failed.json",
+    "affected_field": "http_calls[].latency_ms when there was no response",
+    "reason": "Initial schema/1 finalized pending HTTP durations at run end, inflating the first request.",
+    "use_instead": "cases[].latency_ms = 45000 and 45015 ms",
+    "fix": "Current schema/2 finalizes per case and separately reports response-header and case-exit durations."
+  },
+  "limits": [
+    "No classroom outcomes or actual teacher decisions measured",
+    "No blinded scientific scoring or statistical model accuracy estimate",
+    "Unknown provider weight revision and monetary cost",
+    "Production routing defaults were not changed by the evaluation flags"
+  ],
+  "post_precision_follow_up": {
+    "report": "live-model-evaluation.json",
+    "source_snapshot": "source-snapshot.json",
+    "automated_result": "4 cases passed; 3 actual provider requests",
+    "observed_candidate_summary": "States kappa remains fixed and reasoning is based on attenuation distance; does not reproduce the earlier longer-decay-length phrase.",
+    "conclusion": "Preventive clarification plus one successful sample; no proof of general scientific accuracy or actual teacher approval.",
+    "latencies_seconds": [
+      61.703,
+      91.547,
+      68.61
+    ],
+    "known_usage": {
+      "prompt_tokens": 5493,
+      "completion_tokens": 1315,
+      "total_tokens": 6808
+    }
+  }
+}

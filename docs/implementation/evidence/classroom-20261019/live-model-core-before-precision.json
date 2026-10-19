@@ -1,0 +1,575 @@
+{
+  "schema_version": "synthetic-live-classroom-evaluation/2",
+  "label": "AUTOMATED SYNTHETIC EVALUATION; NOT CLASSROOM RESULTS OR TEACHER APPROVAL",
+  "run_id": "d041b618-0eb5-4470-846a-9920345e38f0",
+  "started_at": "2026-10-19T16:16:23.765492+00:00",
+  "model_alias": "deepseek-flash",
+  "thinking_mode": "disabled",
+  "model_weights_version": "unknown; aliases/returned names are not weight attestations",
+  "cost": "unknown; token usage is recorded when supplied by the provider",
+  "python": "3.12.14",
+  "script_sha256": "c6b8f20461c23837d8459da6258f6f43bd8c84b74e34bca848569c2bb37ff41d",
+  "source_snapshot_sha256": "f31bbe5d32e2adf2d064de94bc0e5e925d20d8aacbab94f5de2d51990fe44c83",
+  "base_revision": "68fd4cdaf4169be40863dfd0b3bed096d885b03e",
+  "dirty": true,
+  "source_tree_sha256": "f67accf2e1d47f21df407fae0308157a353797b4b56709a88b96ffb50e4723f8",
+  "fixture": {
+    "path": "content\\barrier_demo\\lecture.html",
+    "sha256": "14428ed2aed3ae1a5305677b79e8021650f50920ff2fb18117f5fc65d9c97c37",
+    "publication": "offline fixture; no database publication",
+    "graph": "synthetic directed prerequisite fixture",
+    "teacher_approval": "not_performed",
+    "packet": {
+      "id": "2b488c19-f15c-4190-8cf9-0faf8579fb98",
+      "course_id": "8b1eecf1-5abe-58d2-81a1-58310650aa0c",
+      "curriculum_edition_id": "b32ed464-459a-59e0-9eab-20f10bcd19f5",
+      "query": "无吸收、质量相同且0<E<V0的有限矩形势垒，固定E和V0只增大宽度，T如何变化？",
+      "created_at": "2026-10-19T16:16:23.764492Z",
+      "coverage": "sufficient",
+      "evidence": [
+        {
+          "evidence_id": "5016bc38-f612-5ddd-b27a-f715ebed921b",
+          "chunk_id": "eb1f5bd4-299d-57b4-849b-04068d5791ef",
+          "document_id": "a47a451f-9a86-5f74-ad61-70e4a25eb755",
+          "document_version_id": "3092a4a0-4479-5a6e-9f84-bda99f969f6f",
+          "document_title": "自编开发验收讲义；未获任课教师审核",
+          "document_version": 1,
+          "source_file_name": "lecture.html",
+          "source_file_sha256": "14428ed2aed3ae1a5305677b79e8021650f50920ff2fb18117f5fc65d9c97c37",
+          "source_chunk_sha256": "d956dd6dc1a0e2709a83996f3b95e1c428ee96d3b30bfa18ac8f85c15f773596",
+          "evidence_sha256": "78d1c3b44468e07e533401f07ed4cb60497a79d0f4f0487bdb8b28ec152fd199",
+          "curriculum_edition_id": "b32ed464-459a-59e0-9eab-20f10bcd19f5",
+          "chapter": "有限矩形势垒",
+          "section_path": [],
+          "locator": {
+            "locator_type": "text_lines",
+            "physical_page": null,
+            "printed_page_label": null,
+            "slide_number": null,
+            "paragraph_start": null,
+            "paragraph_end": null,
+            "sheet_name": null,
+            "row_start": null,
+            "row_end": null,
+            "line_start": 5,
+            "line_end": 5
+          },
+          "source_chunk": "<h2>§2 禁阻区并不要求波函数为零</h2><p>定态薛定谔方程移项得到 ψ″=2m(V₀−E)ψ/ℏ²=κ²ψ，其中 κ=√[2m(V₀−E)]/ℏ&gt;0。正号使区域解为两个指数项，而不是把 ψ 强制为零。</p><p class=\"formula\">ψⅡ(x)=C exp(κx)+D exp(−κx)</p><p>有限区间内两个指数项都应保留。右侧出射波的系数可能非零；E&lt;V₀ 并不推出 ψ 处处为零，也不推出 T=0。没有学生的具体步骤时，不能据这个常见误解判断学生犯了它。</p></section>",
+          "evidence_snippet": "有限区间内两个指数项都应保留。右侧出射波的系数可能非零；",
+          "kind": "course_material",
+          "authority_priority": 0,
+          "contributions": [
+            {
+              "channel": "postgres_full_text",
+              "rank": 1,
+              "raw_score": null,
+              "fused_score": 1.0
+            }
+          ]
+        },
+        {
+          "evidence_id": "f339e489-e78f-5225-b63f-13b550c5b711",
+          "chunk_id": "2e2e9bc9-0e95-500f-91dd-aa7f23c8fade",
+          "document_id": "a47a451f-9a86-5f74-ad61-70e4a25eb755",
+          "document_version_id": "3092a4a0-4479-5a6e-9f84-bda99f969f6f",
+          "document_title": "自编开发验收讲义；未获任课教师审核",
+          "document_version": 1,
+          "source_file_name": "lecture.html",
+          "source_file_sha256": "14428ed2aed3ae1a5305677b79e8021650f50920ff2fb18117f5fc65d9c97c37",
+          "source_chunk_sha256": "bcea2e7c51fd92db2d6d7aa924c9c61e354305fdfeca434ff38aa1f8eb15f9d9",
+          "evidence_sha256": "bf907070a9209ecaecd630c9735329965c71697e8e0a8e7861ef8be6dba7b2c9",
+          "curriculum_edition_id": "b32ed464-459a-59e0-9eab-20f10bcd19f5",
+          "chapter": "有限矩形势垒",
+          "section_path": [],
+          "locator": {
+            "locator_type": "text_lines",
+            "physical_page": null,
+            "printed_page_label": null,
+            "slide_number": null,
+            "paragraph_start": null,
+            "paragraph_end": null,
+            "sheet_name": null,
+            "row_start": null,
+            "row_end": null,
+            "line_start": 6,
+            "line_end": 6
+          },
+          "source_chunk": "<section><h1>自编演示讲义 · QB-03 v1.0</h1><h2>§3 边界连续性连接透射振幅</h2><p>令 ψⅠ=A exp(ikx)+B exp(−ikx)，ψⅢ=F exp(ikx)，k=√(2mE)/ℏ。右侧无向左入射波。两端各匹配波函数及其导数：</p><p class=\"formula\">A+B=C+D<br>ik(A−B)=κ(C−D)<br>C exp(κa)+D exp(−κa)=F exp(ika)<br>κ[C exp(κa)−D exp(−κa)]=ikF exp(ika)</p><p>四个连续条件确定反射、势垒内及透射振幅相对入射振幅的比例。这一步是指数解与透射率之间的推导桥，而非直接把波函数当概率。</p><h2>§4 概率流与精确透射率</h2><p>概率流 j=(ℏ/m) Im(ψ*ψ′)。两侧波数相同，T=j透/j入=|F/A|²，R=|B/A|²。消去中间系数得到有限势垒精确式：</p><p class=\"formula\">T={1+[V₀²/(4E(V₀−E))]sinh²(κa)}⁻¹</p><p>无吸收时应满足 R+T=1。但若代码把 R 定义成 1−T，守恒是构造恒等式，不能独立证明 T 正确；应另解四个复数边界方程得到 r,t 后交叉比较。</p></section>",
+          "evidence_snippet": "概率流 j=(ℏ/m) Im(ψ*ψ′)。两侧波数相同，T=j透/j入=|F/A|²，R=|B/A|²。",
+          "kind": "course_material",
+          "authority_priority": 0,
+          "contributions": [
+            {
+              "channel": "postgres_full_text",
+              "rank": 2,
+              "raw_score": null,
+              "fused_score": 0.5
+            }
+          ]
+        },
+        {
+          "evidence_id": "ff66f2ee-8ecd-5901-b599-909c5cb8976b",
+          "chunk_id": "94baf9cf-3b79-50d1-b6a8-8576bbd566f3",
+          "document_id": "a47a451f-9a86-5f74-ad61-70e4a25eb755",
+          "document_version_id": "3092a4a0-4479-5a6e-9f84-bda99f969f6f",
+          "document_title": "自编开发验收讲义；未获任课教师审核",
+          "document_version": 1,
+          "source_file_name": "lecture.html",
+          "source_file_sha256": "14428ed2aed3ae1a5305677b79e8021650f50920ff2fb18117f5fc65d9c97c37",
+          "source_chunk_sha256": "37181132de4ab6a50dd7832c25c8c11a7bc28c239f99863a67762543fa6c2863",
+          "evidence_sha256": "cabbd6e8afc553af3de78654088b1444984c36c388d3f9314d2862b4b8d09c53",
+          "curriculum_edition_id": "b32ed464-459a-59e0-9eab-20f10bcd19f5",
+          "chapter": "有限矩形势垒",
+          "section_path": [],
+          "locator": {
+            "locator_type": "text_lines",
+            "physical_page": null,
+            "printed_page_label": null,
+            "slide_number": null,
+            "paragraph_start": null,
+            "paragraph_end": null,
+            "sheet_name": null,
+            "row_start": null,
+            "row_end": null,
+            "line_start": 7,
+            "line_end": 7
+          },
+          "source_chunk": "<section><h1>自编演示讲义 · QB-03 v1.0</h1><h2>§5 宽度、解释与迁移</h2><p>固定 E、V₀、m 时 κ 不变。a 增大使 κa 增大，sinh²(κa) 严格增大，因此有限势垒透射率 T 降低。更长禁阻区使到达另一端的透射振幅更小；不能说只是宽度增加就使 κ 变大，也不能说电子在无吸收势垒内损失能量。</p><p>只有 κa 足够大时才可用厚势垒指数近似，不能用近似代替本任务的精确数值验收。讲义不给出课堂迁移或 Solo 的题目数值答案。定性题只要求趋势及因果解释；评价解释是结构化模型判断，参考数值是独立计算，二者分别记录。</p><h2>§6 单位与支持边界</h2><p>输入 eV、nm，计算转为 J、m：1 eV=1.602176634×10⁻¹⁹ J，1 nm=10⁻⁹ m；m电子=9.1093837015×10⁻³¹ kg，ℏ=1.054571817×10⁻³⁴ J·s。本文应用审核范围 E∈[0.5,9] eV、V₀∈[1,20] eV、a∈[0.05,0.5] nm 且 0&lt;E&lt;V₀。计算器独立决定数值是否可靠；E≈V₀ 或极厚区可拒绝/无法判定。</p><p class=\"note\">背景阅读：OpenStax University Physics Volume 3 §7.6，https://openstax.org/books/university-physics-volume-3/pages/7-6-the-quantum-tunneling-of-particles-through-potential-barriers 。本页中文推导为自编，未将外部教材文字冒充本课程检索结果。数值复核：项目的独立边界匹配测试。</p></section></html>",
+          "evidence_snippet": "固定 E、V₀、m 时 κ 不变。a 增大使 κa 增大，sinh²(κa) 严格增大，因此有限势垒透射率 T 降低。",
+          "kind": "course_material",
+          "authority_priority": 0,
+          "contributions": [
+            {
+              "channel": "postgres_full_text",
+              "rank": 3,
+              "raw_score": null,
+              "fused_score": 0.3333333333333333
+            }
+          ]
+        }
+      ],
+      "graph_nodes": [
+        {
+          "id": "1bb811fb-8ec4-53df-a4b8-65c306ffd331",
+          "node_type": "Concept",
+          "name": "概率流",
+          "aliases": []
+        },
+        {
+          "id": "bace34ad-c4c4-548e-9a02-a7cde6a0f149",
+          "node_type": "Concept",
+          "name": "有限势垒隧穿",
+          "aliases": []
+        }
+      ],
+      "graph_edges": [
+        {
+          "id": "aff379f3-a40f-565d-8141-4bfc9d6dcece",
+          "source_id": "1bb811fb-8ec4-53df-a4b8-65c306ffd331",
+          "target_id": "bace34ad-c4c4-548e-9a02-a7cde6a0f149",
+          "relation_type": "PREREQUISITE_OF"
+        }
+      ],
+      "degraded_channels": [],
+      "warnings": []
+    }
+  },
+  "course_package": {
+    "package_id": "finite-barriers",
+    "version": "1.0.0",
+    "content_sha256": "dff1a96d36bc0f4345750196d8a9bc7b1ad66b6bfe05c8a897caeb5e3f96ce7d",
+    "objective_ids": [
+      "FB-O1",
+      "FB-O2",
+      "FB-O3",
+      "FB-O4"
+    ],
+    "rubric_ids": [
+      "FB-R1",
+      "FB-R2",
+      "FB-R3",
+      "FB-R4"
+    ]
+  },
+  "budgets": {
+    "http_requests": 3,
+    "output_tokens_each": 2048,
+    "request_bytes_each": 65536,
+    "capability_seconds": 120.0,
+    "total_seconds": 600.0
+  },
+  "live_requested": true,
+  "extended": false,
+  "http_calls": [
+    {
+      "case": "diagnosis_correct",
+      "requested_model": "deepseek-flash",
+      "status": 200,
+      "response_headers_ms": 68250.0,
+      "returned_model": "deepseek-flash",
+      "usage": {
+        "prompt_tokens": 1815,
+        "completion_tokens": 215,
+        "total_tokens": 2030
+      },
+      "elapsed_until_case_exit_ms": 68265.0,
+      "timing_basis": "response_headers_and_case_exit_recorded_separately",
+      "structured_outcome": "completed"
+    },
+    {
+      "case": "diagnosis_incorrect",
+      "requested_model": "deepseek-flash",
+      "status": 200,
+      "response_headers_ms": 64781.0,
+      "returned_model": "deepseek-flash",
+      "usage": {
+        "prompt_tokens": 1811,
+        "completion_tokens": 407,
+        "total_tokens": 2218
+      },
+      "elapsed_until_case_exit_ms": 64796.0,
+      "timing_basis": "response_headers_and_case_exit_recorded_separately",
+      "structured_outcome": "completed"
+    },
+    {
+      "case": "guidance_incorrect",
+      "requested_model": "deepseek-flash",
+      "status": 200,
+      "response_headers_ms": 62312.0,
+      "returned_model": "deepseek-flash",
+      "usage": {
+        "prompt_tokens": 1806,
+        "completion_tokens": 748,
+        "total_tokens": 2554
+      },
+      "elapsed_until_case_exit_ms": 62328.0,
+      "timing_basis": "response_headers_and_case_exit_recorded_separately",
+      "structured_outcome": "completed"
+    }
+  ],
+  "cases": [
+    {
+      "checks": {
+        "not_degraded": true,
+        "supported_prerequisites_only": true,
+        "no_unsupported_diagnosis_or_call": true
+      },
+      "synthetic_answer": null,
+      "diagnosis": {
+        "status": "insufficient_evidence",
+        "summary": "尚未观察到学生的解题或推导过程，不能判断具体误解。",
+        "likely_misconception": null,
+        "observation_basis": [
+          "student_message"
+        ],
+        "target_concepts": [
+          "有限势垒隧穿",
+          "概率流"
+        ],
+        "first_error": null,
+        "misconception_candidates": [],
+        "missing_prerequisites": [],
+        "prerequisite_support": [],
+        "progress_state": "no_attempt",
+        "confidence": 0.0,
+        "verification_needed": false,
+        "reason": "No non-empty student attempt was supplied, so no misconception or first consequential error can be inferred.",
+        "prerequisite_topics": [
+          "概率流"
+        ]
+      },
+      "passed": true,
+      "name": "diagnosis_no_attempt",
+      "latency_ms": 0.0,
+      "model_calls": []
+    },
+    {
+      "checks": {
+        "not_degraded": true,
+        "supported_prerequisites_only": true,
+        "actual_model_success": true,
+        "correct_answer_not_marked_wrong": true
+      },
+      "synthetic_answer": "透射率降低。E和V0不变使κ不变；更长禁阻区带来更长衰减距离，使透射振幅更小。",
+      "diagnosis": {
+        "status": "model_inference",
+        "summary": "The student correctly states that T decreases when the barrier width increases at fixed E and V0, and gives a valid physical reason (κ fixed, longer decay length, smaller transmission amplitude). This matches the course result that sinh²(κa) strictly increases, so T decreases. No clear error.",
+        "likely_misconception": null,
+        "observation_basis": [
+          "student_attempt",
+          "course_evidence"
+        ],
+        "target_concepts": [
+          "有限势垒隧穿",
+          "概率流"
+        ],
+        "first_error": {
+          "inferred": true,
+          "step_index": null,
+          "kind": "no_clear_error",
+          "description": "No faulty step; the student's answer is consistent with the course result."
+        },
+        "misconception_candidates": [],
+        "missing_prerequisites": [],
+        "prerequisite_support": [],
+        "progress_state": "started",
+        "confidence": 0.85,
+        "verification_needed": false,
+        "reason": "Student answer aligns with course evidence (κ fixed, sinh²(κa) increases, T decreases); no error to localize.",
+        "prerequisite_topics": [
+          "概率流"
+        ]
+      },
+      "passed": true,
+      "name": "diagnosis_correct",
+      "latency_ms": 71546.0,
+      "model_calls": [
+        {
+          "model": "deepseek-flash",
+          "task": "diagnose_student_progress_structured",
+          "profile": "reasoning_primary",
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "checks": {
+        "not_degraded": true,
+        "supported_prerequisites_only": true,
+        "actual_model_success": true,
+        "error_localized_as_inference": true
+      },
+      "synthetic_answer": "因为E<V0，有限势垒里面波函数处处为零，所以透射率严格等于零，宽度没有影响。",
+      "diagnosis": {
+        "status": "model_inference",
+        "summary": "The student claims that for E<V0 the wavefunction vanishes everywhere inside a finite barrier, so T=0 and width is irrelevant. This conflates the infinite-well/forbidden-region intuition with a finite barrier. Course evidence shows both exponential terms must be kept inside the finite barrier, the outgoing coefficient can be nonzero, and T depends on sinh²(κa), which grows with width a, so T decreases as width increases.",
+        "likely_misconception": "For E<V0 the wavefunction is identically zero inside a finite barrier, hence transmission is exactly zero and independent of barrier width.",
+        "observation_basis": [
+          "student_attempt",
+          "course_evidence"
+        ],
+        "target_concepts": [
+          "有限势垒隧穿",
+          "概率流"
+        ],
+        "first_error": {
+          "inferred": true,
+          "step_index": 0,
+          "kind": "physical_interpretation_error",
+          "description": "Student asserts '有限势垒里面波函数处处为零，所以透射率严格等于零' — treating a finite barrier as if the wavefunction must vanish inside, ignoring the retained exponential terms and nonzero outgoing amplitude."
+        },
+        "misconception_candidates": [
+          {
+            "statement": "Inside a finite potential barrier with E<V0 the wavefunction is zero everywhere, so no tunneling occurs.",
+            "confidence": 0.85
+          },
+          {
+            "statement": "Barrier width has no effect on transmission when E<V0.",
+            "confidence": 0.8
+          }
+        ],
+        "missing_prerequisites": [],
+        "prerequisite_support": [],
+        "progress_state": "started",
+        "confidence": 0.8,
+        "verification_needed": false,
+        "reason": "Student's answer directly contradicts course evidence that finite-barrier wavefunction retains exponential terms and T depends on sinh²(κa), decreasing with width.",
+        "prerequisite_topics": [
+          "概率流"
+        ]
+      },
+      "passed": true,
+      "name": "diagnosis_incorrect",
+      "latency_ms": 64875.0,
+      "model_calls": [
+        {
+          "model": "deepseek-flash",
+          "task": "diagnose_student_progress_structured",
+          "profile": "reasoning_primary",
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "checks": {
+        "actual_model_success": true,
+        "evidence_validation": true,
+        "answer_grounded_probe": true
+      },
+      "response": {
+        "orientation": "下面只给出与当前卡点直接相关的一级提示。",
+        "claims": [],
+        "next_question": "你写道“因为E<V0，有限势垒里面波函数处处为零，所以透射率严格等于零，宽度没有影响。”。请说明其中最关键的一步依据，并指出什么证据会支持或修正这一步。",
+        "derivation_bridge": null,
+        "status": "grounded",
+        "limitations": [],
+        "student_answer_anchor": "因为E<V0，有限势垒里面波函数处处为零，所以透射率严格等于零，宽度没有影响。"
+      },
+      "validation": {
+        "passed": true,
+        "citation_ids_valid": true,
+        "literal_course_claims_valid": true,
+        "scientific_references_valid": true,
+        "warnings": []
+      },
+      "passed": true,
+      "name": "guidance_incorrect",
+      "latency_ms": 62407.0,
+      "model_calls": [
+        {
+          "model": "deepseek-flash",
+          "task": "compose_grounded_teaching_response",
+          "profile": "reasoning_primary",
+          "outcome": "completed"
+        }
+      ]
+    }
+  ],
+  "not_exercised": [
+    "database/replica concurrency",
+    "classroom outcomes",
+    "teacher approvals",
+    "external unaided behavior"
+  ],
+  "deterministic": {
+    "checks": {
+      "finite_positive_tiny_reference": true,
+      "zero_rejected": true,
+      "accurate_value_accepted": true,
+      "relative_error_rejected": true,
+      "solo_projection_hides_help": true,
+      "solo_projection_preserves_initial_answer": true
+    },
+    "passed": true,
+    "reference": {
+      "kind": "rectangular_barrier_tunnelling",
+      "method": "numerical",
+      "status": "pass",
+      "tool": {
+        "name": "numpy",
+        "version": "2.5.2"
+      },
+      "inputs_sha256": "5ad75bd23a033978384e10d0e7d5199c598c9cccc88aa98e143602c614d9d5c8",
+      "observations": [
+        "Rectangular barrier: E=0.5 eV, V0=20 eV, a=5e-10 m.",
+        "Transmission T=5.83301248552e-11, reflection R=0.999999999942, |R+T-1|=1.110e-16."
+      ],
+      "limitations": [
+        "Stationary scattering calculation; does not model wave-packet dispersion or finite-time effects.",
+        "Analytic T is cross-checked against independent boundary matching; R is obtained from the reflected amplitude, not defined as 1-T. The E≈V0 band and point calculations outside the verified float64 range are unsupported. Optional scans outside that range are omitted."
+      ],
+      "metrics": {
+        "T": 5.83301248551651e-11,
+        "R": 0.9999999999416698,
+        "conservation_error": 1.1102230246251565e-16,
+        "reference_T": 5.833012485516513e-11,
+        "reference_error": 2.5849394142282115e-26,
+        "reference_relative_error": 4.431568457373729e-16,
+        "reference_relative_tolerance": 1e-08,
+        "transmission_comparison": "positive_relative_v2",
+        "visualization_status": "rendered",
+        "reference_method": "independent_boundary_matching_v1",
+        "conservation_tolerance": 1e-09,
+        "energy_eV": 0.5,
+        "barrier_height_eV": 20.0,
+        "barrier_width_m": 5e-10,
+        "particle_mass_kg": 9.1093837015e-31,
+        "k1": 3622626284.404427,
+        "kappa_or_k2": 22623293895.05107,
+        "regime": "tunnelling"
+      },
+      "visualization": {
+        "renderer": {
+          "name": "matplotlib",
+          "version": "3.11.1"
+        },
+        "kind": "line",
+        "title": "Rectangular barrier transmission vs width",
+        "x_label": "barrier width (m)",
+        "y_label": "transmission T",
+        "x": [
+          5.000000000000001e-11,
+          8.064516129032259e-11,
+          1.1129032258064517e-10,
+          1.4193548387096777e-10,
+          1.7258064516129034e-10,
+          2.0322580645161293e-10,
+          2.338709677419355e-10,
+          2.645161290322581e-10,
+          2.951612903225807e-10,
+          3.258064516129033e-10,
+          3.564516129032259e-10,
+          3.8709677419354837e-10,
+          4.1774193548387097e-10,
+          4.4838709677419356e-10,
+          4.790322580645162e-10,
+          5.096774193548388e-10,
+          5.403225806451613e-10,
+          5.709677419354839e-10,
+          6.016129032258065e-10,
+          6.322580645161291e-10,
+          6.629032258064517e-10,
+          6.935483870967742e-10,
+          7.241935483870968e-10,
+          7.548387096774194e-10,
+          7.85483870967742e-10,
+          8.161290322580646e-10,
+          8.467741935483872e-10,
+          8.774193548387098e-10,
+          9.080645161290323e-10,
+          9.387096774193549e-10,
+          9.693548387096775e-10,
+          1e-09
+        ],
+        "series": [
+          {
+            "label": "T(width)",
+            "y": [
+              0.04815084918371394,
+              0.010583707060117173,
+              0.0025628540799111357,
+              0.0006355070048099467,
+              0.000158518407691818,
+              3.9598497369772805e-05,
+              9.895494907975125e-06,
+              2.4730692070205633e-06,
+              6.180804418696327e-07,
+              1.544742968865868e-07,
+              3.8607179644091487e-08,
+              9.648950568963803e-09,
+              2.411526982516574e-09,
+              6.027041465460355e-10,
+              1.5063165078885618e-10,
+              3.76468195567735e-11,
+              9.408932424319918e-12,
+              2.351540194242806e-12,
+              5.877118716430836e-13,
+              1.468846864356163e-13,
+              3.671035442758811e-14,
+              9.174885108192107e-15,
+              2.293045601468534e-15,
+              5.73092531231752e-16,
+              1.432309279602983e-16,
+              3.579718388630007e-17,
+              8.946659722436335e-18,
+              2.236006062468443e-18,
+              5.588368471036645e-19,
+              1.3966805677440665e-19,
+              3.490672847404501e-20,
+              8.724111446104003e-21
+            ]
+          }
+        ],
+        "rendering_sha256": "a916ae176d01666726fc981d6d1ed521905b9c87e9829d3852e4b4c6f5ee2e13"
+      },
+      "error_code": null
+    },
+    "comparisons": {
+      "0": "fail",
+      "1": "pass",
+      "2": "fail"
+    },
+    "limitation": "Projection only; database isolation/retry persistence are offline tests."
+  },
+  "passed": true
+}

@@ -53,10 +53,11 @@ up: require-secrets ## Start databases, migrate, and launch healthy API/web serv
 bootstrap: up ingest ## Start the stack, then ingest the checksum-verified real manifest.
 
 demo-bootstrap: require-secrets ## Seed the competition demo student account for API-key login.
+	@test "$${ALLOW_SHARED_DEMO_LOGIN:-false}" = "true" || { echo 'Shared scripted demo requires explicit ALLOW_SHARED_DEMO_LOGIN=true outside production.'; exit 1; }
 	$(COMPOSE) -f compose.yaml exec -T api quantum-agent seed-login-account --activate-course
 	@echo ""
-	@echo "Login account seeded. From the browser, enter /agent, submit your USTC"
-	@echo "API key in the login card, and the API mints a session on demand."
+	@echo "Scripted shared demo account seeded. Enable the same opt-in on the"
+	@echo "development API and restart it. Real classrooms use personal invitations."
 	@echo "See DEMO.md for the full judge entry procedure."
 
 down: ## Stop all stack services while preserving named data volumes.

@@ -6,6 +6,10 @@ QuantumAgent 是面向量子物理教学的工作流驱动智能体，将课程�
 
 [观看原始演示](docs/implementation/evidence/video-parity-flash-20260918/main-raw.webm) · [查看验收报告](docs/implementation/VIDEO_PARITY_ACCEPTANCE.md) · [复现运行环境](docs/implementation/LOCAL_STACK.md) · [版本与发布说明](docs/implementation/COMPETITION_RELEASE.md)
 
+2026-10-19 课堂增量：面向高等教育“AI + 教学”场景，补强科学验证、恢复、个人身份隔离、版本化教学包、Solo 首答、教师决定和证据导出。见[本次改动与验证](docs/implementation/CLASSROOM_IMPROVEMENTS.md)及[真实课堂评价规程](docs/implementation/CLASSROOM_EVALUATION_PROTOCOL.md)。自动化与脚本演示结果不代表真实课堂成效或教师批准；下方 9 月材料仍是历史记录。
+
+2026-10-20 试用准备：已执行真实 PostgreSQL / Redis / 双 worker 浏览器恢复测试，加入统一单轮预算、首轮待复核队列、分项测评证据和完整待审题本。见[可复现试用准备报告](docs/implementation/CLASSROOM_TRIAL_READINESS.md)与[教师测评材料](docs/teacher-packets/finite-barriers-heldout/1.0.0/README.md)。实际教师审定、学生前后测与延迟测仍待执行。
+
 ![有限矩形势垒工作台：生成代码的执行记录、独立数值核验与透射率曲线](docs/implementation/evidence/video-parity-flash-20260918/1366-verify.png)
 
 *2026-09-18 历史验收截图：回看有限矩形势垒的代码执行与数值核验结果。*

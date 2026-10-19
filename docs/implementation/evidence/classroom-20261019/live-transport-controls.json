@@ -1,0 +1,16 @@
+[
+  {
+    "label": "AUTOMATED TRANSPORT DIAGNOSTIC; NOT CLASSROOM EVIDENCE",
+    "client": "httpx",
+    "requested_model": "deepseek-flash",
+    "failure_type": "ReadTimeout",
+    "latency_ms": 30328.0
+  },
+  {
+    "label": "AUTOMATED TRANSPORT DIAGNOSTIC; NOT CLASSROOM EVIDENCE",
+    "client": "httpx2",
+    "requested_model": "deepseek-flash",
+    "failure_type": "ReadTimeout",
+    "latency_ms": 30172.0
+  }
+]

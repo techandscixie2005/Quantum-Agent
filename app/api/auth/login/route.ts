@@ -43,14 +43,16 @@ function clearQaSessionCookie(): string {
   return `qa_session=; HttpOnly; Max-Age=0; Path=/; SameSite=${sameSite}${secure ? "; Secure" : ""}`;
 }
 
+async function rateDigest(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export async function POST(request: Request) {
-  const rate = checkRateLimit(
-    `login:${request.headers.get("cf-connecting-ip") ?? "local"}`,
-    10,
-    300_000,
-  );
-  if (!rate.allowed) {
-    return Response.json(
+  const coarseBucket = `login:ip:${await rateDigest(request.headers.get("cf-connecting-ip") ?? "local")}`;
+  function limited(bucket: string): Response | null {
+    const rate = checkRateLimit(bucket, 10, 300_000);
+    return rate.allowed ? null : Response.json(
       { error: "登录尝试过于频繁，请稍后再试" },
       { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } },
     );
@@ -62,12 +64,29 @@ export async function POST(request: Request) {
       { status: 503 },
     );
   }
-  let body: { api_key?: string; course_id?: string };
+  let body: { api_key?: string; course_id?: string; classroom_access_token?: string };
   try {
-    body = (await request.json()) as { api_key?: string; course_id?: string };
+    const value: unknown = await request.json();
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("object required");
+    body = value as typeof body;
+    if (typeof body.api_key !== "string" ||
+        (body.classroom_access_token !== undefined && typeof body.classroom_access_token !== "string") ||
+        (body.course_id !== undefined && typeof body.course_id !== "string")) throw new Error("invalid fields");
   } catch {
+    const rejected = limited(coarseBucket);
+    if (rejected) return rejected;
     return Response.json({ error: "请求正文必须是 JSON 对象。" }, { status: 400 });
   }
+  const invitation = body.classroom_access_token?.trim() || "";
+  let bucket = coarseBucket;
+  if (invitation.length >= 32 && invitation.length <= 512) {
+    // Never retain a plaintext access token in the process-local limiter.
+    // Python validates the invitation before selecting its per-person bucket;
+    // fabricated tokens still share Python's coarse guessing budget.
+    bucket = `login:invite:${await rateDigest(invitation)}`;
+  }
+  const rejected = limited(bucket);
+  if (rejected) return rejected;
   const apiKey = (body.api_key ?? "").trim();
   if (!apiKey || apiKey.length < 16 || apiKey.length > 256) {
     return Response.json({ error: "请提供有效的 API Key。" }, { status: 400 });
@@ -77,9 +96,10 @@ export async function POST(request: Request) {
     upstream = await fetch(new URL("/api/v1/auth/login", baseUrl), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: apiKey, course_id: body.course_id ?? null }),
+      body: JSON.stringify({ api_key: apiKey, course_id: body.course_id ?? null,
+        classroom_access_token: invitation || null }),
       cache: "no-store",
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(35_000),
     });
   } catch {
     return Response.json(
@@ -90,7 +110,7 @@ export async function POST(request: Request) {
   if (!upstream.ok) {
     const message =
       upstream.status === 401
-        ? "API Key 被模型服务拒绝或模型服务不可用。"
+        ? "课堂访问凭证或 API Key 无效、已使用或已过期；请联系任课教师。"
         : upstream.status === 429
           ? "登录尝试过于频繁，请稍后再试。"
           : "登录被拒绝。";

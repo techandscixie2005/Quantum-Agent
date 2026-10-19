@@ -5,6 +5,10 @@ SANDBOX_TEST_IMAGE="${SANDBOX_TEST_IMAGE:-quantum-agent-sandbox-attack:test}"
 SANDBOX_TEST_CONTAINER="qa-sandbox-attack-${$}"
 
 cleanup_sandbox_attack() {
+  local result=$?
+  if [ "${result}" != "0" ]; then
+    docker logs --tail 100 "${SANDBOX_TEST_CONTAINER}" >&2 || true
+  fi
   docker rm -f "${SANDBOX_TEST_CONTAINER}" >/dev/null 2>&1 || true
 }
 trap cleanup_sandbox_attack EXIT
@@ -15,18 +19,20 @@ if [ "${SANDBOX_SKIP_BUILD:-0}" = "1" ]; then
     --volume "${PWD}/services/api/quantum_agent:/workspace/services/api/quantum_agent:ro"
   )
 else
-  docker build --quiet --target runtime --tag "${SANDBOX_TEST_IMAGE}" services/api >/dev/null
+  docker build --quiet --file services/api/Dockerfile --target runtime --tag "${SANDBOX_TEST_IMAGE}" . >/dev/null
 fi
 docker run --detach --name "${SANDBOX_TEST_CONTAINER}" \
   --network none \
   --read-only \
   --tmpfs /tmp:size=128m,noexec,nosuid,nodev \
-  --tmpfs /run/sandbox:size=1m,nosuid,nodev \
+  --tmpfs /run/sandbox:size=1m,uid=10001,gid=10001,mode=0700,nosuid,nodev \
   --pids-limit 32 \
   --memory 768m \
   --cpus 1.0 \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
+  --env OPENBLAS_NUM_THREADS=1 --env OMP_NUM_THREADS=1 \
+  --env MKL_NUM_THREADS=1 --env NUMEXPR_NUM_THREADS=1 \
   "${SANDBOX_SOURCE_MOUNT[@]}" \
   "${SANDBOX_TEST_IMAGE}" \
   uvicorn quantum_agent.sandbox_runner:app --uds /run/sandbox/runner.sock >/dev/null
@@ -72,6 +78,8 @@ from quantum_agent.coding.sandbox import RemoteSandbox
 from quantum_agent.science.models import SandboxLimits
 async def main():
  s=RemoteSandbox('unix:///run/sandbox/runner.sock')
+ benign=await s.execute_program(CodeArtifact(purpose='benign control',code='print(2 + 2)'),SandboxLimits(wall_time_seconds=2,memory_megabytes=64))
+ assert benign.completed and benign.stdout_bounded.strip() == '4'
  cpu=await s.execute_program(CodeArtifact(purpose='cpu attack',code='while True:\n    pass'),SandboxLimits(wall_time_seconds=0.5,memory_megabytes=64))
  assert not cpu.completed and (cpu.timed_out or cpu.exit_code != 0)
  memory=await s.execute_program(CodeArtifact(purpose='memory attack',code='x = [bytearray(1024 * 1024) for _ in range(2048)]'),SandboxLimits(wall_time_seconds=2,memory_megabytes=64))

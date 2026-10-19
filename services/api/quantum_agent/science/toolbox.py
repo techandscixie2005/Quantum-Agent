@@ -8,6 +8,7 @@ import json
 import math
 import multiprocessing
 from collections.abc import Mapping
+from functools import lru_cache
 from multiprocessing.queues import Queue
 from typing import Any, Protocol, cast
 
@@ -42,6 +43,11 @@ _MAX_AST_NODES = 128
 _MAX_AST_DEPTH = 20
 _MAX_FUNCTION_CALLS = 24
 _MAX_RESULT_OPERATIONS = 512
+_MAX_CACHED_PLOT_JSON_BYTES = 64_000
+# The independent complex 4x4 solve can return 1 + a few ULP at a
+# transmission resonance. This upper-bound allowance is independent of a
+# caller's conservation tolerance, and never supplies a near-zero floor.
+_PROBABILITY_ROUNDOFF_TOLERANCE = 32 * math.ulp(1.0)
 
 
 class UnsafeExpressionError(ValueError):
@@ -395,6 +401,23 @@ def _verify_unitarity(request: NumericalUnitarityRequest) -> ScientificVerificat
 
 
 def _render_line_spec(request: LineVisualizationRequest) -> VisualizationSpec:
+    # Repeated verification of a course example need not redraw the same
+    # figure. Cache immutable JSON snapshots, then deserialize for each caller
+    # so mutable series/x lists cannot corrupt a later result. Both key size
+    # and entry count are bounded (roughly 2 MiB of serialized plot data).
+    canonical = request.model_dump_json()
+    if len(canonical.encode("utf-8")) > _MAX_CACHED_PLOT_JSON_BYTES:
+        return _render_line_spec_uncached(request)
+    return VisualizationSpec.model_validate_json(_cached_line_spec_json(canonical))
+
+
+@lru_cache(maxsize=16)
+def _cached_line_spec_json(canonical: str) -> str:
+    request = LineVisualizationRequest.model_validate_json(canonical)
+    return _render_line_spec_uncached(request).model_dump_json()
+
+
+def _render_line_spec_uncached(request: LineVisualizationRequest) -> VisualizationSpec:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -651,7 +674,9 @@ def _verify_rectangular_barrier(
             error_code="BARRIER_NUMERIC_EDGE_CASE",
         )
 
-    # Guard: T must be a finite number in [0, 1].
+    # A zero is permitted here only so an underflowed, out-of-range case can
+    # fail closed as INCONCLUSIVE in the independent solver below. PASS still
+    # requires strictly positive transmission and relative agreement.
     if not math.isfinite(t_value) or t_value < 0.0 or t_value > 1.0:
         return _result(
             request,
@@ -666,7 +691,6 @@ def _verify_rectangular_barrier(
             ],
             metrics={
                 "T": t_value,
-                "R": 1.0 - t_value,
                 "energy_eV": request.energy_eV,
                 "barrier_height_eV": request.barrier_height_eV,
                 "barrier_width_m": request.barrier_width_m,
@@ -690,16 +714,25 @@ def _verify_rectangular_barrier(
         )
     conservation_error = abs(r_value + reference_t - 1.0)
     reference_error = abs(t_value - reference_t)
+    reference_relative_error: float | str = (
+        reference_error / reference_t
+        if math.isfinite(reference_t) and reference_t > 0
+        else "undefined"
+    )
     verified = (
         conservation_error <= request.conservation_tolerance
-        and math.isclose(t_value, reference_t, rel_tol=1e-8, abs_tol=1e-12)
-        and 0 <= r_value <= 1 + request.conservation_tolerance
+        and math.isfinite(reference_t)
+        and 0 < reference_t <= 1 + _PROBABILITY_ROUNDOFF_TOLERANCE
+        and t_value > 0
+        and math.isclose(t_value, reference_t, rel_tol=1e-8, abs_tol=0.0)
+        and 0 <= r_value <= 1 + _PROBABILITY_ROUNDOFF_TOLERANCE
     )
 
     # Build a small T-vs-width visualization so the frontend can render the
     # tunnelling curve alongside the student's prediction.
     widths = list(np.linspace(max(width * 0.1, 1e-12), width * 2.0, 32))
     t_series: list[float] = []
+    scan_unavailable = False
     for w in widths:
         try:
             arg_w = k_inside * float(w)
@@ -723,26 +756,24 @@ def _verify_rectangular_barrier(
                 raise ValueError("Curve outside verified range")
             t_series.append(float(t_w))
         except (OverflowError, ValueError, ZeroDivisionError):
-            return _result(
-                request, method=ScientificVerificationMethod.NUMERICAL,
-                status=ScientificVerificationStatus.INCONCLUSIVE,
-                tool=_tool("boundary-matching", "1"),
-                observations=["Width scan exceeds the verified numerical range."],
-                limitations=["Curve omitted; failed samples are never replaced with zero."],
-                error_code="BARRIER_SCAN_UNAVAILABLE",
-            )
+            # The requested point has already been independently checked. An
+            # optional plot scanning to 2a must not discard that valid result.
+            scan_unavailable = True
+            break
 
-    plot_request = LineVisualizationRequest(
-        title="Rectangular barrier transmission vs width",
-        x_label="barrier width (m)",
-        y_label="transmission T",
-        x=widths,
-        series=[PlotSeries(label="T(width)", y=t_series)],
-    )
-    try:
-        spec = _render_line_spec(plot_request)
-    except Exception:
-        spec = None
+    spec = None
+    if not scan_unavailable:
+        plot_request = LineVisualizationRequest(
+            title="Rectangular barrier transmission vs width",
+            x_label="barrier width (m)",
+            y_label="transmission T",
+            x=widths,
+            series=[PlotSeries(label="T(width)", y=t_series)],
+        )
+        try:
+            spec = _render_line_spec(plot_request)
+        except Exception:
+            pass
 
     return _result(
         request,
@@ -758,13 +789,18 @@ def _verify_rectangular_barrier(
                 f"Transmission T={t_value:.12g}, reflection R={r_value:.12g}, "
                 f"|R+T-1|={conservation_error:.3e}."
             ),
+            *(["Optional width scan omitted: a sample exceeds the verified numerical range."]
+              if scan_unavailable else []),
         ],
         limitations=[
             "Stationary scattering calculation; does not model wave-packet dispersion "
             "or finite-time effects.",
             "Analytic T is cross-checked against independent boundary matching; "
             "R is obtained from the reflected amplitude, not defined as 1-T. "
-            "The E≈V0 band and scans outside the verified float64 range are unsupported.",
+            "Independent amplitude probabilities retain their raw values; their "
+            "upper bound allows at most 32 ULP of roundoff at unity. "
+            "The E≈V0 band and point calculations outside the verified float64 range "
+            "are unsupported. Optional scans outside that range are omitted.",
         ],
         metrics={
             "T": t_value,
@@ -772,6 +808,14 @@ def _verify_rectangular_barrier(
             "conservation_error": conservation_error,
             "reference_T": reference_t,
             "reference_error": reference_error,
+            "reference_relative_error": reference_relative_error,
+            "reference_relative_tolerance": 1e-8,
+            "reference_probability_roundoff_tolerance": _PROBABILITY_ROUNDOFF_TOLERANCE,
+            "transmission_comparison": "positive_relative_v2",
+            "visualization_status": (
+                "omitted_outside_verified_range" if scan_unavailable
+                else "rendered" if spec is not None else "renderer_unavailable"
+            ),
             "reference_method": "independent_boundary_matching_v1",
             "conservation_tolerance": request.conservation_tolerance,
             "energy_eV": request.energy_eV,

@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from time import monotonic
-from typing import Any, Literal, cast
+from typing import Any, Literal, Protocol, cast
 from uuid import UUID
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.runtime import Runtime
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +31,13 @@ from quantum_agent.multimodal.teaching import (
     resolve_teaching_attachments,
 )
 from quantum_agent.science import ScientificToolbox
+from quantum_agent.teaching.access import require_conversation_assistance_access
+from quantum_agent.teaching.execution_budget import (
+    ExecutionLimits,
+    current_execution_budget,
+    execution_budget_scope,
+    raise_if_execution_exhausted,
+)
 from quantum_agent.teaching.hitl import (
     HitlAction,
     HitlAuthorizationError,
@@ -100,6 +108,26 @@ _STAGE_LABELS: dict[str, str] = {
 }
 
 
+class _BudgetedNode(Protocol):
+    def __call__(
+        self, state: TutorState, *, runtime: Runtime[TutorContext],
+    ) -> Awaitable[dict[str, Any]]: ...
+
+
+def _budgeted_node(
+    name: str,
+    node: Callable[[TutorState, Runtime[TutorContext]], Awaitable[dict[str, Any]]],
+) -> _BudgetedNode:
+    async def tracked(state: TutorState, *, runtime: Runtime[TutorContext]) -> dict[str, Any]:
+        budget = current_execution_budget()
+        if budget is None:
+            return await node(state, runtime)
+        async with budget.stage(name):
+            return await node(state, runtime)
+
+    return tracked
+
+
 def _route_after_hitl(
     state: TutorState,
 ) -> Literal["assemble_result", "reject_turn", "restart"]:
@@ -154,6 +182,7 @@ class TutorGraph:
         enable_hitl: bool = False,
         coding_agent: CodingAgent | None = None,
         sandbox: SubprocessSandbox | RemoteSandbox | SandboxDisabled | None = None,
+        execution_limits: ExecutionLimits | None = None,
     ) -> None:
         if enable_hitl and checkpointer is None:
             raise ValueError("HITL requires a durable or in-memory LangGraph checkpointer")
@@ -165,9 +194,10 @@ class TutorGraph:
         self._has_checkpointer = checkpointer is not None
         self._coding_agent = coding_agent
         self._sandbox = sandbox
+        self._execution_limits = execution_limits or ExecutionLimits()
 
         builder = StateGraph(TutorState, context_schema=TutorContext)
-        builder.add_node("interpret", interpret_node)
+        builder.add_node("interpret", _budgeted_node("interpret", interpret_node))
         # PRD V3.0 Axiom 1 ("Learner generates before AI completes"): the
         # commitment gate runs BEFORE retrieval so the student must commit a
         # prediction / first step before any evidence-grounded explanation is
@@ -179,17 +209,20 @@ class TutorGraph:
         # ``prepare_commitment_gate`` which emits a deterministic elicitation
         # response with zero claims.  When the gate does not fire, the full
         # evidence-grounded workflow runs.
-        builder.add_node("learning_native_pre", learning_native_pre_node)
-        builder.add_node("prepare_commitment_gate", prepare_commitment_gate_node)
-        builder.add_node("retrieve_evidence", retrieve_evidence_node)
-        builder.add_node("diagnose", diagnose_node)
-        builder.add_node("apply_policy", apply_policy_node)
-        builder.add_node("scientific_tools", scientific_tools_node)
-        builder.add_node("generate_response", generate_response_node)
-        builder.add_node("learning_native", learning_native_node)
-        builder.add_node("hitl_gate", hitl_gate_node)
-        builder.add_node("reject_turn", reject_turn_node)
-        builder.add_node("assemble_result", assemble_result_node)
+        for name, node in (
+            ("learning_native_pre", learning_native_pre_node),
+            ("prepare_commitment_gate", prepare_commitment_gate_node),
+            ("retrieve_evidence", retrieve_evidence_node),
+            ("diagnose", diagnose_node),
+            ("apply_policy", apply_policy_node),
+            ("scientific_tools", scientific_tools_node),
+            ("generate_response", generate_response_node),
+            ("learning_native", learning_native_node),
+            ("hitl_gate", hitl_gate_node),
+            ("reject_turn", reject_turn_node),
+            ("assemble_result", assemble_result_node),
+        ):
+            builder.add_node(name, _budgeted_node(name, node))
 
         builder.add_edge(START, "interpret")
         builder.add_edge("interpret", "learning_native_pre")
@@ -275,6 +308,8 @@ class TutorGraph:
                     curriculum_edition_id=curriculum_edition_id,
                     started=started,
                 )
+            if started.turn.status is TeachingTurnStatus.FAILED:
+                raise HitlConflictError("the original teaching turn was rejected")
             try:
                 return await self._inspect_interrupt(
                     session=session,
@@ -313,14 +348,18 @@ class TutorGraph:
         )
         config = self._config(started.conversation.id)
 
-        with turn_scope(started.conversation.id, started.turn.id):
-            final_state = await self._execute_graph(
-                initial_state,
-                config,
-                context,
-                on_stage=on_stage,
-                started_at=start_time_monotonic(),
-            )
+        async with execution_budget_scope(session, started.turn, self._execution_limits):
+            with turn_scope(started.conversation.id, started.turn.id):
+                final_state = await self._execute_graph(
+                    initial_state,
+                    config,
+                    context,
+                    on_stage=on_stage,
+                    started_at=start_time_monotonic(),
+                )
+        # A HITL/node commit may have released the entry lock while a provider
+        # was in flight. Recheck before releasing any answer to another tab.
+        await require_conversation_assistance_access(session, actor, started.conversation.id)
         if final_state.get("result") is not None:
             return TeachingTurnResult.model_validate(final_state["result"])
         return await self._inspect_interrupt(
@@ -500,7 +539,8 @@ class TutorGraph:
             or curriculum_edition_id != started.conversation.curriculum_edition_id
         ):
             raise HitlConflictError("replay actor does not own the completed turn")
-        if started.durable_phase.solo_assistance_locked:
+        if (started.durable_phase.solo_assistance_locked
+                or started.durable_phase.phase.value == "solo_active"):
             from quantum_agent.teaching.models import LearningPhase
             from quantum_agent.teaching.solo_visibility import solo_visible_snapshot
 
@@ -517,6 +557,7 @@ class TutorGraph:
         curriculum_edition_id: UUID,
         conversation_id: UUID,
     ) -> HitlInterruptResponse:
+        await require_conversation_assistance_access(session, actor, conversation_id)
         payload, state = await self._checkpoint_interrupt(conversation_id)
         reference = self._reference(state)
         if reference.conversation_id != conversation_id:
@@ -563,7 +604,68 @@ class TutorGraph:
     ) -> TeachingTurnResult | TeachingTurnOutcome:
         if not self._enable_hitl:
             raise HitlNotFoundError("HITL is disabled for this workflow")
+        await require_conversation_assistance_access(session, actor, conversation_id)
+        repository = TeachingRepository(session)
+        if request.interrupt_id is not None:
+            replay = await repository.resolved_interrupt(
+                actor=actor, curriculum_edition_id=curriculum_edition_id,
+                conversation_id=conversation_id, interrupt_id=request.interrupt_id,
+            )
+            if replay is not None:
+                started, event = replay
+                self._authorize_resolution(
+                    actor=actor, reference=StartedTeachingTurnRef.from_started(started),
+                    payload=event.interrupt, request=request,
+                )
+                expected = HitlResolution.authenticated(
+                    payload=event.interrupt, request=request,
+                    actor_user_id=actor.user_id, actor_role=actor.course_role,
+                )
+                if expected != event.resolution:
+                    raise HitlConflictError("interrupt already has another decision")
+                # A durable reviewer receipt survives worker failure. It must
+                # never be reinterpreted as a teacher rejection merely because
+                # the turn later failed or exhausted its execution allowance.
+                raise_if_execution_exhausted(started.turn)
+                if started.turn.status is TeachingTurnStatus.COMPLETED:
+                    snapshot = started.turn.scientific_results_json.get("__result_snapshot")
+                    if not isinstance(snapshot, dict):
+                        raise HitlConflictError("resolved turn has no result snapshot")
+                    if actor.course_role is CourseRole.STUDENT:
+                        return await self._replay_completed_turn(
+                            session=session, actor=actor,
+                            curriculum_edition_id=curriculum_edition_id, started=started,
+                        )
+                    return TeachingTurnResult.model_validate(snapshot)
+                if started.turn.status is TeachingTurnStatus.FAILED:
+                    if (started.turn.failure_code == "HITL_REJECTED"
+                            and expected.action is HitlAction.REJECT):
+                        return HitlRejectedResponse(
+                            conversation_id=conversation_id, turn_id=started.turn.id,
+                            interrupt_id=event.interrupt.interrupt_id,
+                        )
+                    raise HitlConflictError(
+                        "the recorded reviewer decision was not released because the turn failed"
+                    )
+                # A transcription can reveal another pause on the same turn.
+                # Return that pause; never apply an old command to the new one.
+                try:
+                    current = await self._inspect_interrupt(
+                        session=session, actor=actor,
+                        curriculum_edition_id=curriculum_edition_id,
+                        conversation_id=conversation_id,
+                    )
+                except HitlNotFoundError as exc:
+                    raise HitlConflictError("the recorded decision is still being applied") from exc
+                if current.interrupt.interrupt_id != request.interrupt_id:
+                    return current
+                # SQL may have committed the decision immediately before a
+                # worker failed to checkpoint the node update. Re-enter with
+                # the same authenticated decision; repository writes are
+                # idempotent and cannot replace the original reviewer/reason.
         payload, state = await self._checkpoint_interrupt(conversation_id)
+        if request.interrupt_id is not None and request.interrupt_id != payload.interrupt_id:
+            raise HitlConflictError("resume command targets a stale interrupt")
         reference = self._reference(state)
         self._authorize_resolution(
             actor=actor,
@@ -574,6 +676,7 @@ class TutorGraph:
         if request.edited_response is not None:
             validation = validate_human_response(
                 response=request.edited_response,
+                proposed_response=state["response"],
                 packet=state["evidence_packet"],
                 scientific_results=list(state.get("scientific_results", [])),
                 release=state["release"],
@@ -584,7 +687,6 @@ class TutorGraph:
                     + ", ".join(validation.warnings)
                 )
 
-        repository = TeachingRepository(session)
         started = await repository.load_started_turn(
             course_id=actor.course_id,
             curriculum_edition_id=curriculum_edition_id,
@@ -607,13 +709,16 @@ class TutorGraph:
             started=started,
             model_gateway_override=model_gateway_override,
         )
-        outcome = await self._graph.ainvoke(
-            Command(resume=resolution.model_dump(mode="json")),
-            self._config(conversation_id),
-            context=context,
-            durability="sync" if self._has_checkpointer else None,
-        )
+        async with execution_budget_scope(session, started.turn, self._execution_limits):
+            with turn_scope(conversation_id, started.turn.id):
+                outcome = await self._graph.ainvoke(
+                    Command(resume=resolution.model_dump(mode="json")),
+                    self._config(conversation_id),
+                    context=context,
+                    durability="sync" if self._has_checkpointer else None,
+                )
         final_state = cast(TutorState, outcome)
+        await require_conversation_assistance_access(session, actor, conversation_id)
         if final_state.get("result") is not None:
             return TeachingTurnResult.model_validate(final_state["result"])
         if final_state.get("hitl_rejection") is not None:

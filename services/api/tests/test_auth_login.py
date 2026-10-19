@@ -107,6 +107,7 @@ def _build_app(
         environment=environment,
         session_vault_key=fernet_key,
         login_course_email=email,
+        allow_shared_demo_login=True,
     )
     app.state.settings = settings
     app.state.session_factory = session_factory

@@ -96,6 +96,7 @@ from quantum_agent.tutor.graph import TutorGraph
 T = TypeVar("T")
 
 API_ROOT = Path(__file__).resolve().parents[1]
+_FIXTURE_SOLO_TASK_ID = UUID("1dd78ca6-1e9e-4562-a09b-7daf34d54ac1")
 
 
 def _sha(value: str) -> str:
@@ -205,6 +206,8 @@ async def _seed_conversation_with_phase(
     """
 
     learning_phase_json: dict[str, object] = {"phase": phase}
+    if phase == "solo_active":
+        learning_phase_json["active_transfer_task_id"] = str(_FIXTURE_SOLO_TASK_ID)
     if extra_phase is not None:
         learning_phase_json.update(extra_phase)
     conversation = TeachingConversation(
@@ -980,6 +983,7 @@ class TestTutorGraphLearningNative:
             conversation_id=conversation_id,
             learning_native=LearningNativeSubmission(
                 solo_attempt=SoloAttemptSubmission(
+                    transfer_task_id=_FIXTURE_SOLO_TASK_ID,
                     response="透射率随势垒宽度增加而指数下降。",
                     confidence=0.6,
                 )
@@ -1161,8 +1165,7 @@ class TestCognitiveMirrorEvidenceSemantics:
         assert state.label is not ConceptStateLabel.TRANSFER_READY
         assert state.unaided_retrieval is False
 
-    def test_transfer_verified_plus_teach_back_yields_transfer_ready(self) -> None:
-        # Only a VERIFIED transfer attempt + teach-back yields TRANSFER_READY.
+    def test_legacy_verified_and_teach_back_do_not_establish_mastery(self) -> None:
         concept_id = uuid4()
         observations = [
             self._make_evidence(
@@ -1183,13 +1186,11 @@ class TestCognitiveMirrorEvidenceSemantics:
             observations=observations,
             diagnosis=None,
         )
-        assert state.label is ConceptStateLabel.TRANSFER_READY
-        assert state.unaided_retrieval is True
-        # The transfer_evidence list must contain the verified observation.
-        assert any(
-            "TRANSFER_VERIFIED" in item or "observation" in item
-            for item in state.transfer_evidence
-        )
+        assert state.label is ConceptStateLabel.DEVELOPING
+        assert state.unaided_retrieval is False
+        assert state.assessment_evidence.mastery_status == "not_assessed"
+        assert state.assessment_evidence.explanation_assessment == "not_assessed"
+        assert state.transfer_evidence == []
 
     def test_unverified_transfer_attempt_does_not_yield_unaided_retrieval(self) -> None:
         # An unverified transfer attempt (TRANSFER_ATTEMPTED / TRANSFER_FAILED)
@@ -1220,10 +1221,11 @@ class TestCognitiveMirrorEvidenceSemantics:
         )
         assert state.label is not ConceptStateLabel.TRANSFER_READY
         assert state.unaided_retrieval is False
-        # A failed transfer marks the concept FRAGILE.
-        assert state.label is ConceptStateLabel.FRAGILE
+        # A task flag without a scoped judgment calls for review, not mastery
+        # or a global learner-deficit diagnosis.
+        assert state.label is ConceptStateLabel.NEEDS_REVIEW
 
-    def test_legacy_solo_attempt_only_counts_when_verified(self) -> None:
+    def test_legacy_verified_solo_does_not_backfill_assessment_scope(self) -> None:
         # Legacy pre-remediation SOLO_ATTEMPT rows must only count toward
         # unaided_retrieval when their evidence_json marks verified=True.
         concept_id = uuid4()
@@ -1265,8 +1267,38 @@ class TestCognitiveMirrorEvidenceSemantics:
             observations=verified_legacy,
             diagnosis=None,
         )
-        assert state_verified.unaided_retrieval is True
-        assert state_verified.label is ConceptStateLabel.TRANSFER_READY
+        assert state_verified.unaided_retrieval is False
+        assert state_verified.label is ConceptStateLabel.DEVELOPING
+        assert state_verified.assessment_evidence.mastery_status == "not_assessed"
+
+    def test_old_transfer_failure_does_not_override_latest_verified_revision(self) -> None:
+        concept_id = uuid4()
+        latest = self._make_evidence(
+            LearningEvidenceKind.TRANSFER_VERIFIED, verified=True, concept_id=concept_id,
+        )
+        latest.evidence_json["unaided"] = True
+        old_failure = self._make_evidence(
+            LearningEvidenceKind.TRANSFER_FAILED, concept_id=concept_id,
+        )
+        state = LearningNativePolicy._concept_state(
+            concept_id=concept_id, observations=[latest, old_failure], diagnosis=None,
+        )
+        assert state.label is ConceptStateLabel.DEVELOPING
+        assert state.unaided_retrieval is False
+
+    def test_latest_failed_transfer_still_requires_revision(self) -> None:
+        concept_id = uuid4()
+        old_pass = self._make_evidence(
+            LearningEvidenceKind.TRANSFER_VERIFIED, verified=True, concept_id=concept_id,
+        )
+        old_pass.evidence_json["unaided"] = True
+        latest = self._make_evidence(
+            LearningEvidenceKind.TRANSFER_FAILED, concept_id=concept_id,
+        )
+        state = LearningNativePolicy._concept_state(
+            concept_id=concept_id, observations=[latest, old_pass], diagnosis=None,
+        )
+        assert state.label is ConceptStateLabel.NEEDS_REVIEW
 
     def test_untagged_evidence_uses_stable_bucket_not_random_uuid(self) -> None:
         # PRD V3.0 P1-1: untagged evidence must group under a stable bucket

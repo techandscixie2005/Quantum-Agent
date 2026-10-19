@@ -15,7 +15,8 @@ def solo_visible_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(native, dict) or native.get("phase") != LearningPhase.SOLO_ACTIVE:
         return snapshot
     visible = deepcopy(snapshot)
-    # Only a recorded submitted attempt permits the current reference computation.
+    # Reference answers remain hidden until Solo ends. A wrong first attempt
+    # must not expose the oracle before a later supposedly independent retry.
     submitted = "transfer_attempted" in native.get("evidence_persisted", [])
     visible["evidence_packet"].update({
         "query": "Solo task", "evidence": [], "graph_nodes": [], "graph_edges": [],
@@ -33,11 +34,11 @@ def solo_visible_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         "limitations": ["Solo 中不提供辅助解答。提交后才返回允许的任务评价。"],
     })
     visible["code_artifact"] = None
-    if not submitted:
-        visible["scientific_results"] = []
+    visible["scientific_results"] = []
     visible["learning_native"].update({
         "cognitive_mirror": None, "teach_back": None, "minimal_intervention_prompt": "",
         "commitment": None,
+        "teacher_follow_up": None,
     })
     return visible
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import resource
 from uuid import uuid4
 
 import pytest
@@ -210,6 +209,7 @@ def test_sandbox_enforces_declared_memory_limit() -> None:
     not the host-side AS; the wall-time timeout is the primary host-side bound.
     """
 
+    resource = pytest.importorskip("resource", reason="POSIX rlimits are unavailable on Windows")
     configured = dict(_rlimit_settings(SandboxLimits(memory_megabytes=64)))
 
     assert resource.RLIMIT_AS in configured

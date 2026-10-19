@@ -128,10 +128,14 @@ async def _extract_pedagogy_async(arguments: argparse.Namespace) -> int:
     try:
         async with create_session_factory(engine)() as session:
             report = await extract_pedagogical_content(
-                session, scope=RetrievalScope(
+                session,
+                scope=RetrievalScope(
                     course_id=UUID(arguments.course_id),
                     curriculum_edition_id=UUID(arguments.edition_id),
-                ), gateway=gateway, query=arguments.query, limit=arguments.limit,
+                ),
+                gateway=gateway,
+                query=arguments.query,
+                limit=arguments.limit,
             )
         _json_output({"teacher_review_required": True, "chunks": report})
         return 1 if any("failure" in row for row in report) else 0
@@ -322,9 +326,7 @@ async def _teacher_actor(
 ) -> CourseActor:
     """Load or seed a teacher actor for operational governance commands."""
     user = (
-        await session.scalars(
-            select(User).where(User.email == "ops-teacher@example.edu").limit(1)
-        )
+        await session.scalars(select(User).where(User.email == "ops-teacher@example.edu").limit(1))
     ).first()
     if user is None:
         user = User(
@@ -506,7 +508,8 @@ async def _seed_live_e2e_async(arguments: argparse.Namespace) -> int:
                     .where(CurriculumEdition.status == CurriculumEditionStatus.PUBLISHED)
                     .where(
                         CurriculumEdition.id == UUID(arguments.edition_id)
-                        if getattr(arguments, "edition_id", None) else true()
+                        if getattr(arguments, "edition_id", None)
+                        else true()
                     )
                     .order_by(
                         (Course.status == CourseStatus.ACTIVE).desc(),
@@ -650,8 +653,11 @@ async def _seed_demo_account_async(arguments: argparse.Namespace) -> int:
                     .join(CurriculumEdition, CurriculumEdition.course_id == Course.id)
                     .where(
                         CurriculumEdition.status == CurriculumEditionStatus.PUBLISHED,
-                        *([Course.id == UUID(arguments.course_id)]
-                          if getattr(arguments, "course_id", None) else []),
+                        *(
+                            [Course.id == UUID(arguments.course_id)]
+                            if getattr(arguments, "course_id", None)
+                            else []
+                        ),
                     )
                     .order_by(
                         (Course.status == CourseStatus.ACTIVE).desc(),
@@ -718,8 +724,7 @@ async def _seed_demo_account_async(arguments: argparse.Namespace) -> int:
                 "curriculum_edition_id": str(edition.id),
                 "course_activated": bool(arguments.activate_course),
                 "next_step": (
-                    "POST /api/v1/auth/login with a valid USTC API key "
-                    "to receive a session token."
+                    "POST /api/v1/auth/login with a valid USTC API key to receive a session token."
                 ),
             }
         )
@@ -732,9 +737,59 @@ def _seed_demo_account(arguments: argparse.Namespace) -> int:
     return asyncio.run(_seed_demo_account_async(arguments))
 
 
+async def _classroom_access_async(arguments: argparse.Namespace) -> int:
+    from quantum_agent.classroom import provision_classroom_access
+
+    destination = Path(arguments.output)
+    # Exclusive creation prevents overwriting a credential or existing file.
+    descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    engine = create_database_engine(Settings())
+    issued = False
+    try:
+        async with create_session_factory(engine)() as session:
+            payload = await provision_classroom_access(
+                session,
+                email=arguments.email,
+                display_name=arguments.display_name,
+                course_id=UUID(arguments.course_id),
+                role=CourseRole(arguments.role),
+                expires_hours=arguments.expires_hours,
+            )
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                descriptor = -1
+                json.dump(payload, stream)
+            await session.commit()
+            issued = True
+        _json_output({"status": "issued", "output": str(destination), "role": arguments.role})
+        return 0
+    finally:
+        if descriptor != -1:
+            os.close(descriptor)
+        if not issued:
+            await asyncio.to_thread(destination.unlink, missing_ok=True)
+        await engine.dispose()
+
+
+def _classroom_access(arguments: argparse.Namespace) -> int:
+    arguments.output = str(Path(arguments.output).expanduser().resolve())
+    return asyncio.run(_classroom_access_async(arguments))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="quantum-agent")
     commands = parser.add_subparsers(dest="command", required=True)
+
+    classroom = commands.add_parser(
+        "issue-classroom-access",
+        help="operator-only named roster enrollment and access token",
+    )
+    classroom.add_argument("--email", required=True)
+    classroom.add_argument("--display-name", required=True)
+    classroom.add_argument("--course-id", required=True)
+    classroom.add_argument("--role", choices=["student", "ta", "teacher"], default="student")
+    classroom.add_argument("--expires-hours", type=int, default=24)
+    classroom.add_argument("--output", required=True, help="new private credential file")
+    classroom.set_defaults(handler=_classroom_access)
 
     migrate = commands.add_parser("migrate", help="upgrade the authoritative database")
     migrate.set_defaults(handler=_migrate)

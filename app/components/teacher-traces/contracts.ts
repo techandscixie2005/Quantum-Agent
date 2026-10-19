@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { WORKFLOW_ORDER } from "@/app/components/teaching/contracts";
+import { derivationBridgeSchema } from "@/app/components/teaching/derivation";
 
 const uuid = z.string().uuid();
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
@@ -267,6 +268,10 @@ export const diagnosisSchema = z
       )
       .max(4),
     missing_prerequisites: z.array(boundedText(160)).max(6),
+    prerequisite_topics: z.array(boundedText(160)).max(6).optional(),
+    prerequisite_support: z.array(z.object({
+      prerequisite: boundedText(160), student_quote: boundedText(1200),
+    }).strict()).max(6).optional(),
     progress_state: z.enum(["no_attempt", "started", "struggling", "progressing", "confident"]),
     confidence: z.number().min(0).max(1),
     verification_needed: z.boolean(),
@@ -314,6 +319,8 @@ const claimSchema = z
 
 export const teachingResponseSchema = z
   .object({
+    derivation_bridge: derivationBridgeSchema.nullable().optional(),
+    student_answer_anchor: z.string().max(800).nullable().optional(),
     orientation: boundedText(1_200),
     claims: z.array(claimSchema).max(8),
     next_question: boundedText(1_000),
@@ -480,6 +487,10 @@ export const agentTracePageSchema = z
   .strict();
 
 export const agentTraceDetailSchema = traceSummarySchema.extend({
+  course_package: z.object({
+    package_id: boundedText(120), version: boundedText(40), content_sha256: sha256,
+    objective_ids: z.array(boundedText(120)).max(32), rubric_ids: z.array(boundedText(120)).max(32),
+  }).strict().nullable().optional(),
   user_message: boundedText(4_000),
   student_attempt: z.string().max(12_000).nullable(),
   workflow_steps: workflowSchema,
@@ -595,6 +606,24 @@ export function parseAgentTraceDetail(
       throw new Error("trace HITL event does not belong to this turn");
     }
   }
+  const bridge = parsed.response?.derivation_bridge;
+  if (bridge) {
+    if (parsed.response?.status !== "mixed") {
+      throw new Error("trace derivation bridge must retain its inference status");
+    }
+    const level = parsed.release_decision?.release_level;
+    if (!level || level === "question_only" || level === "hint") {
+      throw new Error("trace derivation bridge exceeds its release policy");
+    }
+    if (level === "scaffold" && (!bridge.partial || bridge.missing_steps.length > 1)) {
+      throw new Error("a scaffold trace permits only one partial worked step");
+    }
+    const refs = [...bridge.source_refs, ...bridge.missing_steps.flatMap(step => step.source_refs)];
+    if (refs.some(ref => !parsed.evidence_packet?.evidence.some(item =>
+      item.evidence_id === ref.evidence_id && item.evidence_snippet.includes(ref.quote)))) {
+      throw new Error("trace derivation bridge requires exact course evidence spans");
+    }
+  }
   return parsed;
 }
 
@@ -608,6 +637,9 @@ export function assertEditedResponseAuthority(
 ): void {
   if (candidate.status !== inspected.status) {
     throw new Error("staff edits cannot change the validated response status");
+  }
+  if (JSON.stringify(candidate.derivation_bridge ?? null) !== JSON.stringify(inspected.derivation_bridge ?? null)) {
+    throw new Error("staff edits cannot change the inspected derivation bridge authority");
   }
   if (candidate.claims.length !== inspected.claims.length) {
     throw new Error("staff edits cannot add or remove authority-bearing claims");

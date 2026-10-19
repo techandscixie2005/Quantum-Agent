@@ -2107,6 +2107,8 @@ class TeachingTurn(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         nullable=False,
     )
     sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    client_request_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64))
     user_message: Mapped[str] = mapped_column(Text, nullable=False)
     student_attempt: Mapped[str | None] = mapped_column(Text)
     task_kind: Mapped[TeachingTaskKind | None] = mapped_column(
@@ -2140,6 +2142,9 @@ class TeachingTurn(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failure_code: Mapped[str | None] = mapped_column(String(160))
+    execution_budget_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON_TYPE, default=dict, server_default=text("'{}'"), nullable=False,
+    )
 
     __table_args__ = (
         UniqueConstraint(
@@ -2158,6 +2163,53 @@ class TeachingTurn(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
             name="failed_has_code",
         ),
         Index("ix_teaching_turns_conversation_created", "conversation_id", "created_at"),
+    )
+
+
+class TeachingReview(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Append-only human decisions, distinct from model diagnostic candidates."""
+
+    __tablename__ = "teaching_reviews"
+
+    course_id: Mapped[UUID] = mapped_column(
+        UUID_TYPE, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False,
+    )
+    curriculum_edition_id: Mapped[UUID] = mapped_column(UUID_TYPE, nullable=False)
+    conversation_id: Mapped[UUID] = mapped_column(
+        UUID_TYPE, ForeignKey("teaching_conversations.id", ondelete="CASCADE"), nullable=False,
+    )
+    source_turn_id: Mapped[UUID] = mapped_column(
+        UUID_TYPE, ForeignKey("teaching_turns.id", ondelete="CASCADE"), nullable=False,
+    )
+    student_user_id: Mapped[UUID] = mapped_column(
+        UUID_TYPE, ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+    )
+    reviewer_user_id: Mapped[UUID] = mapped_column(
+        UUID_TYPE, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+    )
+    decision: Mapped[str] = mapped_column(String(40), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    follow_up: Mapped[str] = mapped_column(String(40), nullable=False)
+    probe: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    rubric_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON_TYPE, nullable=False, default=dict, server_default=text("'{}'"),
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["curriculum_edition_id", "course_id"],
+            ["curriculum_editions.id", "curriculum_editions.course_id"],
+            name="fk_teaching_reviews_edition_course", ondelete="CASCADE",
+        ),
+        CheckConstraint("length(trim(reason)) > 0", name="reason_not_blank"),
+        CheckConstraint(
+            "decision IN ('confirmed', 'revise', 'needs_follow_up')", name="decision_known",
+        ),
+        CheckConstraint(
+            "follow_up IN ('continue', 'request_revision', 'revisit_prerequisite')",
+            name="follow_up_known",
+        ),
+        Index("ix_teaching_reviews_conversation_created", "conversation_id", "created_at"),
     )
 
 

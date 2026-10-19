@@ -1,0 +1,81 @@
+{
+  "packet_id": "finite-barriers-heldout",
+  "version": "1.0.0",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "2dfd8b7fd19668482bcfcdddbd46412c06a7beeb8d219427a779c7d34462d3fc",
+      "bytes": 5531,
+      "audience": "teacher_or_operator"
+    },
+    {
+      "path": "student-forms/form-a-pretest.md",
+      "sha256": "c3720be36a0fa145321bb613686249e90f45e5f792063e675808a004de1acad1",
+      "bytes": 4990,
+      "audience": "student_question_form"
+    },
+    {
+      "path": "student-forms/form-b-immediate.md",
+      "sha256": "cbf7446b35754af8c33f18228e881ad54d1cd99b1eaa99aaa41c169ee29232b7",
+      "bytes": 4411,
+      "audience": "student_question_form"
+    },
+    {
+      "path": "student-forms/form-c-delayed.md",
+      "sha256": "6843565b0c8c04ebb0ddc3284981e58195a7ac3d395c8a85cf528d8283f92340",
+      "bytes": 4402,
+      "audience": "student_question_form"
+    },
+    {
+      "path": "teacher-only/administration.md",
+      "sha256": "db41cf2a7c96b6e02ac1f63573d9bc58956acb8f4be55728f7c469ef991eddd8",
+      "bytes": 6796,
+      "audience": "teacher_or_operator"
+    },
+    {
+      "path": "teacher-only/answer-key.md",
+      "sha256": "6b6ab01b298434b2db413579b3e75934aeb39e378c8ca7732f4db9e3c5b2d6e8",
+      "bytes": 12225,
+      "audience": "teacher_or_operator"
+    },
+    {
+      "path": "teacher-only/reference-cases.json",
+      "sha256": "8b7c24895f25daec6784d61e9459a7bfb8e218892a290cda187300ca7870bc03",
+      "bytes": 2348,
+      "audience": "teacher_or_operator"
+    },
+    {
+      "path": "teacher-only/reference-results.json",
+      "sha256": "b98b19d1f83751800f483e6d611d0ec81c4ac6c65e9252c0e4e8fda4246e68b8",
+      "bytes": 18257,
+      "audience": "teacher_or_operator"
+    },
+    {
+      "path": "teacher-only/rubric-and-examples.md",
+      "sha256": "cf356bb9dd4c2c516f4f198caf85b7eb4489b8a06c04600a4ebc7185d54c5b2b",
+      "bytes": 8597,
+      "audience": "teacher_or_operator"
+    }
+  ],
+  "reference_script": {
+    "path": "scripts/verify-heldout-barriers.py",
+    "sha256": "72bde31255b69316a11daa46b36b3908ab2558112f31bc2c53cb6ce42b88b973"
+  },
+  "schema_version": "teacher-packet-manifest/1.0.0",
+  "status": "unreviewed_no_classroom_results",
+  "teacher_approvals": [],
+  "packet_content_sha256": "99bf612ce5595a2b1e5de27bc973c6eeb06a8bbe76a6736ef7bcf3b111c11ffa",
+  "digest_method": "SHA-256 of UTF-8 canonical JSON (sorted keys, no spaces) of packet_id, version, files, reference_script",
+  "prior_prompt_tuning_exposure": "Created after recorded fixed runs; not used to tune their prompts; prospective use requires actual exposure controls",
+  "access_control": "Repository and review-archive readers can read keys; teacher-only is a workflow label only",
+  "sources": [
+    {
+      "title": "MIT 8.04 Lectures XV and XVI, NTHU-hosted notes",
+      "url": "https://www.phys.nthu.edu.tw/~edyen/100-general-physics/notes/modern/Week11_Lec2.pdf"
+    },
+    {
+      "title": "OpenStax University Physics Volume 3, 7.6",
+      "url": "https://openstax.org/books/university-physics-volume-3/pages/7-6-the-quantum-tunneling-of-particles-through-potential-barriers"
+    }
+  ]
+}

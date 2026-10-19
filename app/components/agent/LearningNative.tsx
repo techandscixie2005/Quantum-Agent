@@ -13,6 +13,7 @@ import {
 import { useState } from "react";
 
 import type {
+  AssessmentEvidence,
   CognitiveCommitment,
   CognitiveMirror,
   CommitmentKind,
@@ -274,7 +275,7 @@ export function TransferCard({
       confidence: confidence / 100,
       teach_back: null,
       transfer_attempt: isSoloActive ? null : { transfer_task_id: transfer.task_id, response: trimmed, confidence: confidence / 100 },
-      solo_attempt: isSoloActive ? { response: trimmed, confidence: confidence / 100 } : null,
+      solo_attempt: isSoloActive ? { transfer_task_id: transfer.task_id, response: trimmed, confidence: confidence / 100 } : null,
       request_transfer: false,
       request_solo_exit: false,
       request_teach_back: false,
@@ -369,6 +370,22 @@ export function TransferCard({
       </footer>
     </section>
   );
+}
+
+export function AssessmentEvidenceCard({ evidence }: { evidence: AssessmentEvidence | undefined }) {
+  if (!evidence) return <p role="status">历史记录未分项评价；物理掌握程度尚未评定。</p>;
+  const numeric = { not_assessed: "未评定", correct: "参考数值一致", incorrect: "参考数值不一致" };
+  const explanation = { not_assessed: "未评定", model_supported: "模型认为有解释支持（需教师复核）", needs_revision: "需要修订" };
+  return <section className={styles.learningCard} aria-label="独立提交与物理掌握评价" data-testid="assessment-evidence">
+    <h3>本次提交的证据</h3>
+    <dl>
+      <div><dt>独立提交条件</dt><dd>{evidence.valid_independent_submission ? "满足应用内独立首答条件" : "尚未建立有效独立首答"}</dd></div>
+      <div><dt>数值核验</dt><dd>{numeric[evidence.numeric_correctness]}</dd></div>
+      <div><dt>解释评价</dt><dd>{explanation[evidence.explanation_assessment]}</dd></div>
+      <div><dt>物理掌握</dt><dd>尚未评定；需要教师评分与独立后测、延迟测</dd></div>
+    </dl>
+    <p>应用内独立条件不能排除外部帮助。一次数值一致或模型解释反馈不足以认定掌握。</p>
+  </section>;
 }
 
 export function CognitiveMirrorPanel({ mirror }: { mirror: CognitiveMirror }) {

@@ -1,0 +1,1032 @@
+{
+  "schema_version": "synthetic-model-latency/1",
+  "run_id": "90f3f960-012f-4c22-90f3-eac79310c42c",
+  "label": "AUTOMATED SYNTHETIC LATENCY DIAGNOSTIC; NOT CLASSROOM OR QUALITY EVIDENCE",
+  "started_at": "2026-10-19T17:05:46.795307+00:00",
+  "model_alias": "deepseek-flash",
+  "model_weights_version": "unknown",
+  "cost": "unknown",
+  "python": "3.12.14",
+  "platform": "Windows-10-10.0.19045-SP0",
+  "packages": {
+    "httpx2": "2.12.0",
+    "httpcore2": "2.12.0"
+  },
+  "script_sha256": "9f3b086f056aa0605c9dd455578d268e4e32fa8268e7ae4756057a59d0323e7e",
+  "prompt_sha256": "f0a0ab21a031a5c0854bee65794fa86d1e7f57a87a0394c82f98121ad16a487d",
+  "prompt": "Reply exactly with this JSON and nothing else: {\"ok\":true}",
+  "endpoint": "https://api.llm.ustc.edu.cn/v1/chat/completions",
+  "limits": {
+    "http_posts": 8,
+    "output_tokens_each": 64,
+    "capability_seconds": 120,
+    "total_seconds": 900,
+    "response_bytes_each": 1048576,
+    "retries": 0
+  },
+  "controls": {
+    "fresh_client_each_case": true,
+    "temperature": 0,
+    "seed": "not_set; provider support unverified",
+    "http2": false,
+    "trust_env": true,
+    "dns_preflight": "not_measured",
+    "connect_tcp": "combined resolver/TCP phase; proxy may resolve target DNS"
+  },
+  "limitations": [
+    "n=2 per condition; descriptive only",
+    "queueing, reasoning and deployment load effects cannot be causally separated",
+    "first observed SSE content/reasoning chunk is not individual-token timing",
+    "nonstream first-token time is unobservable",
+    "no held-out assessment key supplied"
+  ],
+  "cases": [
+    {
+      "case": "thinking-1",
+      "block": "thinking",
+      "condition": "default",
+      "thinking": null,
+      "stream": false,
+      "status": "completed",
+      "http_attempts": 1,
+      "started_at": "2026-10-19T17:05:46.864326+00:00",
+      "trace": [
+        {
+          "event": "connection.connect_tcp.started",
+          "at_ms": 93.0
+        },
+        {
+          "event": "connection.connect_tcp.complete",
+          "at_ms": 93.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 93.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 93.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 93.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 109.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 109.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 109.0
+        },
+        {
+          "event": "proxy.start_tls.started",
+          "at_ms": 109.0
+        },
+        {
+          "event": "proxy.start_tls.complete",
+          "at_ms": 140.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 140.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 140.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 140.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 140.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 140.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 47765.0
+        },
+        {
+          "event": "http11.receive_response_body.started",
+          "at_ms": 47765.0
+        },
+        {
+          "event": "http11.receive_response_body.complete",
+          "at_ms": 47765.0
+        },
+        {
+          "event": "http11.response_closed.started",
+          "at_ms": 47765.0
+        },
+        {
+          "event": "http11.response_closed.complete",
+          "at_ms": 47765.0
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 44,
+        "completion_tokens": 18,
+        "total_tokens": 62
+      },
+      "returned_model": "deepseek-flash",
+      "response_bytes": 548,
+      "trace_events_omitted": 0,
+      "sse_events": 0,
+      "request_sha256": "26fe0d9b9c21f088a4cd024db74d793d2d2a8d3acabb2f4cfa5fbedd0c8811d0",
+      "request_bytes": 175,
+      "client_ready_ms": 93.0,
+      "request_started_ms": 93.0,
+      "response_headers_ms": 47765.0,
+      "http_status": 200,
+      "first_body_chunk_ms": 47765.0,
+      "body_complete_ms": 47765.0,
+      "outer_json_parse_ms": 0.0,
+      "finish_reason": "stop",
+      "content_json_schema_ms": 0.0,
+      "structured_result": {
+        "ok": true
+      },
+      "content_characters": 11,
+      "elapsed_until_case_exit_ms": 47765.0,
+      "first_observed_token_chunk_ms": null,
+      "timing_basis": "observed_headers_body_and_case_exit"
+    },
+    {
+      "case": "thinking-2",
+      "block": "thinking",
+      "condition": "disabled",
+      "thinking": "disabled",
+      "stream": false,
+      "status": "completed",
+      "http_attempts": 1,
+      "started_at": "2026-10-19T17:06:34.623789+00:00",
+      "trace": [
+        {
+          "event": "connection.connect_tcp.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "connection.connect_tcp.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "proxy.start_tls.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "proxy.start_tls.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 27297.0
+        },
+        {
+          "event": "http11.receive_response_body.started",
+          "at_ms": 27297.0
+        },
+        {
+          "event": "http11.receive_response_body.complete",
+          "at_ms": 27297.0
+        },
+        {
+          "event": "http11.response_closed.started",
+          "at_ms": 27297.0
+        },
+        {
+          "event": "http11.response_closed.complete",
+          "at_ms": 27297.0
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 18,
+        "completion_tokens": 6,
+        "total_tokens": 24
+      },
+      "returned_model": "deepseek-flash",
+      "response_bytes": 469,
+      "trace_events_omitted": 0,
+      "sse_events": 0,
+      "request_sha256": "8dbc60868158935d4747341da8fea869300ff3116fa8bd29d3b73ab8aa76521c",
+      "request_bytes": 206,
+      "client_ready_ms": 0.0,
+      "request_started_ms": 0.0,
+      "response_headers_ms": 27297.0,
+      "http_status": 200,
+      "first_body_chunk_ms": 27297.0,
+      "body_complete_ms": 27297.0,
+      "outer_json_parse_ms": 0.0,
+      "finish_reason": "stop",
+      "content_json_schema_ms": 0.0,
+      "structured_result": {
+        "ok": true
+      },
+      "content_characters": 11,
+      "elapsed_until_case_exit_ms": 27297.0,
+      "first_observed_token_chunk_ms": null,
+      "timing_basis": "observed_headers_body_and_case_exit"
+    },
+    {
+      "case": "thinking-3",
+      "block": "thinking",
+      "condition": "disabled",
+      "thinking": "disabled",
+      "stream": false,
+      "status": "completed",
+      "http_attempts": 1,
+      "started_at": "2026-10-19T17:07:01.919538+00:00",
+      "trace": [
+        {
+          "event": "connection.connect_tcp.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "connection.connect_tcp.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "proxy.start_tls.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "proxy.start_tls.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 48156.0
+        },
+        {
+          "event": "http11.receive_response_body.started",
+          "at_ms": 48156.0
+        },
+        {
+          "event": "http11.receive_response_body.complete",
+          "at_ms": 48156.0
+        },
+        {
+          "event": "http11.response_closed.started",
+          "at_ms": 48156.0
+        },
+        {
+          "event": "http11.response_closed.complete",
+          "at_ms": 48156.0
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 18,
+        "completion_tokens": 6,
+        "total_tokens": 24
+      },
+      "returned_model": "deepseek-flash",
+      "response_bytes": 469,
+      "trace_events_omitted": 0,
+      "sse_events": 0,
+      "request_sha256": "8dbc60868158935d4747341da8fea869300ff3116fa8bd29d3b73ab8aa76521c",
+      "request_bytes": 206,
+      "client_ready_ms": 0.0,
+      "request_started_ms": 0.0,
+      "response_headers_ms": 48156.0,
+      "http_status": 200,
+      "first_body_chunk_ms": 48156.0,
+      "body_complete_ms": 48156.0,
+      "outer_json_parse_ms": 0.0,
+      "finish_reason": "stop",
+      "content_json_schema_ms": 0.0,
+      "structured_result": {
+        "ok": true
+      },
+      "content_characters": 11,
+      "elapsed_until_case_exit_ms": 48156.0,
+      "first_observed_token_chunk_ms": null,
+      "timing_basis": "observed_headers_body_and_case_exit"
+    },
+    {
+      "case": "thinking-4",
+      "block": "thinking",
+      "condition": "default",
+      "thinking": null,
+      "stream": false,
+      "status": "completed",
+      "http_attempts": 1,
+      "started_at": "2026-10-19T17:07:50.087292+00:00",
+      "trace": [
+        {
+          "event": "connection.connect_tcp.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "connection.connect_tcp.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "proxy.start_tls.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "proxy.start_tls.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 36594.0
+        },
+        {
+          "event": "http11.receive_response_body.started",
+          "at_ms": 36594.0
+        },
+        {
+          "event": "http11.receive_response_body.complete",
+          "at_ms": 36594.0
+        },
+        {
+          "event": "http11.response_closed.started",
+          "at_ms": 36594.0
+        },
+        {
+          "event": "http11.response_closed.complete",
+          "at_ms": 36594.0
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 44,
+        "completion_tokens": 18,
+        "total_tokens": 62
+      },
+      "returned_model": "deepseek-flash",
+      "response_bytes": 548,
+      "trace_events_omitted": 0,
+      "sse_events": 0,
+      "request_sha256": "26fe0d9b9c21f088a4cd024db74d793d2d2a8d3acabb2f4cfa5fbedd0c8811d0",
+      "request_bytes": 175,
+      "client_ready_ms": 0.0,
+      "request_started_ms": 0.0,
+      "response_headers_ms": 36594.0,
+      "http_status": 200,
+      "first_body_chunk_ms": 36594.0,
+      "body_complete_ms": 36594.0,
+      "outer_json_parse_ms": 0.0,
+      "finish_reason": "stop",
+      "content_json_schema_ms": 0.0,
+      "structured_result": {
+        "ok": true
+      },
+      "content_characters": 11,
+      "elapsed_until_case_exit_ms": 36594.0,
+      "first_observed_token_chunk_ms": null,
+      "timing_basis": "observed_headers_body_and_case_exit"
+    },
+    {
+      "case": "stream-1",
+      "block": "stream",
+      "condition": "nonstream",
+      "thinking": "disabled",
+      "stream": false,
+      "status": "completed",
+      "http_attempts": 1,
+      "started_at": "2026-10-19T17:08:26.691821+00:00",
+      "trace": [
+        {
+          "event": "connection.connect_tcp.started",
+          "at_ms": 15.0
+        },
+        {
+          "event": "connection.connect_tcp.complete",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 15.0
+        },
+        {
+          "event": "proxy.start_tls.started",
+          "at_ms": 15.0
+        },
+        {
+          "event": "proxy.start_tls.complete",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 27797.0
+        },
+        {
+          "event": "http11.receive_response_body.started",
+          "at_ms": 27797.0
+        },
+        {
+          "event": "http11.receive_response_body.complete",
+          "at_ms": 27797.0
+        },
+        {
+          "event": "http11.response_closed.started",
+          "at_ms": 27797.0
+        },
+        {
+          "event": "http11.response_closed.complete",
+          "at_ms": 27797.0
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 18,
+        "completion_tokens": 6,
+        "total_tokens": 24
+      },
+      "returned_model": "deepseek-flash",
+      "response_bytes": 469,
+      "trace_events_omitted": 0,
+      "sse_events": 0,
+      "request_sha256": "8dbc60868158935d4747341da8fea869300ff3116fa8bd29d3b73ab8aa76521c",
+      "request_bytes": 206,
+      "client_ready_ms": 15.0,
+      "request_started_ms": 15.0,
+      "response_headers_ms": 27797.0,
+      "http_status": 200,
+      "first_body_chunk_ms": 27797.0,
+      "body_complete_ms": 27797.0,
+      "outer_json_parse_ms": 0.0,
+      "finish_reason": "stop",
+      "content_json_schema_ms": 0.0,
+      "structured_result": {
+        "ok": true
+      },
+      "content_characters": 11,
+      "elapsed_until_case_exit_ms": 27797.0,
+      "first_observed_token_chunk_ms": null,
+      "timing_basis": "observed_headers_body_and_case_exit"
+    },
+    {
+      "case": "stream-2",
+      "block": "stream",
+      "condition": "stream",
+      "thinking": "disabled",
+      "stream": true,
+      "status": "completed",
+      "http_attempts": 1,
+      "started_at": "2026-10-19T17:08:54.483334+00:00",
+      "trace": [
+        {
+          "event": "connection.connect_tcp.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "connection.connect_tcp.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "proxy.start_tls.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "proxy.start_tls.complete",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 15.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 22547.0
+        },
+        {
+          "event": "http11.receive_response_body.started",
+          "at_ms": 22547.0
+        },
+        {
+          "event": "http11.receive_response_body.complete",
+          "at_ms": 22640.0
+        },
+        {
+          "event": "http11.response_closed.started",
+          "at_ms": 22640.0
+        },
+        {
+          "event": "http11.response_closed.complete",
+          "at_ms": 22640.0
+        }
+      ],
+      "usage": null,
+      "returned_model": "deepseek-flash",
+      "response_bytes": 809,
+      "trace_events_omitted": 0,
+      "sse_events": 5,
+      "request_sha256": "2a7ea32e77be1c8055a75afec5ee1f136cbeff1142969c76d883333e27fdc418",
+      "request_bytes": 205,
+      "client_ready_ms": 0.0,
+      "request_started_ms": 0.0,
+      "response_headers_ms": 22547.0,
+      "http_status": 200,
+      "first_body_chunk_ms": 22547.0,
+      "first_sse_event_ms": 22547.0,
+      "outer_json_parse_ms": 0.0,
+      "first_content_chunk_ms": 22547.0,
+      "finish_reason": "stop",
+      "sse_done": true,
+      "body_complete_ms": 22640.0,
+      "content_json_schema_ms": 0.0,
+      "structured_result": {
+        "ok": true
+      },
+      "content_characters": 11,
+      "elapsed_until_case_exit_ms": 22640.0,
+      "first_observed_token_chunk_ms": 22547.0,
+      "timing_basis": "observed_headers_body_and_case_exit"
+    },
+    {
+      "case": "stream-3",
+      "block": "stream",
+      "condition": "stream",
+      "thinking": "disabled",
+      "stream": true,
+      "status": "completed",
+      "http_attempts": 1,
+      "started_at": "2026-10-19T17:09:17.129519+00:00",
+      "trace": [
+        {
+          "event": "connection.connect_tcp.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "connection.connect_tcp.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "proxy.start_tls.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "proxy.start_tls.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 16.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 35125.0
+        },
+        {
+          "event": "http11.receive_response_body.started",
+          "at_ms": 35125.0
+        },
+        {
+          "event": "http11.receive_response_body.complete",
+          "at_ms": 35422.0
+        },
+        {
+          "event": "http11.response_closed.started",
+          "at_ms": 35422.0
+        },
+        {
+          "event": "http11.response_closed.complete",
+          "at_ms": 35422.0
+        }
+      ],
+      "usage": null,
+      "returned_model": "deepseek-flash",
+      "response_bytes": 809,
+      "trace_events_omitted": 0,
+      "sse_events": 5,
+      "request_sha256": "2a7ea32e77be1c8055a75afec5ee1f136cbeff1142969c76d883333e27fdc418",
+      "request_bytes": 205,
+      "client_ready_ms": 16.0,
+      "request_started_ms": 16.0,
+      "response_headers_ms": 35125.0,
+      "http_status": 200,
+      "first_body_chunk_ms": 35125.0,
+      "first_sse_event_ms": 35125.0,
+      "outer_json_parse_ms": 0.0,
+      "first_content_chunk_ms": 35125.0,
+      "finish_reason": "stop",
+      "sse_done": true,
+      "body_complete_ms": 35422.0,
+      "content_json_schema_ms": 0.0,
+      "structured_result": {
+        "ok": true
+      },
+      "content_characters": 11,
+      "elapsed_until_case_exit_ms": 35422.0,
+      "first_observed_token_chunk_ms": 35125.0,
+      "timing_basis": "observed_headers_body_and_case_exit"
+    },
+    {
+      "case": "stream-4",
+      "block": "stream",
+      "condition": "nonstream",
+      "thinking": "disabled",
+      "stream": false,
+      "status": "completed",
+      "http_attempts": 1,
+      "started_at": "2026-10-19T17:09:52.553486+00:00",
+      "trace": [
+        {
+          "event": "connection.connect_tcp.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "connection.connect_tcp.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "proxy.start_tls.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "proxy.start_tls.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "at_ms": 0.0
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "at_ms": 55125.0
+        },
+        {
+          "event": "http11.receive_response_body.started",
+          "at_ms": 55125.0
+        },
+        {
+          "event": "http11.receive_response_body.complete",
+          "at_ms": 55125.0
+        },
+        {
+          "event": "http11.response_closed.started",
+          "at_ms": 55125.0
+        },
+        {
+          "event": "http11.response_closed.complete",
+          "at_ms": 55125.0
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 18,
+        "completion_tokens": 6,
+        "total_tokens": 24
+      },
+      "returned_model": "deepseek-flash",
+      "response_bytes": 469,
+      "trace_events_omitted": 0,
+      "sse_events": 0,
+      "request_sha256": "8dbc60868158935d4747341da8fea869300ff3116fa8bd29d3b73ab8aa76521c",
+      "request_bytes": 206,
+      "client_ready_ms": 0.0,
+      "request_started_ms": 0.0,
+      "response_headers_ms": 55125.0,
+      "http_status": 200,
+      "first_body_chunk_ms": 55125.0,
+      "body_complete_ms": 55125.0,
+      "outer_json_parse_ms": 0.0,
+      "finish_reason": "stop",
+      "content_json_schema_ms": 0.0,
+      "structured_result": {
+        "ok": true
+      },
+      "content_characters": 11,
+      "elapsed_until_case_exit_ms": 55125.0,
+      "first_observed_token_chunk_ms": null,
+      "timing_basis": "observed_headers_body_and_case_exit"
+    }
+  ],
+  "summary": [
+    {
+      "block": "thinking",
+      "condition": "default",
+      "n_attempted": 2,
+      "n_completed": 2,
+      "completed_total_ms_median": 42179.5,
+      "timeouts": 0
+    },
+    {
+      "block": "thinking",
+      "condition": "disabled",
+      "n_attempted": 2,
+      "n_completed": 2,
+      "completed_total_ms_median": 37726.5,
+      "timeouts": 0
+    },
+    {
+      "block": "stream",
+      "condition": "nonstream",
+      "n_attempted": 2,
+      "n_completed": 2,
+      "completed_total_ms_median": 41461.0,
+      "timeouts": 0
+    },
+    {
+      "block": "stream",
+      "condition": "stream",
+      "n_attempted": 2,
+      "n_completed": 2,
+      "completed_total_ms_median": 29031.0,
+      "timeouts": 0
+    }
+  ],
+  "elapsed_seconds": 300.828,
+  "completed_at": "2026-10-19T17:10:47.688351+00:00",
+  "passed": true
+}

@@ -15,7 +15,7 @@ ASSIGNMENT = re.compile(
     r"(?:^|[\s,(])(?:export\s+)?(?:USTC_API(?:_KEY)?|TEACHER_PASSWORD|SESSION_SECRET)"
     r"\s*=\s*(?:\"([^\"\n]*)\"|'([^'\n]*)'|([^\s,;)]+))"
 )
-# Exact pre-existing fixtures for redaction, provider routing and fake credential vaults.
+# Exact reviewed fixtures for redaction, routing, fake vaults and classroom isolation.
 FIXTURES = {
     "services/api/tests/test_auth_login.py": {
         "f2d927e8aed50a30742ed8a82dcd7ea6c42df097c7c3429a0dfaef30b3b4d9fd",
@@ -34,6 +34,12 @@ FIXTURES = {
         "1923f665927132505277ebc362369d83522ec948ca77600f0090716f7974e812",
     },
     "services/api/tests/test_model_routing.py": {"930bbdc51b6aed5c2a5678fd6e28dee7a05e8a4b643cfc0b4427c3efb86c0d94"},
+    "services/api/tests/test_classroom_auth.py": {
+        "7a8e44cb0da24bb5da593db91765752138e436e1b1fe473a245725ff012d59fc",
+    },
+    "tests/classroom-login-rate.test.ts": {
+        "2c4f6c115c3af0fd2b3ad687738ea1bbfe4cbaa60f6bb69c622cb96a62e79235",
+    },
 }
 
 

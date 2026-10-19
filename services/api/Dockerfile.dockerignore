@@ -1,0 +1,37 @@
+# Allow only backend sources and the test stage's exact offline review material.
+# Original course files, credentials, Git history and generated outputs stay out.
+**
+!services/
+!services/api/
+!services/api/pyproject.toml
+!services/api/uv.lock
+!services/api/alembic.ini
+!services/api/alembic/
+!services/api/alembic/**
+!services/api/quantum_agent/
+!services/api/quantum_agent/**
+!services/api/tests/
+!services/api/tests/**
+!docs/
+!docs/teacher-packets/
+!docs/teacher-packets/**
+!scripts/
+!scripts/verify-heldout-barriers.py
+!scripts/investigate-model-latency.py
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.env
+**/.env.*
+**/.dev.vars
+**/private.env
+**/*.pem
+**/*.key
+**/*.sqlite*
+**/*.db
+**/*.vhd*
+**/*.py[cod]
+**/*.tsbuildinfo

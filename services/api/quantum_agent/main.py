@@ -19,6 +19,7 @@ from quantum_agent.api.attachments import router as attachments_router
 from quantum_agent.api.auth import router as auth_router
 from quantum_agent.api.course_context import router as course_context_router
 from quantum_agent.api.graph import router as graph_router
+from quantum_agent.api.learning_records import router as learning_records_router
 from quantum_agent.api.retrieval import router as retrieval_router
 from quantum_agent.api.review import router as review_router
 from quantum_agent.api.source_files import SourceFileRepository
@@ -48,6 +49,8 @@ from quantum_agent.knowledge.retrieval import (
 )
 from quantum_agent.llm.routing import ModelRouter
 from quantum_agent.multimodal.runtime import build_attachment_runtime
+from quantum_agent.teaching.execution_budget import ExecutionLimits
+from quantum_agent.tutor.checkpoints import setup_checkpoint_schema
 from quantum_agent.tutor.graph import TutorGraph
 
 
@@ -116,7 +119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "postgresql+asyncpg://", "postgresql://", 1
                 )
                 async with AsyncPostgresSaver.from_conn_string(checkpoint_url) as saver:
-                    await saver.setup()
+                    await setup_checkpoint_schema(saver, checkpoint_url)
                     lifespan_app.state.teaching_workflow = TutorGraph(
                         evidence_retriever=hybrid_retriever,
                         model_gateway=model_gateway,
@@ -125,6 +128,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         enable_hitl=True,
                         coding_agent=coding_agent,
                         sandbox=sandbox,
+                        execution_limits=ExecutionLimits.from_settings(resolved_settings),
                     )
                     yield
         finally:
@@ -172,6 +176,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             enable_hitl=False,
             coding_agent=coding_agent,
             sandbox=sandbox,
+            execution_limits=ExecutionLimits.from_settings(resolved_settings),
         )
     app.dependency_overrides[session_dependency] = app_session_dependency
     app.include_router(review_router)
@@ -182,6 +187,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(teaching_router)
     app.include_router(source_files_router)
     app.include_router(teacher_insights_router)
+    app.include_router(learning_records_router)
     app.include_router(auth_router)
 
     @app.get("/health/live", response_model=HealthResponse, tags=["health"])

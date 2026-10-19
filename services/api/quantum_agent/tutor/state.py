@@ -36,6 +36,7 @@ from quantum_agent.teaching.models import (
     WorkflowStep,
 )
 from quantum_agent.teaching.repository import StartedTeachingTurn, StartedTeachingTurnRef
+from quantum_agent.teaching.reviews import TeacherFollowUp
 from quantum_agent.teaching.state_machine import EvidenceRetriever
 
 
@@ -97,6 +98,7 @@ class TutorState(TypedDict, total=False):
     solo_assistance_locked: bool
     learning_native_pre_decision: dict[str, object] | None
     answer_withheld_by_gate: bool
+    teacher_follow_up: TeacherFollowUp | None
 
     # PRD V3.1 §6: Coding Agent artifact.  When the scientific request is a
     # computation-bearing kind, the Coding Agent writes fresh Python, runs it

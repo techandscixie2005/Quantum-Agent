@@ -1,0 +1,17 @@
+{
+  "package_id": "finite-barriers",
+  "version": "1.0.0",
+  "content_sha256": "dff1a96d36bc0f4345750196d8a9bc7b1ad66b6bfe05c8a897caeb5e3f96ce7d",
+  "objective_ids": [
+    "FB-O1",
+    "FB-O2",
+    "FB-O3",
+    "FB-O4"
+  ],
+  "rubric_ids": [
+    "FB-R1",
+    "FB-R2",
+    "FB-R3",
+    "FB-R4"
+  ]
+}

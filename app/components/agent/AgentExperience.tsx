@@ -62,10 +62,12 @@ import { DerivationBridgePanel } from "./DerivationBridgePanel";
 import {
   CognitiveMirrorPanel,
   LearningNativeSurface,
+  AssessmentEvidenceCard,
 } from "./LearningNative";
 import { StageReview } from "./StageReview";
 import { LearningJourney } from "./LearningJourney";
 import styles from "./agent.module.css";
+import { parseTeachingRequestStatus, recoveryMatchesView, type TeachingRequestStatus } from "@/lib/teaching-request-status";
 
 const AgentCodeEditor = dynamic(() => import("./AgentCodeEditor"), {
   ssr: false,
@@ -120,6 +122,8 @@ type TurnRequest = Readonly<{
   scientificExecution?: "generate_code" | "reference_only";
   learningNative: LearningNativeSubmission | null;
   clientRequestId: string | null;
+  viewEpoch: number;
+  userId: string;
 }>;
 
 function isHitlOutcome(value: TeachingWorkflowOutcome): value is HitlInterruptResponse {
@@ -180,7 +184,7 @@ async function consumeTeachingStream(
   response: Response,
   onProgress: (progress: StageProgress) => void,
 ): Promise<unknown> {
-  if (!response.body) throw new Error("教学事件流缺少响应体。");
+  if (!response.body) throw workflowFailure("TRANSPORT_INTERRUPTED");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -238,7 +242,10 @@ async function consumeTeachingStream(
   };
 
   while (true) {
-    const { done, value } = await reader.read();
+    let part: ReadableStreamReadResult<Uint8Array>;
+    try { part = await reader.read(); }
+    catch { throw workflowFailure("TRANSPORT_INTERRUPTED"); }
+    const { done, value } = part;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     let separatorIndex: number;
@@ -265,9 +272,13 @@ async function consumeTeachingStream(
   if (buffer.trim()) flushBlock(buffer);
   if (failure) throw workflowFailure(failure);
   if (terminal === undefined || terminalCount !== 1) {
-    throw new Error("教学工作流没有返回唯一的完成或暂停记录。");
+    throw workflowFailure("TRANSPORT_INTERRUPTED");
   }
   return terminal;
+}
+
+class TeachingWorkflowError extends Error {
+  constructor(readonly code: string, message: string) { super(message); }
 }
 
 function workflowFailure(code: string): Error {
@@ -279,8 +290,12 @@ function workflowFailure(code: string): Error {
     WORKFLOW_UNAVAILABLE: "本轮执行失败，未产生完成结论。输入已保留，请恢复学习记录后重试。",
     CONVERSATION_CONFLICT: "学习记录已被另一次操作更新。请刷新恢复当前进度，再提交保留的输入。",
     INVALID_UPSTREAM_CONTRACT: "服务返回的数据未通过校验，本轮没有显示为完成。请恢复学习记录后重试。",
+    EXECUTION_BUDGET_EXHAUSTED: "本轮执行额度已用完，未据此判断你的掌握情况。请先检查保存状态，再明确提交新一轮。",
+    EXECUTION_BUDGET_BUSY: "同一次提交仍在服务端执行，请检查保存状态并等待，避免重复消耗。",
+    TRANSPORT_TIMEOUT: "等待回应超时，服务端可能已保存结果。请先检查保存状态。",
+    TRANSPORT_INTERRUPTED: "连接中断，服务端可能仍在执行或已保存结果。输入和原提交标识已保留。",
   };
-  return new Error(messages[code] ?? `教学工作流中止（${code}）。`);
+  return new TeachingWorkflowError(code, messages[code] ?? "教学工作流中止，请检查已保存状态。");
 }
 
 async function responseMessage(response: Response, fallback: string): Promise<string> {
@@ -589,6 +604,7 @@ function SessionRequiredView({
   onReload: () => void;
 }) {
   const [apiKey, setApiKey] = useState("");
+  const [classroomToken, setClassroomToken] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -602,7 +618,7 @@ function SessionRequiredView({
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_key: trimmed }),
+        body: JSON.stringify({ api_key: trimmed, classroom_access_token: classroomToken.trim() || undefined }),
       });
       if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
@@ -616,6 +632,7 @@ function SessionRequiredView({
         return;
       }
       setApiKey("");
+      setClassroomToken("");
       onReload();
     } catch {
       setLoginError("无法连接教学服务。");
@@ -627,11 +644,15 @@ function SessionRequiredView({
   return (
     <main className={styles.bootError}>
       <Atom size={34} />
-      <p className={styles.kicker}>QUANTUM AGENT / 连接中国科大</p>
-      <h1>词元计划 · 一〇七杯</h1>
-      <p>输入你的 API Key，连接学校模型服务并进入学习空间。Key 只会经 HTTPS 发送到后端保险库，不会写入浏览器、日志或 Agent Trace。</p>
+      <p className={styles.kicker}>QUANTUM AGENT / 课堂学习</p>
+      <h1>进入你的课程</h1>
+      <p>使用任课教师分配的个人课堂访问凭证连接自己的学习记录。API Key 用于调用模型服务，并保存在后端保险库。</p>
       <form onSubmit={submitApiKeyLogin} className={styles.demoLogin} aria-label="API Key 登录表单">
         <p className={styles.kicker}>MODEL SERVICE LOGIN</p>
+        <label htmlFor="classroom-access">个人课堂访问凭证</label>
+        <input id="classroom-access" type="password" autoComplete="off" maxLength={512}
+          value={classroomToken} onChange={(event) => setClassroomToken(event.target.value)}
+          placeholder="由任课教师分配；首次登录后失效" />
         <label htmlFor="ustc-api-key">API Key</label>
         <input
           id="ustc-api-key"
@@ -688,6 +709,51 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
   const [cmdQuery, setCmdQuery] = useState("");
   const [expandedClaim, setExpandedClaim] = useState<number | null>(null);
   const [showAttempt, setShowAttempt] = useState(false);
+  const [requestRecovery, setRequestRecovery] = useState<{
+    requestId: string; epoch: number; status: TeachingRequestStatus | null; restored?: boolean;
+  } | null>(null);
+  const [recoveryPending, setRecoveryPending] = useState(false);
+  const [recoveryError, setRecoveryError] = useState("");
+  const recoveryControllerRef = useRef<AbortController | null>(null);
+  // Network completion is scoped to the view that started it. Changing course,
+  // starting another episode, or submitting a newer turn invalidates old reads.
+  const viewEpochRef = useRef(0);
+  const activeViewRef = useRef({ courseKey, conversationId });
+  activeViewRef.current = { courseKey, conversationId };
+  function invalidateView() {
+    viewEpochRef.current += 1;
+    interruptRecoveryRef.current = null;
+    setStageProgress(null);
+    turnMutation.reset();
+    resumeMutation.reset();
+    setReviewStage(null);
+    setHistoryPresence(null);
+    setUploads([]);
+    setSelectedSource(null);
+    setRestoreError("");
+    recoveryControllerRef.current?.abort();
+    setRequestRecovery(null); setRecoveryPending(false); setRecoveryError("");
+    for (const url of previewUrlsRef.current) URL.revokeObjectURL(url);
+    previewUrlsRef.current.clear();
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+  const identityRef = useRef<string | null>(null);
+  const identityChanged = identityRef.current !== null && Boolean(contextQuery.data)
+    && identityRef.current !== contextQuery.data?.user_id;
+  useEffect(() => {
+    const identity = contextQuery.data?.user_id;
+    if (!identity) return;
+    if (identityRef.current !== null && identityRef.current !== identity) {
+      invalidateView();
+      setConversationId(null); setCourseKey(null); setResult(null); setInterrupt(null);
+      setAttempt(""); setMessage(""); setUploads([]); setSelectedSource(null);
+      setBridgeSource(""); setBridgeTarget(""); setProjectCode("");
+      setConfirmedTranscription(""); setRestoreError("");
+      try { storage().removeItem(storageKey("qa_conversation_id")); } catch { /* unavailable */ }
+    }
+    identityRef.current = identity;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextQuery.data?.user_id]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -792,11 +858,13 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
       course_id: courseId,
       curriculum_edition_id: curriculumEditionId,
     });
-    // No AbortController — same rationale as the state restore below:
-    // `scope` changes identity every render and the ref makes re-entry
-    // impossible, so a cleanup abort would only kill a live fetch.
+    const controller = new AbortController();
+    const epoch = viewEpochRef.current;
+    const isCurrent = () => !controller.signal.aborted && epoch === viewEpochRef.current
+      && activeViewRef.current.conversationId === conversationId
+      && activeViewRef.current.courseKey === `${courseId}:${curriculumEditionId}`;
     agentFetch(`/api/teaching/threads/${conversationId}/interrupt?${query.toString()}`, {
-      headers: { Accept: "application/json" },
+      headers: { Accept: "application/json" }, signal: controller.signal,
     })
       .then(async (response) => {
         if (!response.ok) return;
@@ -804,12 +872,14 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
           parseHitlInterruptResponse(await response.json()),
         );
         assertHitlScope(pause, { courseId, curriculumEditionId }, pause.artifacts.policy.mode);
-        if (pause.conversation_id !== conversationId) return;
+        if (pause.conversation_id !== conversationId || !isCurrent()) return;
         setInterrupt(pause);
         setConfirmedTranscription(interruptTranscription(pause));
       })
       .catch(() => undefined);
-  }, [scope, conversationId, interrupt, agentFetch]);
+    return () => { controller.abort(); interruptRecoveryRef.current = null; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope?.courseId, scope?.curriculumEditionId, conversationId, agentFetch]);
 
   // §13 refresh restoration: after a reload the persisted conversation_id is
   // restored above; this re-reads the durable learning state from the
@@ -834,6 +904,10 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
     // effect cleanup here would abort the in-flight fetch before its
     // response is ever applied (the restore would silently never happen).
     const controller = new AbortController();
+    const epoch = viewEpochRef.current;
+    const isCurrent = () => !controller.signal.aborted && epoch === viewEpochRef.current
+      && activeViewRef.current.conversationId === conversationId
+      && activeViewRef.current.courseKey === `${courseId}:${curriculumEditionId}`;
     setRestoreError("");
     agentFetch(`/api/teaching/threads/${conversationId}/state?${query.toString()}`, {
       headers: { Accept: "application/json" }, signal: controller.signal,
@@ -844,7 +918,7 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
           mode?: string;
           result?: unknown;
         };
-        if (controller.signal.aborted) return;
+        if (!isCurrent()) return;
         if (parsed.mode === "learn_concepts" || parsed.mode === "review_derivations" || parsed.mode === "run_experiments" || parsed.mode === "work_on_projects") {
           setMode(parsed.mode);
         }
@@ -868,7 +942,7 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
           }
         }
       })
-      .catch(() => { if (!controller.signal.aborted) setRestoreError("学习过程恢复失败，请重试；不会用示例记录替代。"); });
+      .catch(() => { if (isCurrent()) setRestoreError("学习过程恢复失败，请重试；不会用示例记录替代。"); });
     return () => {
       controller.abort();
       stateRestoreRef.current = null;
@@ -898,25 +972,33 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
         course_id: input.scope.courseId,
         curriculum_edition_id: input.scope.curriculumEditionId,
       });
-      setStageProgress({
+      if (input.viewEpoch === viewEpochRef.current) setStageProgress({
         step: "workflow_started",
         status: "started",
         detail: "教学流程已启动",
         elapsed_seconds: 0,
       });
-      const response = await agentFetch(`/api/teaching/turns/stream?${query.toString()}`, {
-        method: "POST",
-        headers: { Accept: "text/event-stream", "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) throw new Error(await responseMessage(response, "教学工作流不可用。"));
+      let response: Response;
+      try {
+        response = await agentFetch(`/api/teaching/turns/stream?${query.toString()}`, {
+          method: "POST", headers: { Accept: "text/event-stream", "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      } catch { throw workflowFailure("TRANSPORT_INTERRUPTED"); }
+      if (!response.ok) {
+        const failure = parseTeachingApiError(await response.json().catch(() => null));
+        throw failure ? new TeachingWorkflowError(failure.error.code, failure.error.message)
+          : workflowFailure("WORKFLOW_UNAVAILABLE");
+      }
       // PRD V3.2 streaming: consume the SSE stream incrementally so the UI
       // renders per-stage progress as each ``progress`` event arrives.  The
       // terminal event is still validated by the BFF before forwarding, and
       // ``consumeTeachingStream`` enforces the exactly-one-terminal contract
       // on the client side too.
       const parsed = parseTeachingWorkflowOutcome(
-        await consumeTeachingStream(response, (progress) => setStageProgress(progress)),
+        await consumeTeachingStream(response, (progress) => {
+          if (input.viewEpoch === viewEpochRef.current) setStageProgress(progress);
+        }),
       );
       if (isHitlOutcome(parsed)) assertHitlScope(parsed, input.scope, input.mode);
       else assertTeachingScope(parsed, input.scope, input.mode);
@@ -924,8 +1006,11 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
     },
     onMutate: () => {
       setStageProgress(null);
+      recoveryControllerRef.current?.abort();
+      setRequestRecovery(null); setRecoveryPending(false); setRecoveryError("");
     },
     onSuccess: (next, variables) => {
+      if (variables.viewEpoch !== viewEpochRef.current || variables.userId !== identityRef.current) return;
       setConversationId(next.conversation_id);
       if (isHitlOutcome(next)) {
         setInterrupt(next);
@@ -957,6 +1042,7 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
       conversationId: string;
       interruptId: string;
       confirmedAttempt: string;
+      viewEpoch: number;
     }) => {
       const query = new URLSearchParams({
         course_id: input.scope.courseId,
@@ -986,7 +1072,8 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
       }
       return parsed;
     },
-    onSuccess: (next) => {
+    onSuccess: (next, variables) => {
+      if (variables.viewEpoch !== viewEpochRef.current) return;
       setConversationId(next.conversation_id);
       if (isHitlOutcome(next)) {
         setInterrupt(next);
@@ -1002,6 +1089,83 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
       // blocks pointer events (see turnMutation.onSuccess note above).
     },
   });
+
+  const failedRequest = turnMutation.error && turnMutation.variables
+    && turnMutation.variables.viewEpoch === viewEpochRef.current
+    && turnMutation.variables.userId === contextQuery.data?.user_id
+    && turnMutation.variables.scope.courseId === scope?.courseId
+    && turnMutation.variables.scope.curriculumEditionId === scope?.curriculumEditionId
+    ? turnMutation.variables : null;
+  const recoveredRequest = requestRecovery && requestRecovery.epoch === viewEpochRef.current
+    && requestRecovery.requestId === failedRequest?.clientRequestId ? requestRecovery : null;
+  const recoveryBlocksNewTurn = Boolean(failedRequest && (!recoveredRequest || recoveryPending
+    || recoveredRequest.status?.recovery_action === "wait_then_retry_same_request"
+    || (recoveredRequest.status && !recoveredRequest.restored)));
+  const terminalOrBusy = turnMutation.error instanceof TeachingWorkflowError
+    && ["EXECUTION_BUDGET_EXHAUSTED", "EXECUTION_BUDGET_BUSY"].includes(turnMutation.error.code);
+  const canRetrySameRequest = Boolean(failedRequest && !recoveryPending && (!terminalOrBusy || recoveredRequest)
+    && (!recoveredRequest?.status || recoveredRequest.status.recovery_action === "replay_same_request"));
+
+  async function recoverSavedRequest() {
+    if (!failedRequest?.clientRequestId || recoveryPending) return;
+    const variables = failedRequest;
+    const requestId = variables.clientRequestId!;
+    recoveryControllerRef.current?.abort();
+    const controller = new AbortController();
+    recoveryControllerRef.current = controller;
+    const isCurrent = () => !controller.signal.aborted && recoveryMatchesView({
+      epoch: variables.viewEpoch, userId: variables.userId, courseId: variables.scope.courseId,
+      editionId: variables.scope.curriculumEditionId,
+    }, { epoch: viewEpochRef.current, userId: identityRef.current,
+      courseId: activeViewRef.current.courseKey?.split(":")[0] ?? null,
+      editionId: activeViewRef.current.courseKey?.split(":")[1] ?? null });
+    setRecoveryPending(true); setRecoveryError("");
+    const query = new URLSearchParams({ course_id: variables.scope.courseId,
+      curriculum_edition_id: variables.scope.curriculumEditionId, client_request_id: requestId });
+    try {
+      const response = await agentFetch(`/api/teaching/requests/status?${query}`, {
+        cache: "no-store", signal: controller.signal,
+      });
+      if (!isCurrent()) return;
+      if (response.status === 404) {
+        setRequestRecovery({ requestId, epoch: variables.viewEpoch, status: null });
+        setRecoveryError("当前账号和课程尚未找到这次提交；可使用原标识重试同一次提交。");
+        return;
+      }
+      if (!response.ok) throw new Error("暂时无法确认保存状态，请保留原提交并再次检查。");
+      const saved = parseTeachingRequestStatus(await response.json(), requestId);
+      if (!isCurrent()) return;
+      setRequestRecovery({ requestId, epoch: variables.viewEpoch, status: saved });
+      setConversationId(saved.conversation_id);
+      query.delete("client_request_id");
+      const suffix = saved.recovery_action === "review_required" ? "interrupt" : "state";
+      if (saved.recovery_action === "wait_then_retry_same_request") return;
+      const restored = await agentFetch(`/api/teaching/threads/${saved.conversation_id}/${suffix}?${query}`, {
+        cache: "no-store", signal: controller.signal,
+      });
+      if (!restored.ok) throw new Error("已找到提交记录，但学习状态尚未恢复；请再次检查。");
+      const raw: unknown = await restored.json();
+      if (!isCurrent()) return;
+      if (suffix === "interrupt") {
+        const pause = redactHitlProposedResponse(parseHitlInterruptResponse(raw));
+        assertHitlScope(pause, variables.scope, pause.artifacts.policy.mode);
+        if (pause.conversation_id !== saved.conversation_id || pause.turn_id !== saved.turn_id) throw new Error("复核记录已变化，请再次检查。");
+        setInterrupt(pause); setResult(null); setConfirmedTranscription(interruptTranscription(pause));
+      } else {
+        const state = raw as { conversation_id?: unknown; result?: unknown };
+        if (state.conversation_id !== saved.conversation_id) throw new Error("保存的线程标识不匹配。");
+        const next = state.result ? parseTeachingTurnResult(state.result) : null;
+        if (next) assertTeachingScope(next, variables.scope, next.policy.mode);
+        setResult(next); setInterrupt(null);
+        if (next) setMode(next.policy.mode);
+      }
+      setRequestRecovery({ requestId, epoch: variables.viewEpoch, status: saved, restored: true });
+    } catch (error) {
+      if (isCurrent()) setRecoveryError(error instanceof Error ? error.message : "无法恢复保存状态。");
+    } finally {
+      if (isCurrent()) setRecoveryPending(false);
+    }
+  }
 
   async function uploadFile(record: UploadRecord, uploadScope: TeachingScope) {
     const query = new URLSearchParams({
@@ -1078,7 +1242,7 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
   }
 
   function submit(scientificExecution: "generate_code" | "reference_only" = "generate_code") {
-    if (!scope || interrupt || turnMutation.isPending || resumeMutation.isPending) return;
+    if (!scope || interrupt || turnMutation.isPending || resumeMutation.isPending || recoveryBlocksNewTurn) return;
     if (bridgeDetailsRef.current) bridgeDetailsRef.current.open = false;
     const ready = uploads.filter((item) => item.remote && item.state === "ready");
     const codeAttempt = mode === "work_on_projects" ? `\n\n[当前代码]\n${projectCode}` : "";
@@ -1129,11 +1293,13 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
       scientificExecution,
       learningNative: null,
       clientRequestId: newClientRequestId(),
+      viewEpoch: ++viewEpochRef.current,
+      userId: contextQuery.data!.user_id,
     });
   }
 
   function submitLearningNative(submission: LearningNativeSubmission, studentResponse?: string) {
-    if (!scope || interrupt || turnMutation.isPending || resumeMutation.isPending) return;
+    if (!scope || interrupt || turnMutation.isPending || resumeMutation.isPending || recoveryBlocksNewTurn) return;
     turnMutation.mutate({
       scope,
       mode,
@@ -1144,12 +1310,17 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
       scientificRequest: null,
       learningNative: submission,
       clientRequestId: newClientRequestId(),
+      viewEpoch: ++viewEpochRef.current,
+      userId: contextQuery.data!.user_id,
     });
   }
 
   function startGoldenTunnelingLoop() {
     if (!scope || interrupt || turnMutation.isPending) return;
     if (demo) { setMessage(demo.next()); return; }
+    invalidateView();
+    setAttempt("");
+    setBridgeSource(""); setBridgeTarget("");
     setMessage("我想学习量子隧穿：为什么 E<V0 时粒子仍可能透射？请用 Learning-Native 循环引导我。");
     setMode("run_experiments");
     setGoldenTunnelling(true);
@@ -1175,6 +1346,7 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
       conversationId,
       interruptId: interrupt.interrupt.interrupt_id,
       confirmedAttempt: confirmedTranscription.trim(),
+      viewEpoch: ++viewEpochRef.current,
     });
   }
 
@@ -1278,7 +1450,7 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
     return activeMode.label.toUpperCase();
   }, [interrupt, loopDone, nativeState, activeMode.label, reviewStage, independentWorkspace, conversationId]);
 
-  if (contextQuery.isPending) {
+  if (contextQuery.isPending || identityChanged) {
     return <main className={styles.boot}><Atom /><p>正在建立课程边界与证据索引…</p></main>;
   }
   if (contextQuery.isError || !contextQuery.data) {
@@ -1358,7 +1530,7 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
         <div className={styles.railSpacer} />
         <button
           className={styles.railIconButton}
-          onClick={() => { if (demo?.reset) { demo.reset(); location.reload(); return; } setReviewStage(null); setConversationId(null); setResult(null); setInterrupt(null); setConfirmedTranscription(""); setAttempt(""); setMessage(""); setRestoreError(""); }}
+          onClick={() => { if (demo?.reset) { demo.reset(); location.reload(); return; } invalidateView(); setReviewStage(null); setConversationId(null); setResult(null); setInterrupt(null); setConfirmedTranscription(""); setAttempt(""); setMessage(""); setRestoreError(""); }}
           disabled={turnMutation.isPending || resumeMutation.isPending || independentWorkspace}
           aria-label="新建学习记录"
           title="新建学习记录"
@@ -1419,6 +1591,16 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
               phase={nativeState.phase}
             </span>
           ) : null}
+          {nativeState?.course_package ? <p className={styles.kicker} data-testid="course-package-version">
+            课程包 {nativeState.course_package.package_id} · v{nativeState.course_package.version}
+          </p> : null}
+          {nativeState?.teacher_follow_up ? <p role="status">教师已安排本轮追问；依据见教师审阅记录。</p> : null}
+          {loopDone && nativeState?.solo_first_attempt ? <details data-testid="preserved-first-attempt">
+            <summary>Solo 首次独立作答（提交后保留）</summary>
+            <p>{nativeState.solo_first_attempt.response}</p>
+            <time>{nativeState.solo_first_attempt.submitted_at}</time>
+            <p>记录表示提交时应用内辅助已锁定；外部帮助无法由系统核实。</p>
+          </details> : null}
 
           {!loopDone ? <EvidenceSpine
             uploads={uploads}
@@ -1543,7 +1725,7 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
             <LearningNativeSurface
               key={result.turn_id}
               state={result.learning_native}
-              pending={turnMutation.isPending || resumeMutation.isPending}
+              pending={turnMutation.isPending || resumeMutation.isPending || recoveryBlocksNewTurn}
               onSubmit={submitLearningNative}
             />
           ) : null}
@@ -1557,6 +1739,7 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
               {result?.learning_native?.cognitive_mirror ? (
                 <CognitiveMirrorPanel mirror={result.learning_native.cognitive_mirror} />
               ) : null}
+              <AssessmentEvidenceCard evidence={result?.learning_native?.assessment_evidence} />
               {!demo && scope && conversationId ? (
                 <EpisodeEvidence key={conversationId} scope={scope} conversationId={conversationId} />
               ) : null}
@@ -1764,13 +1947,30 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
               <button
                 className={styles.sendButton}
                 onClick={() => submit()}
-                disabled={Boolean(interrupt) || turnMutation.isPending || resumeMutation.isPending || uploading || (!message.trim() && uploads.length === 0 && !(mode === "review_derivations" && bridgeSource.trim() && bridgeTarget.trim()))}
+                disabled={Boolean(interrupt) || turnMutation.isPending || resumeMutation.isPending || recoveryBlocksNewTurn || uploading || (!message.trim() && uploads.length === 0 && !(mode === "review_derivations" && bridgeSource.trim() && bridgeTarget.trim()))}
               >
                 {turnMutation.isPending || resumeMutation.isPending ? <LoaderCircle className={styles.spin} /> : <Send />}
                 <span>{interrupt ? "先完成上方复核" : turnMutation.isPending ? "执行工作流" : "发送 / 运行"}</span>
               </button>
             </footer>
-            {turnMutation.error ? <p className={styles.composerError}><CircleAlert /> {turnMutation.error.message}</p> : null}
+            {turnMutation.error ? <div className={styles.composerError}><CircleAlert />
+              {recoveredRequest?.restored && recoveredRequest.status?.status === "completed"
+                ? "已恢复服务端保存的学习状态；原连接中断没有创建重复提交。" : turnMutation.error.message}
+              {failedRequest ? <button type="button" onClick={() => void recoverSavedRequest()} disabled={recoveryPending}>
+                {recoveryPending ? "正在检查保存状态…" : "检查并恢复保存状态"}
+              </button> : null}
+              {canRetrySameRequest ? <button type="button" onClick={() => {
+                if (failedRequest?.viewEpoch === viewEpochRef.current) turnMutation.mutate({ ...failedRequest, viewEpoch: ++viewEpochRef.current });
+              }} disabled={turnMutation.isPending}>重试同一次提交</button> : null}
+              {recoveredRequest?.status ? <p role="status" data-testid="request-recovery-status">
+                已保存状态：{recoveredRequest.status.status === "completed" ? "已完成" : recoveredRequest.status.status === "failed" ? "本轮已停止" : "执行中或等待复核"}。
+                主动执行 {(recoveredRequest.status.execution_budget.active_used_seconds ?? 0).toFixed(1)} 秒；
+                人工等待 {(recoveredRequest.status.execution_budget.human_wait_seconds ?? 0).toFixed(1)} 秒。
+                {recoveredRequest.status.recovery_action === "new_explicit_turn" ? "本轮没有形成掌握结论；恢复线程后可明确发送新一轮。" : null}
+                {recoveredRequest.status.recovery_action === "wait_then_retry_same_request" ? "请等待后再次检查，不会自动创建新提交。" : null}
+              </p> : null}
+              {recoveryError ? <p role="alert">{recoveryError}</p> : null}
+            </div> : null}
           </section>
           </div>
         </div>
@@ -1886,6 +2086,9 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
                     className={styles.cmdItem}
                     data-active={`${course.course_id}:${course.curriculum_edition_id}` === courseKey ? "true" : "false"}
                     onClick={() => {
+                      invalidateView();
+                      setMessage(""); setAttempt("");
+                      setBridgeSource(""); setBridgeTarget(""); setProjectCode("");
                       setCourseKey(`${course.course_id}:${course.curriculum_edition_id}`);
                       setConversationId(null);
                       setResult(null);
@@ -1918,7 +2121,7 @@ export function AgentExperience({ demo }: { demo?: { fetch: typeof fetch; next: 
                 </button>
                 <button
                   className={styles.cmdItem}
-                  onClick={() => { if (demo?.reset) { demo.reset(); location.reload(); return; } setReviewStage(null); setConversationId(null); setResult(null); setInterrupt(null); setConfirmedTranscription(""); setAttempt(""); setMessage(""); setRestoreError(""); setCmdOpen(false); setCmdQuery(""); }}
+                  onClick={() => { if (demo?.reset) { demo.reset(); location.reload(); return; } invalidateView(); setReviewStage(null); setConversationId(null); setResult(null); setInterrupt(null); setConfirmedTranscription(""); setAttempt(""); setMessage(""); setRestoreError(""); setCmdOpen(false); setCmdQuery(""); }}
                 >
                   <Plus size={15} />
                   <span><strong>新建学习记录</strong><small>清空当前会话</small></span>

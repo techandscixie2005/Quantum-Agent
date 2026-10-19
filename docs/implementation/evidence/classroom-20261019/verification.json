@@ -1,0 +1,198 @@
+{
+  "kind": "automated_verification_not_classroom_evidence",
+  "execution_dates_local": [
+    "2026-10-19",
+    "2026-10-20"
+  ],
+  "timezone": "Asia/Shanghai",
+  "platform": "Windows-10-10.0.19045-SP0",
+  "python": "3.12.14",
+  "node": "24.19.0",
+  "dependencies": "Python uv.lock --frozen --extra dev; npm package-lock.json via npm ci --ignore-scripts",
+  "source_snapshot": "source-snapshot.json",
+  "classroom_results": null,
+  "teacher_approvals": null,
+  "checks": [
+    {
+      "name": "portable_backend",
+      "status": "passed",
+      "passed": 555,
+      "skipped": 1,
+      "deselected": 30,
+      "warnings": 132,
+      "duration_seconds": 381.42,
+      "command": "cd services/api; python -m pytest -q -m \"not live_infra and not live_model\" --tb=short [--deselect=<each node in windows-test-exclusions.txt>]",
+      "exclusions": {
+        "platform_cases": 28,
+        "explicit_live_tests": 2,
+        "skip": "POSIX resource limit test unavailable on Windows"
+      },
+      "limitation": "Portable subset only. Linux sandbox and PostgreSQL concurrency were not verified.",
+      "note": "Final full portable sweep after the scientific-precision prompt clarification; 555 passed, 1 skipped, 30 deselected, 132 warnings."
+    },
+    {
+      "name": "backend_ruff",
+      "status": "passed",
+      "command": "cd services/api; python -m ruff check quantum_agent tests alembic"
+    },
+    {
+      "name": "backend_mypy",
+      "status": "passed",
+      "source_files": 155,
+      "command": "cd services/api; python -m mypy quantum_agent tests"
+    },
+    {
+      "name": "node_unit_contract_golden",
+      "status": "passed",
+      "passed": 87,
+      "command": "npm run test:unit",
+      "live_models": false
+    },
+    {
+      "name": "typescript",
+      "status": "passed",
+      "command": "node node_modules/typescript/bin/tsc --noEmit"
+    },
+    {
+      "name": "eslint",
+      "status": "passed_with_existing_warnings",
+      "errors": 0,
+      "warnings": 3,
+      "command": "node node_modules/eslint/bin/eslint.js . --ignore-pattern dist --ignore-pattern .next --ignore-pattern services/api/.venv",
+      "existing_warnings": [
+        "lib/diatomic unused tolerance",
+        "tests/e2e/live/visual-qa unused writeFileSync",
+        "tests/e2e/live/visual-qa unused UUID"
+      ]
+    },
+    {
+      "name": "production_build",
+      "status": "passed",
+      "command": "node node_modules/vinext/dist/cli.js build",
+      "note": "Vinext build; existing large chunk warning retained."
+    },
+    {
+      "name": "worker_and_hosting_artifacts",
+      "status": "passed",
+      "assertions": [
+        "dist/server/index.js default.fetch is callable",
+        "dist/.openai/hosting.json parses"
+      ]
+    },
+    {
+      "name": "rendered_html",
+      "status": "passed",
+      "passed": 1,
+      "command": "node --test tests/rendered-html.test.mjs"
+    },
+    {
+      "name": "public_bundle_secrets",
+      "status": "passed",
+      "public_artifacts_scanned": 31,
+      "command": "npm run check:secrets"
+    },
+    {
+      "name": "scripted_browser_contracts",
+      "status": "passed",
+      "passed": 16,
+      "duration_seconds": 21.2,
+      "command": "BASE_URL=http://127.0.0.1:3100 node node_modules/@playwright/test/cli.js test --workers=1 --reporter=line",
+      "browser": "Chromium 149.0.7827.55 (Playwright v1228)",
+      "test_data": "Synthetic student/teacher fixtures with intercepted API; no human classroom participation.",
+      "screenshot": "teacher-review-scripted.png"
+    },
+    {
+      "name": "compose_configuration",
+      "status": "passed",
+      "note": "YAML and new environment entries parsed; Docker was not started."
+    },
+    {
+      "name": "scientific_plot_cache_benchmark",
+      "status": "passed",
+      "artifact": "benchmark.json",
+      "scope": "Repeated deterministic plot calls on this host; not end-to-end latency or learning efficacy."
+    },
+    {
+      "name": "live_classroom_model_evaluation",
+      "status": "passed_limited_contracts_after_precision_prompt",
+      "model": "deepseek-flash",
+      "credential_source": "USTC_API environment; secret never recorded",
+      "artifact": "live-model-evaluation.json",
+      "live_post_requests": 3,
+      "passed_cases": 4,
+      "zero_call_no_attempt_cases": 1,
+      "command": "python scripts/evaluate-classroom-live.py --allow-live --thinking-mode disabled --capability-seconds 120 --total-seconds 600",
+      "capability_latencies_seconds": [
+        61.703,
+        91.547,
+        68.61
+      ],
+      "known_usage": {
+        "prompt_tokens": 5493,
+        "completion_tokens": 1315,
+        "total_tokens": 6808
+      },
+      "scope": "Two structured diagnoses and one question-only answer-grounded response; no live database, teachers or students.",
+      "caveat": "A prior passing contract run contained a scientific terminology defect. The generic prompt was clarified; this follow-up no longer used that wording. One follow-up is not proof of general scientific accuracy. See live-evaluation-audit.json."
+    },
+    {
+      "name": "live_evaluation_tooling",
+      "status": "passed",
+      "command": "python -m ruff check scripts/benchmark-science.py scripts/capture-source-manifest.py scripts/evaluate-classroom-live.py; python -m mypy scripts/evaluate-classroom-live.py; python scripts/evaluate-classroom-live.py --offline --extended --thinking-mode disabled --capability-seconds 120 --total-seconds 600",
+      "deterministic_assertions": 6,
+      "offline_provider_requests": 0,
+      "note": "Ruff/mypy invoked from services/api with relative script paths."
+    },
+    {
+      "name": "evidence_integrity_and_document_links",
+      "status": "passed",
+      "assertions": [
+        "All three preserved evaluation reports match their source snapshot and script hashes",
+        "Source evidence snippet hashes verified",
+        "Final source manifest still matches 345 scoped code/config files",
+        "Local protocol/report links resolve",
+        "git diff --check passes"
+      ],
+      "limitation": "Hashes establish local file integrity, not a deployed image signature or teacher approval."
+    }
+  ],
+  "not_executed": [
+    "Full Linux/POSIX sandbox suite",
+    "Docker service topology and PostgreSQL multiworker/migration verification",
+    "Real multimodal live-infrastructure model workflow",
+    "Remote CI run",
+    "Actual teacher package approval",
+    "Actual students, delayed independent assessments or learning efficacy measurement",
+    "Successful extended live prerequisite-candidate, interpretation, trend and correct-answer-guidance cases; core run covers a smaller scope"
+  ],
+  "interpretation": "Passing automated contracts does not establish classroom efficacy, institutional privacy approval, teacher approval, production readiness or deployed code identity.",
+  "live_diagnostics": {
+    "model_catalog_http_status": 200,
+    "initial_failed_evaluation": "live-model-initial-failed.json",
+    "initial_source_snapshot": "source-snapshot-initial-live.json",
+    "initial_actual_post_requests": 2,
+    "initial_result": "Both capabilities timed out at 45 seconds; dependent cases failed/degraded or were blocked by cooldown.",
+    "minimal_controls": "live-transport-controls.json",
+    "minimal_control_requests": 2,
+    "minimal_control_result": "httpx and httpx2 both ReadTimeout at 30 seconds.",
+    "longer_disabled_thinking_control": "live-transport-thinking-disabled.json",
+    "longer_control_requests": 1,
+    "longer_control_result": "HTTP200 after 74.547 seconds; 8 input + 2 output tokens.",
+    "total_post_requests_attempted": 11,
+    "timed_out_requests_usage": "unknown; do not infer zero tokens or zero cost",
+    "causality": "Thinking and deadline were changed together; no isolated thinking-mode effect was measured.",
+    "preceding_core_report": "live-model-core-before-precision.json",
+    "preceding_core_source_snapshot": "source-snapshot-core-before-precision.json",
+    "preceding_core_post_requests": 3,
+    "preceding_core_contracts": "passed limited assertions, with terminology defect found on review",
+    "post_precision_core_report": "live-model-evaluation.json",
+    "post_precision_core_post_requests": 3,
+    "known_successful_usage": {
+      "prompt_tokens": 10933,
+      "completion_tokens": 2687,
+      "total_tokens": 13620
+    },
+    "known_successful_usage_scope": "Seven HTTP200 completions including one minimal diagnostic; four timed-out attempts have unknown usage and cost."
+  },
+  "final_source_tree_sha256": "f8f32336311e65b1b847e7ca7af6a23a55876ed2b5fb49cf835af314cdeff7ba"
+}

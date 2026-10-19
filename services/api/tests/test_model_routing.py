@@ -533,3 +533,121 @@ async def test_schema_failure_does_not_cool_down_other_capabilities() -> None:
     )
     assert output.value == 9
     assert len(gateways["reasoning_primary"].calls) == 2
+
+
+async def test_authorization_failure_cannot_be_bypassed_on_next_task() -> None:
+    now = [1.0]
+    router, constructed, gateways = _router_with_outcomes({
+        "reasoning_primary": PermanentGatewayError("HTTP 401"),
+        "reasoning_second_pass": {"value": 7},
+        "lightweight_primary": {"value": 8},
+    }, cooldown_seconds=5, clock=lambda: now[0])
+    for task in ["diagnose_student_progress", "compose_grounded_teaching_response",
+                 "interpret_teaching_turn"]:
+        with pytest.raises(PermanentGatewayError):
+            await router.structured_generate(task=task,
+                messages=[Message(role="user", content="attempt")], output_type=StrictOutput)
+    assert constructed == ["reasoning_primary"]
+    # The same key may have been re-enabled upstream; a bounded recovery probe
+    # can recover without an application restart, while another key is isolated.
+    now[0] += 5
+    gateways["reasoning_primary"].outcome = {"value": 9}
+    output = await router.structured_generate(task="diagnose_student_progress",
+        messages=[Message(role="user", content="attempt")], output_type=StrictOutput)
+    assert output.value == 9
+    assert constructed == ["reasoning_primary"]
+
+
+async def test_exhausted_budget_does_not_strand_half_open_profile() -> None:
+    now = [0.0]
+    phase = [0]
+    primary_calls = [0]
+    second_calls = [0]
+
+    class ProbeGateway(StubGateway):
+        def __init__(self, primary: bool) -> None:
+            super().__init__({"value": 7})
+            self.primary = primary
+
+        async def structured_generate(self, *, task: str, messages: Sequence[Message],
+                                      output_type: type[T],
+                                      model_tier: ModelTier = ModelTier.DEFAULT) -> T:
+            if self.primary:
+                primary_calls[0] += 1
+                if phase[0] == 1:
+                    now[0] += 2  # Exhaust before the half-open second profile.
+                raise GatewayError("primary unavailable")
+            second_calls[0] += 1
+            if phase[0] == 0:
+                raise GatewayError("second unavailable")
+            return cast(T, {"value": 7})
+
+    router = ModelRouter(registry=ModelCapabilityRegistry.ustc_default(),
+                         gateway_factory=lambda p: ProbeGateway(
+                             p.profile_id != "reasoning_second_pass"),
+                         cooldown_seconds=1, max_cooldown_seconds=1,
+                         fallback_budget_seconds=1, clock=lambda: now[0])
+    messages = [Message(role="user", content="attempt")]
+    with pytest.raises(GatewayError):
+        await router.structured_generate(task="diagnose_student_progress", messages=messages,
+                                         output_type=StrictOutput)
+    assert second_calls[0] == 1
+    phase[0] = 1
+    now[0] = 2
+    with pytest.raises(GatewayError):
+        await router.structured_generate(task="diagnose_student_progress", messages=messages,
+                                         output_type=StrictOutput)
+    # A deadline must not leave the second profile's single recovery lease held.
+    phase[0] = 2
+    output = await router.structured_generate(task="diagnose_student_progress", messages=messages,
+                                              output_type=StrictOutput)
+    assert output.value == 7
+    assert second_calls[0] == 2
+
+
+async def test_cancellation_releases_single_recovery_probe() -> None:
+    now = [0.0]
+    started = asyncio.Event()
+    block = [False]
+
+    class BlockingGateway(StubGateway):
+        async def structured_generate(self, *, task: str, messages: Sequence[Message],
+                                      output_type: type[T],
+                                      model_tier: ModelTier = ModelTier.DEFAULT) -> T:
+            if block[0]:
+                started.set()
+                await asyncio.Event().wait()
+            return await super().structured_generate(task=task, messages=messages,
+                output_type=output_type, model_tier=model_tier)
+
+    primary = BlockingGateway(GatewayError("unavailable"))
+    fallback = StubGateway({"value": 7})
+    router = ModelRouter(registry=ModelCapabilityRegistry.ustc_default(),
+        gateway_factory=lambda p: primary if p.profile_id == "reasoning_primary" else fallback,
+        cooldown_seconds=1, clock=lambda: now[0])
+    async def generate() -> StrictOutput:
+        return await router.structured_generate(
+            task="diagnose_student_progress",
+            messages=[Message(role="user", content="attempt")], output_type=StrictOutput,
+        )
+
+    await generate()
+    now[0] += 1
+    block[0] = True
+    pending = asyncio.create_task(generate())
+    await started.wait()
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    block[0] = False
+    primary.outcome = {"value": 9}
+    recovered = await generate()
+    assert recovered.value == 9
+
+
+@pytest.mark.parametrize("budget", [0, -1, float("inf"), float("nan")])
+def test_nonfinite_or_nonpositive_router_budgets_are_rejected(budget: float) -> None:
+    with pytest.raises(ValueError, match="finite positive"):
+        ModelRouter(registry=ModelCapabilityRegistry.ustc_default(),
+                    gateway_factory=lambda p: StubGateway({"value": 1}),
+                    fallback_budget_seconds=budget)

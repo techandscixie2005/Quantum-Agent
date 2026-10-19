@@ -67,6 +67,7 @@ export type SupportedScientificRequest =
   | RectangularBarrierRequest;
 
 export type TeachingTurnRequest = Readonly<{
+  course_package?: Readonly<{ package_id: string; version: string }> | null;
   conversation_id: string | null;
   mode: TeachingMode;
   message: string;
@@ -410,6 +411,7 @@ export type ConceptStateLabel =
   | "needs_review";
 
 export type ConceptMirrorState = Readonly<{
+  assessment_evidence?: AssessmentEvidence;
   concept_candidate_id: string;
   label: ConceptStateLabel;
   evidence_summary: readonly string[];
@@ -468,6 +470,10 @@ export type LearningStage =
 export type RequiredLearningAction = "none" | "commitment" | "revision" | "teach_back" | "solo_attempt";
 
 export type LearningNativeTurnState = Readonly<{
+  assessment_evidence?: AssessmentEvidence;
+  course_package?: Readonly<{ package_id: string; version: string; content_sha256: string; objective_ids: readonly string[]; rubric_ids: readonly string[] }> | null;
+  solo_first_attempt?: Readonly<{ task_id: string; teaching_turn_id: string; response: string; confidence: number | null; submitted_at: string; assistance_locked: true }> | null;
+  teacher_follow_up?: Readonly<{ review_id: string; follow_up: "continue" | "request_revision" | "revisit_prerequisite"; probe: string }> | null;
   commitment: CognitiveCommitment | null;
   learning_action: LearningPolicyAction | null;
   teach_back: TeachBackAnalysis | null;
@@ -495,7 +501,7 @@ export type LearningNativeSubmission = Readonly<{
     response: string;
     confidence: number | null;
   }> | null;
-  solo_attempt: Readonly<{ response: string; confidence: number | null }> | null;
+  solo_attempt: Readonly<{ response: string; confidence: number | null; transfer_task_id?: string }> | null;
   request_transfer: boolean;
   request_solo_exit: boolean;
   request_teach_back: boolean;
@@ -580,6 +586,7 @@ export type TeachingTurnResult = Readonly<{
       scientific_result_ids: readonly string[];
     }>[];
     next_question: string;
+    student_answer_anchor?: string | null;
     status: "grounded" | "mixed" | "model_degraded" | "insufficient_course_evidence";
     limitations: readonly string[];
   }>;
@@ -898,6 +905,7 @@ export function parseTeachingTurnRequest(value: unknown): TeachingTurnRequest {
       "scientific_execution",
       "learning_native",
       "client_request_id",
+      "course_package",
     ],
     "turnRequest",
   );
@@ -920,7 +928,13 @@ export function parseTeachingTurnRequest(value: unknown): TeachingTurnRequest {
     input.client_request_id === undefined || input.client_request_id === null
       ? null
       : text(input.client_request_id, "turnRequest.client_request_id", 128).trim();
+  const packageSelection = input.course_package == null ? null : record(input.course_package, "turnRequest.course_package");
+  if (packageSelection) exactKeys(packageSelection, ["package_id", "version"], "turnRequest.course_package");
   return {
+    ...(input.course_package === undefined ? {} : { course_package: packageSelection ? {
+      package_id: text(packageSelection.package_id, "turnRequest.course_package.package_id", 120),
+      version: text(packageSelection.version, "turnRequest.course_package.version", 40),
+    } : null }),
     conversation_id: nullableUuid(input.conversation_id, "turnRequest.conversation_id"),
     mode,
     message,
@@ -1079,8 +1093,9 @@ function parseSoloAttemptSubmission(
   path: string,
 ): LearningNativeSubmission["solo_attempt"] {
   const input = record(value, path);
-  exactKeys(input, ["response", "confidence"], path);
+  exactKeys(input, ["response", "confidence", "transfer_task_id"], path);
   return {
+    ...(input.transfer_task_id === undefined ? {} : { transfer_task_id: uuid(input.transfer_task_id, `${path}.transfer_task_id`) }),
     response: text(input.response, `${path}.response`, 12_000),
     confidence:
       input.confidence === undefined || input.confidence === null
@@ -2368,6 +2383,7 @@ export function parseTeachingTurnResult(value: unknown): TeachingTurnResult {
       orientation: text(responseInput.orientation, "turnResult.response.orientation", 1_200),
       claims,
       next_question: text(responseInput.next_question, "turnResult.response.next_question", 1_000),
+      student_answer_anchor: responseInput.student_answer_anchor == null ? null : text(responseInput.student_answer_anchor, "turnResult.response.student_answer_anchor", 800),
       status: oneOf(responseInput.status, ["grounded", "mixed", "model_degraded", "insufficient_course_evidence"] as const, "turnResult.response.status"),
       limitations: strings(responseInput.limitations, "turnResult.response.limitations", 8, 4_000),
     },
@@ -2449,6 +2465,26 @@ function recordMetrics(value: unknown, path: string): Readonly<Record<string, st
   return out;
 }
 
+export type AssessmentEvidence = Readonly<{
+  valid_independent_submission: boolean;
+  numeric_correctness: "not_assessed" | "correct" | "incorrect";
+  explanation_assessment: "not_assessed" | "model_supported" | "needs_revision";
+  mastery_status: "not_assessed";
+  basis: readonly string[];
+}>;
+
+function parseAssessmentEvidence(value: unknown, path: string): AssessmentEvidence {
+  const input = record(value, path);
+  exactKeys(input, ["valid_independent_submission", "numeric_correctness", "explanation_assessment", "mastery_status", "basis"], path);
+  return {
+    valid_independent_submission: bool(input.valid_independent_submission, `${path}.valid_independent_submission`),
+    numeric_correctness: oneOf(input.numeric_correctness, ["not_assessed", "correct", "incorrect"] as const, `${path}.numeric_correctness`),
+    explanation_assessment: oneOf(input.explanation_assessment, ["not_assessed", "model_supported", "needs_revision"] as const, `${path}.explanation_assessment`),
+    mastery_status: oneOf(input.mastery_status, ["not_assessed"] as const, `${path}.mastery_status`),
+    basis: strings(input.basis, `${path}.basis`, 8, 400),
+  };
+}
+
 function parseLearningNativeTurnState(value: unknown, path: string): LearningNativeTurnState {
   const input = record(value, path);
   exactKeys(
@@ -2467,10 +2503,41 @@ function parseLearningNativeTurnState(value: unknown, path: string): LearningNat
       "completed_stages",
       "required_action",
       "loop_required",
+      "course_package",
+      "solo_first_attempt",
+      "teacher_follow_up",
+      "assessment_evidence",
     ],
     path,
   );
+  const packageInput = input.course_package == null ? null : record(input.course_package, `${path}.course_package`);
+  const first = input.solo_first_attempt == null ? null : record(input.solo_first_attempt, `${path}.solo_first_attempt`);
+  const follow = input.teacher_follow_up == null ? null : record(input.teacher_follow_up, `${path}.teacher_follow_up`);
+  if (first && first.assistance_locked !== true) fail(`${path}.solo_first_attempt`, "a preserved locked attempt");
   return {
+    ...(input.assessment_evidence == null ? {} : {
+      assessment_evidence: parseAssessmentEvidence(input.assessment_evidence, `${path}.assessment_evidence`),
+    }),
+    course_package: packageInput ? {
+      package_id: text(packageInput.package_id, `${path}.course_package.package_id`, 120),
+      version: text(packageInput.version, `${path}.course_package.version`, 40),
+      content_sha256: sha256(packageInput.content_sha256, `${path}.course_package.content_sha256`),
+      objective_ids: strings(packageInput.objective_ids, `${path}.course_package.objective_ids`, 32, 120),
+      rubric_ids: strings(packageInput.rubric_ids, `${path}.course_package.rubric_ids`, 32, 120),
+    } : null,
+    solo_first_attempt: first ? {
+      task_id: uuid(first.task_id, `${path}.solo_first_attempt.task_id`),
+      teaching_turn_id: uuid(first.teaching_turn_id, `${path}.solo_first_attempt.teaching_turn_id`),
+      response: text(first.response, `${path}.solo_first_attempt.response`, 12000),
+      confidence: first.confidence == null ? null : bounded(first.confidence, `${path}.solo_first_attempt.confidence`, 0, 1),
+      submitted_at: text(first.submitted_at, `${path}.solo_first_attempt.submitted_at`, 100),
+      assistance_locked: true,
+    } : null,
+    teacher_follow_up: follow ? {
+      review_id: uuid(follow.review_id, `${path}.teacher_follow_up.review_id`),
+      follow_up: oneOf(follow.follow_up, ["continue", "request_revision", "revisit_prerequisite"] as const, `${path}.teacher_follow_up.follow_up`),
+      probe: boundedTextAllowEmpty(follow.probe, `${path}.teacher_follow_up.probe`, 1000),
+    } : null,
     commitment:
       input.commitment === undefined || input.commitment === null
         ? null
@@ -2688,6 +2755,7 @@ function parseConceptMirrorState(value: unknown, path: string): ConceptMirrorSta
       "hint_dependency",
       "misconception_candidates",
       "last_demonstrated_at",
+      "assessment_evidence",
     ],
     path,
   );
@@ -2699,6 +2767,9 @@ function parseConceptMirrorState(value: unknown, path: string): ConceptMirrorSta
     },
   );
   return {
+    ...(input.assessment_evidence == null ? {} : {
+      assessment_evidence: parseAssessmentEvidence(input.assessment_evidence, `${path}.assessment_evidence`),
+    }),
     concept_candidate_id: uuid(input.concept_candidate_id, `${path}.concept_candidate_id`),
     label: oneOf(
       input.label,

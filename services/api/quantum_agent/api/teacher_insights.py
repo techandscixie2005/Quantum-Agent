@@ -1,4 +1,4 @@
-"""Read-only, course-scoped teaching governance endpoints.
+"""Course-scoped teaching governance and auditable human learning reviews.
 
 The endpoints in this module expose durable state-machine traces and modest
 event counts to course teaching staff.  Learning-evidence statistics retain the
@@ -8,17 +8,19 @@ hypotheses.  They intentionally do not calculate or report student mastery.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from quantum_agent.auth import (
+    TEACHER_ROLES,
     TEACHING_STAFF_ROLES,
+    CourseActor,
     authenticate_course_actor,
     bearer_credential,
 )
@@ -32,21 +34,35 @@ from quantum_agent.db_models import (
     TeachingAction,
     TeachingConversation,
     TeachingMode,
+    TeachingReview,
     TeachingTaskKind,
     TeachingTurn,
     TeachingTurnStatus,
+    User,
 )
 from quantum_agent.knowledge.evidence_packets import EvidencePacket
 from quantum_agent.science import ScientificVerificationResult
 from quantum_agent.teaching.agents import EvidenceBundle
-from quantum_agent.teaching.hitl import HitlEvent
+from quantum_agent.teaching.course_packages import (
+    CoursePackage,
+    CoursePackageRef,
+    available_course_packages,
+)
+from quantum_agent.teaching.hitl import HitlEvent, HitlInterruptPayload, HitlReason
 from quantum_agent.teaching.models import (
     DiagnosisOutput,
+    DurableLearningPhase,
     PolicySnapshot,
     ReleaseDecision,
     TeachingResponse,
     ValidationReport,
     WorkflowStep,
+)
+from quantum_agent.teaching.repository import TeachingRepository
+from quantum_agent.teaching.reviews import (
+    TeacherFollowUp,
+    TeacherReviewRecord,
+    TeacherReviewRequest,
 )
 
 router = APIRouter(
@@ -57,7 +73,43 @@ router = APIRouter(
 DatabaseSession = Annotated[AsyncSession, Depends(session_dependency)]
 
 
-class AgentTraceSummary(BaseModel):
+class _UtcTimestamps(BaseModel):
+    @field_validator("created_at", "completed_at", check_fields=False)
+    @classmethod
+    def utc_timestamps(cls, value: datetime | None) -> datetime | None:
+        # SQLite drops timezone metadata; these database timestamps are UTC.
+        return value.replace(tzinfo=value.tzinfo or UTC).astimezone(UTC) if value else None
+
+
+class PendingReviewSummary(_UtcTimestamps):
+    """A real unresolved SQL pause; a completed AgentTrace is not required."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    conversation_id: UUID
+    turn_id: UUID
+    interrupt_id: UUID
+    student_user_id: UUID
+    student_display_name: str
+    mode: TeachingMode
+    reasons: list[HitlReason]
+    status: Literal["pending"] = "pending"
+    created_at: datetime
+
+
+class PendingReviewPage(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    course_id: UUID
+    curriculum_edition_id: UUID
+    items: list[PendingReviewSummary]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+    has_more: bool
+
+
+class AgentTraceSummary(_UtcTimestamps):
     """Small trace representation suitable for a paginated queue."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -107,6 +159,7 @@ class AgentTraceDetail(AgentTraceSummary):
     validation: ValidationReport | None
     hitl_events: list[HitlEvent]
     failure_code: str | None
+    course_package: CoursePackageRef | None = None
 
 
 class EvidenceEventAggregate(BaseModel):
@@ -171,12 +224,13 @@ async def _authorize_and_require_edition(
     *,
     course_id: UUID,
     curriculum_edition_id: UUID,
-) -> None:
-    await authenticate_course_actor(
+    teacher_only: bool = False,
+) -> CourseActor:
+    actor = await authenticate_course_actor(
         session,
         credential=bearer_credential(request),
         course_id=course_id,
-        allowed_roles=TEACHING_STAFF_ROLES,
+        allowed_roles=TEACHER_ROLES if teacher_only else TEACHING_STAFF_ROLES,
     )
     edition_exists = await session.scalar(
         select(CurriculumEdition.id).where(
@@ -189,6 +243,167 @@ async def _authorize_and_require_edition(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Course edition not found",
         )
+    return actor
+
+
+@router.get("/course-packages", response_model=list[CoursePackage])
+async def list_course_packages(
+    request: Request, course_id: UUID, curriculum_edition_id: UUID, session: DatabaseSession,
+) -> list[CoursePackage]:
+    await _authorize_and_require_edition(
+        request, session, course_id=course_id, curriculum_edition_id=curriculum_edition_id,
+    )
+    return list(available_course_packages())
+
+
+@router.get("/pending-reviews", response_model=PendingReviewPage)
+async def list_pending_reviews(
+    request: Request, course_id: UUID, curriculum_edition_id: UUID, session: DatabaseSession,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
+) -> PendingReviewPage:
+    await _authorize_and_require_edition(
+        request, session, course_id=course_id, curriculum_edition_id=curriculum_edition_id,
+    )
+    marker = TeachingTurn.validation_json["hitl"]
+    # Project the small pause payload, never complete learner/model snapshots.
+    query = select(
+        TeachingConversation.id, TeachingTurn.id, TeachingConversation.student_user_id,
+        User.display_name, TeachingConversation.mode, TeachingTurn.created_at,
+        marker["interrupt"],
+    ).select_from(TeachingConversation).join(
+        TeachingTurn, TeachingTurn.conversation_id == TeachingConversation.id,
+    ).join(User, User.id == TeachingConversation.student_user_id).where(
+        TeachingConversation.course_id == course_id,
+        TeachingConversation.curriculum_edition_id == curriculum_edition_id,
+        TeachingTurn.status == TeachingTurnStatus.RUNNING,
+        marker["interrupt_id"].as_string().is_not(None),
+        marker["resolution"].as_string().is_(None),
+    )
+    total = int(await session.scalar(select(func.count()).select_from(query.subquery())) or 0)
+    rows = (await session.execute(query.order_by(
+        TeachingTurn.created_at.asc(), TeachingTurn.id.asc(),
+    ).limit(limit).offset(offset))).all()
+    items = []
+    for conversation_id, turn_id, student_id, display_name, mode, created_at, raw in rows:
+        try:
+            payload = HitlInterruptPayload.model_validate(raw)
+        except ValidationError as exc:
+            raise HTTPException(status_code=409, detail="Stored review requires repair") from exc
+        if payload.conversation_id != conversation_id or payload.turn_id != turn_id:
+            raise HTTPException(status_code=409, detail="Stored review requires repair")
+        items.append(PendingReviewSummary(
+            conversation_id=conversation_id, turn_id=turn_id, interrupt_id=payload.interrupt_id,
+            student_user_id=student_id, student_display_name=display_name, mode=mode,
+            reasons=list(payload.reasons), created_at=created_at,
+        ))
+    return PendingReviewPage(
+        course_id=course_id, curriculum_edition_id=curriculum_edition_id,
+        items=items, total=total, limit=limit, offset=offset, has_more=offset + len(items) < total,
+    )
+
+
+def _review_record(row: TeachingReview) -> TeacherReviewRecord:
+    return TeacherReviewRecord.model_validate({
+        "review_id": row.id, "conversation_id": row.conversation_id,
+        "source_turn_id": row.source_turn_id, "student_user_id": row.student_user_id,
+        "reviewer_user_id": row.reviewer_user_id, "created_at": row.created_at,
+        "decision": row.decision, "reason": row.reason, "follow_up": row.follow_up,
+        "probe": row.probe, "criterion_ratings": row.rubric_json.get("criterion_ratings", {}),
+        "course_package": row.rubric_json.get("course_package"),
+    })
+
+
+async def _review_conversation(
+    session: AsyncSession, course_id: UUID, curriculum_edition_id: UUID, conversation_id: UUID,
+) -> TeachingConversation:
+    conversation = await session.scalar(select(TeachingConversation).where(
+        TeachingConversation.id == conversation_id,
+        TeachingConversation.course_id == course_id,
+        TeachingConversation.curriculum_edition_id == curriculum_edition_id,
+    ).with_for_update())
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Teaching conversation not found")
+    return conversation
+
+
+@router.get("/conversations/{conversation_id}/reviews", response_model=list[TeacherReviewRecord])
+async def list_teaching_reviews(
+    request: Request, course_id: UUID, curriculum_edition_id: UUID, conversation_id: UUID,
+    session: DatabaseSession,
+) -> list[TeacherReviewRecord]:
+    await _authorize_and_require_edition(
+        request, session, course_id=course_id, curriculum_edition_id=curriculum_edition_id,
+    )
+    await _review_conversation(session, course_id, curriculum_edition_id, conversation_id)
+    rows = (await session.scalars(select(TeachingReview).where(
+        TeachingReview.conversation_id == conversation_id,
+        TeachingReview.course_id == course_id,
+        TeachingReview.curriculum_edition_id == curriculum_edition_id,
+    ).order_by(TeachingReview.created_at, TeachingReview.id).limit(500))).all()
+    return [_review_record(row) for row in rows]
+
+
+@router.post("/conversations/{conversation_id}/reviews", response_model=TeacherReviewRecord,
+             status_code=status.HTTP_201_CREATED)
+async def create_teaching_review(
+    request: Request, course_id: UUID, curriculum_edition_id: UUID, conversation_id: UUID,
+    payload: TeacherReviewRequest, session: DatabaseSession,
+) -> TeacherReviewRecord:
+    actor = await _authorize_and_require_edition(
+        request, session, course_id=course_id, curriculum_edition_id=curriculum_edition_id,
+        teacher_only=True,
+    )
+    conversation = await _review_conversation(
+        session, course_id, curriculum_edition_id, conversation_id,
+    )
+    source = await session.scalar(select(TeachingTurn).where(
+        TeachingTurn.id == payload.source_turn_id,
+        TeachingTurn.conversation_id == conversation_id,
+        TeachingTurn.status == TeachingTurnStatus.COMPLETED,
+    ))
+    if source is None:
+        raise HTTPException(status_code=404, detail="Completed source turn not found")
+    running = await session.scalar(select(TeachingTurn.id).where(
+        TeachingTurn.conversation_id == conversation_id,
+        TeachingTurn.status == TeachingTurnStatus.RUNNING,
+    ).limit(1))
+    if running is not None:
+        raise HTTPException(status_code=409, detail="Finish the active turn before reviewing")
+    raw_phase = conversation.learning_phase_json
+    try:
+        phase = DurableLearningPhase.model_validate(raw_phase or {})
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail="Learning phase needs repair") from error
+    if phase.pending_teacher_follow_up is not None:
+        raise HTTPException(status_code=409, detail="An earlier teacher follow-up is still pending")
+    allowed_criteria = set(phase.course_package.rubric_ids) if phase.course_package else set()
+    if set(payload.criterion_ratings) - allowed_criteria:
+        raise HTTPException(
+            status_code=422, detail="Rubric criteria must belong to the pinned package",
+        )
+    package_json = phase.course_package.model_dump(mode="json") if phase.course_package else None
+    review = TeachingReview(
+        course_id=course_id, curriculum_edition_id=curriculum_edition_id,
+        conversation_id=conversation_id, source_turn_id=source.id,
+        student_user_id=conversation.student_user_id, reviewer_user_id=actor.user_id,
+        decision=payload.decision, reason=payload.reason, follow_up=payload.follow_up,
+        probe=payload.probe,
+        rubric_json={
+            "criterion_ratings": payload.criterion_ratings, "course_package": package_json,
+        },
+    )
+    session.add(review)
+    await session.flush()
+    phase = phase.model_copy(update={"pending_teacher_follow_up": TeacherFollowUp(
+        review_id=review.id, follow_up=payload.follow_up, probe=payload.probe,
+    )})
+    await TeachingRepository(session).save_durable_learning_phase(
+        conversation=conversation, phase=phase,
+    )
+    record = _review_record(review)
+    await session.commit()
+    return record
 
 
 def _trace_summary(
@@ -196,12 +411,15 @@ def _trace_summary(
     turn: TeachingTurn,
     conversation: TeachingConversation,
 ) -> AgentTraceSummary:
+    # Conversations can switch product modes; historical turns retain the
+    # policy that actually governed their release.
+    policy = PolicySnapshot.model_validate(trace.policy_snapshot_json)
     return AgentTraceSummary(
         id=trace.id,
         teaching_turn_id=trace.teaching_turn_id,
         conversation_id=turn.conversation_id,
         student_user_id=trace.student_user_id,
-        mode=conversation.mode,
+        mode=policy.mode,
         sequence_number=turn.sequence_number,
         task_kind=turn.task_kind,
         teaching_action=turn.teaching_action,
@@ -261,6 +479,12 @@ def _validated_trace_detail(
         if not isinstance(raw_hitl_events, list):
             raise ValueError("trace HITL events are malformed")
         hitl_events = [HitlEvent.model_validate(item) for item in raw_hitl_events]
+        snapshot = turn.scientific_results_json.get("__result_snapshot", {})
+        raw_native = (
+            snapshot.get("learning_native") if isinstance(snapshot, dict) else None
+        ) or trace.steps_json.get("learning_native")
+        raw_package = raw_native.get("course_package") if isinstance(raw_native, dict) else None
+        package_ref = CoursePackageRef.model_validate(raw_package) if raw_package else None
     except (TypeError, ValueError, ValidationError) as error:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -283,6 +507,7 @@ def _validated_trace_detail(
         validation=validation,
         hitl_events=hitl_events,
         failure_code=turn.failure_code,
+        course_package=package_ref,
     )
 
 

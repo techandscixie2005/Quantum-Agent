@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
+from copy import copy
 from typing import Final, Protocol
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from quantum_agent.auth import CourseActor
-from quantum_agent.db_models import AnswerReleaseLevel, TeachingMode, TeachingTaskKind
+from quantum_agent.db_models import (
+    AnswerReleaseLevel,
+    TeachingMode,
+    TeachingTaskKind,
+    TeachingTurnStatus,
+)
 from quantum_agent.knowledge.evidence_packets import (
     EvidenceItem,
     EvidencePacket,
@@ -26,11 +32,17 @@ from quantum_agent.science import (
     ScientificVerificationStatus,
 )
 from quantum_agent.teaching.derivation import constrain_bridge, explicit_endpoints, selected_bridge
+from quantum_agent.teaching.execution_budget import (
+    ExecutionLimits,
+    current_execution_budget,
+    execution_budget_scope,
+)
 from quantum_agent.teaching.models import (
     DiagnosisOutput,
     DiagnosisStatus,
     DraftTeachingResponse,
     InterpretationOutput,
+    LearningPhase,
     ResponseStatus,
     SupportBasis,
     TeachingClaim,
@@ -43,7 +55,11 @@ from quantum_agent.teaching.models import (
     WorkflowStepStatus,
 )
 from quantum_agent.teaching.policy import AnswerPolicyRepository, AnswerReleaseEngine
-from quantum_agent.teaching.repository import TeachingRepository
+from quantum_agent.teaching.repository import (
+    StartedTeachingTurn,
+    TeachingConversationConflictError,
+    TeachingRepository,
+)
 
 WORKFLOW_VERSION: Final[str] = "teaching-state-machine/1.0.0"
 MAX_PROMPT_EVIDENCE_CHARS: Final[int] = 8_000
@@ -295,10 +311,43 @@ async def diagnose_turn(
             output_type=DiagnosisOutput,
             model_tier=ModelTier.DEFAULT,
         )
-        return diagnosis, False
+        # This baseline call has no directed prerequisite contract. It cannot
+        # establish missing knowledge from a topic mention or an omitted step.
+        return diagnosis.model_copy(update={
+            "missing_prerequisites": [], "prerequisite_support": [],
+        }), False
     except (GatewayError, ValueError) as exc:
         event("teaching_interpret_or_diagnose", failure_category(exc))
         return fallback, True
+
+
+def _answer_grounded_probe(
+    request: TeachingTurnInput, diagnosis: DiagnosisOutput, release_level: AnswerReleaseLevel,
+) -> tuple[str, str | None]:
+    """Elicit one next step anchored to actual words, without asserting an error.
+
+    The deterministic question stays inside the answer-release envelope even
+    when a model-generated question would reveal unsupported solution content.
+    """
+    attempt = request.student_attempt
+    if not attempt or release_level is AnswerReleaseLevel.QUESTION_ONLY:
+        return _next_question(request.mode, release_level), None
+    for support in diagnosis.prerequisite_support:
+        if (
+            support.student_quote in attempt
+            and support.prerequisite in diagnosis.missing_prerequisites
+        ):
+            return (
+                f"你写道“{support.student_quote[:180]}”。请说明{support.prerequisite}"
+                "在这一步如何使用，再重做这一小步。该困难仍是待核查的候选判断。",
+                support.student_quote[:800],
+            )
+    anchor = attempt[:180]
+    return (
+        f"你写道“{anchor}”。请说明其中最关键的一步依据，"
+        "并指出什么证据会支持或修正这一步。",
+        anchor,
+    )
 
 
 async def draft_response(
@@ -348,11 +397,13 @@ async def draft_response(
         packet,
         scientific_result_ids,
     )
+    next_probe, student_answer_anchor = _answer_grounded_probe(request, diagnosis, release_level)
     fallback_response = TeachingResponse(
         status=ResponseStatus.MODEL_DEGRADED,
         orientation=_orientation(release_level),
         claims=fallback_claims,
-        next_question=_next_question(request.mode, release_level),
+        next_question=next_probe,
+        student_answer_anchor=student_answer_anchor,
         limitations=[
             "模型生成不可用或未通过证据校验；仅展示课程材料原文。"
         ],
@@ -451,7 +502,8 @@ async def draft_response(
         status=ResponseStatus.MIXED if contains_inference else ResponseStatus.GROUNDED,
         orientation=_orientation(release_level),
         claims=claims,
-        next_question=_next_question(request.mode, release_level),
+        next_question=next_probe,
+        student_answer_anchor=student_answer_anchor,
         derivation_bridge=bridge,
         limitations=(
             ["Model-written inference is explicitly labeled and is not course authority."]
@@ -471,10 +523,12 @@ class TeachingStateMachine:
         evidence_retriever: EvidenceRetriever,
         model_gateway: ModelGateway | None,
         scientific_toolbox: ScientificToolbox | None = None,
+        execution_limits: ExecutionLimits | None = None,
     ) -> None:
         self._evidence_retriever = evidence_retriever
         self._model_gateway = model_gateway
         self._scientific_toolbox = scientific_toolbox or ScientificToolbox()
+        self._execution_limits = execution_limits or ExecutionLimits()
 
     async def _interpret(
         self,
@@ -523,25 +577,16 @@ class TeachingStateMachine:
         on_stage: Callable[[str, float], Awaitable[None]] | None = None,
     ) -> TeachingTurnResult:
         repository = TeachingRepository(session)
-        # PRD V3.1 §3.2: honor a per-session credential override when supplied.
-        # The state machine is the legacy/test path; the authoritative
-        # TutorGraph handles the override in its own ``_context``.  We swap
-        # the gateway for the duration of this run and restore it after so
-        # concurrent runs on the same machine are not affected.
-        original_gateway = self._model_gateway
+        # Keep credential-scoped dependencies local to this run. Mutating the
+        # shared instance across awaits can route another student's request
+        # through this student's model credentials.
+        runner = self
         if model_gateway_override is not None:
-            self._model_gateway = model_gateway_override
-        try:
-            return await self._run_with_gateway(
-                repository,
-                session,
-                actor,
-                curriculum_edition_id,
-                request,
-                on_stage=on_stage,
-            )
-        finally:
-            self._model_gateway = original_gateway
+            runner = copy(self)
+            runner._model_gateway = model_gateway_override
+        return await runner._run_with_gateway(
+            repository, session, actor, curriculum_edition_id, request, on_stage=on_stage,
+        )
 
     async def _run_with_gateway(
         self,
@@ -553,16 +598,56 @@ class TeachingStateMachine:
         *,
         on_stage: Callable[[str, float], Awaitable[None]] | None = None,
     ) -> TeachingTurnResult:
-        import time as _time
-
         started = await repository.start_turn(
             actor=actor,
             curriculum_edition_id=curriculum_edition_id,
             request=request,
         )
+        if started.idempotent_replay:
+            if started.turn.status is not TeachingTurnStatus.COMPLETED:
+                raise TeachingConversationConflictError("original turn is unfinished or failed")
+            snapshot = started.turn.scientific_results_json.get("__result_snapshot")
+            if not isinstance(snapshot, dict):
+                raise TeachingConversationConflictError("completed turn has no replay snapshot")
+            if (
+                started.durable_phase.solo_assistance_locked
+                or started.durable_phase.phase is LearningPhase.SOLO_ACTIVE
+            ):
+                from quantum_agent.teaching.solo_visibility import solo_visible_snapshot
+
+                native = snapshot.get("learning_native")
+                if not isinstance(native, dict) or native.get("phase") != LearningPhase.SOLO_ACTIVE:
+                    raise TeachingConversationConflictError("Solo locks historical answer replay")
+                snapshot = solo_visible_snapshot(snapshot)
+            return TeachingTurnResult.model_validate(snapshot)
+        if (
+            started.durable_phase.solo_assistance_locked
+            or started.durable_phase.phase is LearningPhase.SOLO_ACTIVE
+        ):
+            raise TeachingConversationConflictError("Solo assessment requires the tutor graph")
+        async with execution_budget_scope(session, started.turn, self._execution_limits):
+            return await self._execute_started(
+                repository, session, actor, curriculum_edition_id, request, started,
+                on_stage=on_stage,
+            )
+
+    async def _execute_started(
+        self, repository: TeachingRepository, session: AsyncSession, actor: CourseActor,
+        curriculum_edition_id: UUID, request: TeachingTurnInput, started: StartedTeachingTurn,
+        *, on_stage: Callable[[str, float], Awaitable[None]] | None = None,
+    ) -> TeachingTurnResult:
+        import time as _time
+
         started_at = _time.monotonic()
 
         async def notify(stage: str) -> None:
+            budget = current_execution_budget()
+            if budget is not None:
+                name = {
+                    "retrieve": "retrieve_evidence", "policy": "apply_policy",
+                    "generate": "generate_response", "assemble": "assemble_result",
+                }.get(stage, stage)
+                await budget.switch_stage(name)
             if on_stage is None:
                 return
             try:

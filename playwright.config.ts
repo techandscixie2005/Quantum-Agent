@@ -13,7 +13,7 @@ const deterministicModelRoutes = JSON.stringify({
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testIgnore: "**/live/**",
+  testIgnore: ["**/live/**", "**/backend-live/**"],
   timeout: 60000,
   expect: { timeout: 15000 },
   fullyParallel: true,

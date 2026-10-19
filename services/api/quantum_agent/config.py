@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=20, ge=0, le=200)
     database_pool_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
 
+    teaching_execution_seconds: float = Field(default=180.0, gt=0, le=600)
+    teaching_execution_provider_requests: int = Field(default=12, ge=1, le=64)
+    teaching_execution_token_units: int = Field(default=131_072, ge=1024, le=2_000_000)
+    teaching_execution_output_tokens: int = Field(default=2048, ge=1, le=8192)
+    teaching_execution_request_bytes: int = Field(default=65_536, ge=1024, le=262_144)
+
     embedding_dimension: Literal[384] = Field(
         default=384,
         validation_alias="EMBEDDING_DIMENSION",
@@ -134,6 +140,9 @@ class Settings(BaseSettings):
     login_course_email: str = Field(
         default="demo-student@quantum-agent.local",
         validation_alias="LOGIN_COURSE_EMAIL",
+    )
+    allow_shared_demo_login: bool = Field(
+        default=False, validation_alias="ALLOW_SHARED_DEMO_LOGIN",
     )
     ustc_embedding_route_model: str = Field(
         default="qwen3-embedding",

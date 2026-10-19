@@ -38,7 +38,6 @@ import base64
 import json
 import logging
 import os
-import resource
 import shutil
 import sys
 import tempfile
@@ -48,6 +47,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from types import ModuleType
 
 import httpx
 
@@ -58,6 +58,10 @@ from quantum_agent.science.models import (
     SandboxExecutionOutcome,
     SandboxLimits,
 )
+
+_resource: ModuleType | None = None
+if os.name == "posix":
+    import resource as _resource
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +83,12 @@ class _SandboxRun:
 
 class SandboxError(RuntimeError):
     """Sanitized sandbox failure; never carries the program's raw output."""
+
+
+def _posix_resource() -> ModuleType:
+    if _resource is None or os.name != "posix":
+        raise SandboxError("local sandbox requires POSIX resource limits; use the Linux runner")
+    return _resource
 
 
 class SandboxDisabled:
@@ -116,6 +126,7 @@ def _rlimit_settings(limits: SandboxLimits) -> tuple[tuple[int, tuple[int, int]]
     the soft limit so the program cannot raise them.
     """
 
+    resource = _posix_resource()
     cpu_seconds = max(1, int(limits.wall_time_seconds) + 1)
     fsize_bytes = 16 * 1024 * 1024
     nofile = 32
@@ -136,6 +147,7 @@ def _rlimit_settings(limits: SandboxLimits) -> tuple[tuple[int, tuple[int, int]]
 def _apply_rlimits(limits: SandboxLimits) -> None:
     """``preexec_fn`` target: apply rlimits in the child after fork."""
 
+    resource = _posix_resource()
     for which, (soft, hard) in _rlimit_settings(limits):
         try:
             resource.setrlimit(which, (soft, hard))
@@ -160,6 +172,7 @@ def _bwrap_rlimit_settings(limits: SandboxLimits) -> tuple[tuple[int, tuple[int,
     The wall-time timeout is the primary CPU bound.
     """
 
+    resource = _posix_resource()
     cpu_seconds = max(1, int(limits.wall_time_seconds) + 1)
     fsize_bytes = 16 * 1024 * 1024
     nofile = 64
@@ -177,6 +190,7 @@ def _bwrap_rlimit_settings(limits: SandboxLimits) -> tuple[tuple[int, tuple[int,
 def _apply_bwrap_rlimits(limits: SandboxLimits) -> None:
     """``preexec_fn`` target for the bwrap parent: apply bwrap-safe rlimits."""
 
+    resource = _posix_resource()
     for which, (soft, hard) in _bwrap_rlimit_settings(limits):
         try:
             resource.setrlimit(which, (soft, hard))
@@ -504,6 +518,11 @@ class SubprocessSandbox:
     ) -> _SandboxRun:
         """Spawn the child Python process with rlimits + scrubbed env + timeout."""
 
+        _posix_resource()
+        require_isolation = os.getenv("CODING_SANDBOX_REQUIRE_ISOLATION") == "true"
+        bwrap = shutil.which("bwrap") if require_isolation else None
+        if require_isolation and not bwrap:
+            raise SandboxError("required namespace isolation is unavailable")
         tmpdir = tempfile.mkdtemp(prefix="qa-sandbox-")
         program_path = Path(tmpdir) / "program.py"
         try:
@@ -511,11 +530,6 @@ class SubprocessSandbox:
             env = _scrubbed_env(tmpdir)
             started = time.monotonic()
             try:
-                bwrap = (
-                    shutil.which("bwrap")
-                    if os.getenv("CODING_SANDBOX_REQUIRE_ISOLATION") == "true"
-                    else None
-                )
                 if bwrap:
                     command = _bwrap_command(bwrap, self._python, tmpdir)
                     # bwrap itself creates namespaces via clone/unshare; applying
@@ -622,7 +636,11 @@ class SubprocessSandbox:
         if process.returncode is not None:
             return
         try:
-            os.killpg(process.pid, 9)
+            kill_group = getattr(os, "killpg", None)
+            if kill_group is None:
+                process.kill()
+            else:
+                kill_group(process.pid, 9)
         except (ProcessLookupError, PermissionError, OSError):
             try:
                 process.kill()

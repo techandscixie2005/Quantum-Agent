@@ -1,0 +1,15 @@
+# Local synthetic verification only. Keep production databases on the internal network.
+# Use an isolated project and generated secrets; these ports bind only loopback.
+services:
+  postgres:
+    networks: [backend, edge]
+    ports:
+      - 127.0.0.1:${TRIAL_POSTGRES_PORT:-55432}:5432
+  redis:
+    networks: [backend, edge]
+    ports:
+      - 127.0.0.1:${TRIAL_REDIS_PORT:-56379}:6379
+  neo4j:
+    networks: [backend, edge]
+    ports:
+      - 127.0.0.1:${TRIAL_NEO4J_PORT:-57687}:7687

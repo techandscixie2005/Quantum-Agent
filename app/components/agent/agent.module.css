@@ -449,7 +449,8 @@
 .composer footer small { margin-left: 6px; color: var(--faint); font-size: 11px; }
 .composer footer .sendButton { min-height: 36px; padding: 8px 16px; color: white; background: var(--green); border-radius: 8px; font-weight: 600; font-size: 13px; }
 .composer footer .sendButton:disabled { opacity: .4; cursor: not-allowed; }
-.composerError { display: flex; align-items: center; gap: 6px; margin: 8px 2px 0; color: #a13e34; font-size: 12px; }
+.composerError { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 2px 0; color: #a13e34; font-size: 12px; }
+.composerError p { flex-basis: 100%; margin: 3px 0; line-height: 1.6; }
 .composerError svg { width: 13px; }
 .dragging { border-color: var(--green); }
 .dropNotice { position: absolute; z-index: 5; inset: 0; display: grid; place-items: center; color: var(--green); background: rgba(231, 241, 236, .95); border-radius: 14px; font-size: 13px; font-weight: 600; }

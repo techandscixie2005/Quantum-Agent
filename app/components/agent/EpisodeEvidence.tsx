@@ -59,6 +59,7 @@ export function EpisodeEvidence({ scope, conversationId }: {
   }
 
   return <section className={styles.episodeEvidence} aria-label="本次原始学习证据" data-testid="episode-evidence">
+    <a href={`/api/teaching/threads/${conversationId}/export?${new URLSearchParams({ course_id: scope.courseId, curriculum_edition_id: scope.curriculumEditionId })}`} download>导出可追溯学习证据（JSON）</a>
     <button type="button" onClick={open} disabled={pending}>
       {pending ? "读取中…" : "回看本次原始学习证据"}
     </button>

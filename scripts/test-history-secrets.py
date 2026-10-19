@@ -24,6 +24,17 @@ class HistoryScanTests(unittest.TestCase):
         self.assertTrue(scanner.suspicious(line, "production.py"))
         self.assertTrue(scanner.suspicious(line.replace("token", "other"), "services/api/tests/test_model_routing.py"))
 
+    def test_new_isolation_fixtures_do_not_exempt_other_files(self):
+        fixtures = [
+            ("sk-TEST-DOUBLE-" + "shared-provider-key-1234567890",
+             "services/api/tests/test_classroom_auth.py"),
+            ("sk-TEST-ONLY-" + "provider-key-1234567890", "tests/classroom-login-rate.test.ts"),
+        ]
+        for value, path in fixtures:
+            self.assertFalse(scanner.suspicious(value, path))
+            self.assertTrue(scanner.suspicious(value, "production.py"))
+            self.assertTrue(scanner.suspicious(value + "-changed", path))
+
 
 if __name__ == "__main__":
     unittest.main()

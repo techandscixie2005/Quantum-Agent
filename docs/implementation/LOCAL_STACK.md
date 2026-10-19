@@ -1,5 +1,10 @@
 # Local Quantum Agent stack
 
+For the classroom increment, also read
+[CLASSROOM_EVALUATION_PROTOCOL.md](CLASSROOM_EVALUATION_PROTOCOL.md) and
+[CLASSROOM_IMPROVEMENTS.md](CLASSROOM_IMPROVEMENTS.md). Historical demonstration
+credentials and shared demo identities are not classroom enrollment.
+
 `compose.yaml` runs the Python knowledge and deterministic teaching stack beside
 the existing Vinext web application. PostgreSQL remains authoritative; Neo4j is a rebuildable
 approved-only projection, Redis is ephemeral coordination/cache infrastructure,
@@ -24,10 +29,14 @@ can reach a separately configured external embedding service. The web
 container never receives `USTC_API` or database passwords; its server-side
 proxy reaches the API through `QUANTUM_API_BASE_URL` on the edge network.
 
-Both image build contexts have dedicated `.dockerignore` rules. Local virtual
-environments, `node_modules`, course-source files, Git history, generated
-artifacts, and ignored environment files are not sent to the Docker daemon or
-a remote builder.
+The web context uses `.dockerignore`; the API uses the repository-root context
+with the positive allowlist in `services/api/Dockerfile.dockerignore`. Backend
+code and the test stage's exact offline packet/scripts are allowed. Runtime API
+images contain only backend code; teacher keys are copied only into the test
+stage. Original course files are read-only mounts, not image contents. Local
+environments, dependencies, Git history, generated artifacts and credentials
+remain outside the build contexts. A direct API build now uses
+`docker build -f services/api/Dockerfile --target runtime .` from the root.
 
 ## Prerequisites and secrets
 
@@ -141,6 +150,79 @@ PostgreSQL and Neo4j volumes before manual destructive maintenance.
 
 ## Tests and lint
 
+### Classroom enrollment and version provenance
+
+Back up PostgreSQL, then run `make migrate` before starting the updated API.
+Migration `0009` adds indexed immutable request identities and backfills keys
+where retained in historic JSON. Missing historical inputs cannot be recreated.
+Migration `0010` adds append-only teacher decisions. Verify migrations on the
+deployment PostgreSQL instance; SQLite checks do not prove multi-worker locking.
+
+Set `BUILD_REVISION` to the **full source commit used to build the image**, then
+rebuild/restart the API. The runtime records that revision, workflow version,
+package version/digest, evidence document/chunk digests, and observed model route
+aliases in each new turn. Unset/invalid revisions remain `unknown`; provider
+aliases do not identify immutable model weights. Paused/resumed turns preserve
+execution segments when deployment versions change.
+
+Classroom login requires a separate personal access token and a provider key.
+Provider credentials grant model use, never a student identity or teacher role.
+An authorized operator can provision named roster members for an active course:
+
+```bash
+quantum-agent issue-classroom-access \
+  --course-id COURSE_UUID --email student@example.edu \
+  --display-name 'Student name' --role student \
+  --expires-hours 24 --output /private/classroom/student-access.json
+```
+
+Run this command in the API's configured environment with database access.
+Use a private directory outside the repository and distribute the one-time token
+through the institution's approved channel. The command never prints the token,
+refuses to overwrite an existing file or silently change an existing role, and
+requires neither a provider key nor a model call. `--role teacher` and `--role ta`
+are explicit operator actions. Existing inactive/different-role memberships
+require roster review. Unix files are created with mode 0600; on Windows, restrict
+the directory's ACL because POSIX mode bits do not establish private access.
+
+Enter the token in `/agent` with the user's provider key. The exchange requires
+the encrypted vault, consumes the token once, and issues an opaque session.
+Expired/used tokens require reissuance. Invitations cannot access teaching APIs
+before exchange. Institutional SSO integration remains deployment work.
+
+`ALLOW_SHARED_DEMO_LOGIN=false` is the default. For an explicitly labeled local
+scripted demonstration only, operators may opt in outside production after
+seeding the demo account. Production ignores that opt-in. Never use the shared
+identity to collect individual classroom learning records. Existing automated
+live tests using independently seeded opaque sessions remain separate.
+
+Teacher/admin accounts can record reasoned follow-up decisions in
+`/teacher/traces`; TAs can inspect records but cannot submit these decisions.
+Student and staff views link the bounded JSON export. Exports include raw student
+answers and reviewer IDs: store them privately, use pseudonymous IDs in analysis,
+and apply the institution's retention and access process. Review records are
+append-only; plan retention/erasure with the authoritative database's existing
+evidence governance rather than ad hoc SQL deletion.
+
+The Linux sandbox remains the supported execution environment. Windows imports
+work, while local untrusted execution refuses to run without POSIX limits.
+`CODING_SANDBOX_REQUIRE_ISOLATION=true` fails closed when namespace isolation is
+unavailable. Do not disable isolation to make a classroom demonstration pass.
+
+Optional evidence budgets are explicit: export at most 500 turns, 5,000 learning
+events, 500 teacher decisions and 8 MB; oversized exports return 413 without
+partial success. Plot caching retains at most 16 immutable JSON specifications
+and bypasses keys above 64 KB. Model fallback deadlines cap each routed call.
+Migration `0011` also persists an aggregate allowance per teaching turn across
+stages/retries/recovery; it does not limit the number of deliberately new turns
+in an episode. Keep provider quotas and recording budgets configured as well.
+
+The secret scan is portable: `npm run check:secrets` uses Node and fails when
+public build artifacts are missing. Other existing build wrapper scripts still
+require Bash/GNU tools; on Windows the underlying build can be checked with
+`node node_modules/vinext/dist/cli.js build`, followed by the artifact and HTML
+checks documented in the classroom report.
+
 Host-side locked environments:
 
 ```bash
@@ -149,6 +231,95 @@ make lint-api
 make test-web
 make lint-web
 ```
+
+## Teaching deadlines, recovery and worker limits
+
+`API_WORKERS=2` is the Compose default. Checkpoint DDL is serialized across
+workers using a dedicated PostgreSQL session and nonblocking advisory-lock
+attempts; setup failure/cancellation closes that connection. PostgreSQL and a
+shared Redis vault remain required for restart/multiworker evidence. Preserve
+`SESSION_VAULT_KEY` across restarts. Readiness checks confirm connectivity, not
+course completeness or model quality.
+
+Runtime scientific libraries use one BLAS/OpenMP thread per process. This
+prevents a 48-thread OpenBLAS startup from exhausting the sandbox's 32-PID
+container allowance. The runner still has no network, credentials or API PID
+visibility; resource failure remains visible. Do not increase privileges to
+make a failed sandbox test pass.
+
+| Setting | Default | Meaning |
+|---|---:|---|
+| `TEACHING_EXECUTION_SECONDS` | 180 | Cumulative active seconds per durable turn, at most 600 |
+| `TEACHING_EXECUTION_PROVIDER_REQUESTS` | 12 | Actual provider HTTP attempts, including SDK retries |
+| `TEACHING_EXECUTION_TOKEN_UNITS` | 131072 | Conservative serialized-input/output admission units |
+| `TEACHING_EXECUTION_OUTPUT_TOKENS` | 2048 | Per-call admitted maximum output |
+| `TEACHING_EXECUTION_REQUEST_BYTES` | 65536 | Maximum serialized provider request size |
+| `TEACHING_PROXY_TIMEOUT_SECONDS` | 210 | BFF transport deadline, at least active limit + 15 seconds |
+
+Persisted allowances do not refill when configuration changes or a worker
+restarts. Human waiting is separate; a crashed lease is charged conservatively.
+Reported provider tokens can be partial and are not inferred from admission
+units. These are per-turn limits, not a school-wide monetary quota.
+
+The BFF emits bounded terminal error codes for budget exhaustion/busy leases
+and interrupted transport. On `/agent`, retain input and use **检查保存状态**.
+It queries the original `client_request_id` within the current account/course,
+restores completed results or an unresolved review, and can replay the original
+submission without inventing another request identity. An exhausted failed
+turn requires an explicit new submission after restoration. Its original raw
+request remains auditable and gains no assessment credit merely by being saved.
+
+For a reverse proxy, disable SSE buffering and compression/buffering that
+delays events; set its overall request allowance above the BFF deadline and
+its idle read timeout above the four-second heartbeat interval. Confirm the
+actual hosting platform supports the chosen duration. The current local
+deployment target is the Compose/Vinext Node server. The browser integration
+harness uses Vite/Vinext without hosting-only Cloudflare machinery; it does not
+certify a Cloudflare deployment. A smaller platform limit needs an asynchronous
+job/polling deployment design before a classroom trial, not a larger hidden retry.
+
+## Isolated reproducibility stack on Windows/WSL
+
+The October 20 verification installed Ubuntu on D using:
+
+```powershell
+wsl --install Ubuntu-24.04 --no-launch --location D:\QuantumAgent\outputs\linux-runtime\Ubuntu
+```
+
+Its `ext4.vhdx`, Linux Docker data and downloaded runtime archives are on D.
+The pre-existing Windows WSL launcher remains a Windows system component.
+Virtual disks, image layers and private runtime secrets are excluded from source
+snapshots; versions, digests, commands and test logs are captured separately.
+
+For a new disposable Linux test stack (never a classroom database):
+
+```bash
+python3 scripts/provision-trial-secrets.py /PRIVATE/qa-trial
+docker compose -p qa-classroom-trial -f compose.yaml -f compose.registry.yaml \
+  -f compose.trial.yaml --env-file /PRIVATE/qa-trial/private.env config --quiet
+docker compose -p qa-classroom-trial -f compose.yaml -f compose.registry.yaml \
+  -f compose.trial.yaml --env-file /PRIVATE/qa-trial/private.env up --build -d
+python3 scripts/with-trial-environment.py --private-env /PRIVATE/qa-trial/private.env \
+  -- node node_modules/@playwright/test/cli.js test --config playwright.backend-live.config.ts
+```
+
+The generated provider value is a synthetic placeholder. The browser harness
+routes all model traffic to its local HTTP double; this stack is not enrolled
+for real teaching. `compose.trial.yaml` adds loopback database ports and a test
+network attachment so host tests can connect. Production `compose.yaml` keeps
+those databases internal. Never print interpolated Compose configuration:
+use `config --quiet` because full rendering contains secrets.
+
+The fresh-DB migration roundtrip is opt-in and requires CREATE DATABASE
+permission. It creates/drops only its own UUID-named database; removing new
+tables/columns is not a data-preserving rollback procedure. Back up actual
+classroom data before any migration maintenance.
+
+See [real-backend test instructions](../../tests/e2e/backend-live/README.md) and
+[classroom protocol](CLASSROOM_EVALUATION_PROTOCOL.md). Provision actual personal
+memberships, review/publish the real sources, and complete real teacher approval
+before admitting students; synthetic fixture review registries are rejected by
+the production loader.
 
 The API also has a network-disabled test image:
 

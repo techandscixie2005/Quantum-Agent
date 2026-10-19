@@ -740,7 +740,7 @@ test.describe("Golden Learning Loop · quantum tunnelling", () => {
     await panel.getByText("查看本步课程原文", { exact: true }).click();
     await expect(panel.getByText(ref.quote)).toBeVisible();
     await expect(panel.getByText(/其余步骤留给你重构/)).toBeVisible();
-    await page.screenshot({ path: "docs/implementation/artifacts/2026-09-15-derivation-bridge.png", fullPage: true });
+    await page.screenshot({ path: test.info().outputPath("scripted-derivation-bridge.png"), fullPage: true });
   });
 
   test("drives prediction → diagnosis → simulation → teach-back → transfer → mirror", async ({ page }) => {
@@ -780,7 +780,7 @@ test.describe("Golden Learning Loop · quantum tunnelling", () => {
     await expect(page.getByTestId("stage-review")).toBeVisible();
     await expect(page.getByTestId("stage-review")).toContainText("第 3 轮");
     await expect(page.getByRole("button", { name: "发送 / 运行", exact: true })).not.toBeVisible();
-    await page.screenshot({ path: "docs/implementation/artifacts/video-parity-followup-20260917/mock-review.png" });
+    await page.screenshot({ path: test.info().outputPath("scripted-review.png") });
     await page.getByRole("button", { name: "返回当前任务", exact: true }).click();
     await expect(page.getByTestId("stage-review")).toHaveCount(0);
     await page.getByRole("button", { name: "回看学习证据", exact: true }).click();
@@ -822,7 +822,7 @@ test.describe("Golden Learning Loop · quantum tunnelling", () => {
       const completed = page.getByTestId("learning-loop-complete");
       await expect(completed).toBeInViewport();
       expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
-      await page.screenshot({ path: `docs/implementation/artifacts/video-parity-current/mock-complete-${width}.png` });
+      await page.screenshot({ path: test.info().outputPath(`scripted-complete-${width}.png`) });
     }
   });
 });

@@ -359,6 +359,11 @@ test.describe("Golden Learning Loop · /agent", () => {
       "transfer-card",
       async () => {
         await expect(page.getByText(/AI 辅助暂时不可用/)).toBeVisible();
+        await page.getByLabel("迁移尝试", { exact: true }).fill("Synthetic independent answer");
+        const submission = page.waitForRequest(request => request.url().includes("/api/teaching/turns/stream")
+          && request.method() === "POST");
+        await page.getByRole("button", { name: "提交迁移尝试", exact: true }).click();
+        expect((await submission).postDataJSON().learning_native.solo_attempt.transfer_task_id).toBe(transfer.task_id);
       },
     );
   });
@@ -423,5 +428,167 @@ test("model degradation is visible and retains the student's input", async ({ pa
     await expect(page.getByLabel("给 Quantum Agent 的问题")).toHaveValue("请帮我连接这两步推导");
     await expect(page.getByTestId("learning-loop-complete")).toHaveCount(0);
     await expect(page.getByTestId("derivation-bridge")).toHaveCount(0);
+  });
+});
+
+// Scripted browser regressions. These use synthetic API fixtures, not teachers,
+// students, live model results, or measured classroom learning outcomes.
+test("a delayed restore cannot reopen an episode after starting a new record", async ({ page }) => {
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let requested!: () => void;
+  const started = new Promise<void>(resolve => { requested = resolve; });
+  await page.addInitScript(({ course, edition, conversation }) => {
+    localStorage.setItem("qa_course_key", `${course}:${edition}`);
+    localStorage.setItem("qa_conversation_id", conversation);
+  }, { course: COURSE_ID, edition: EDITION_ID, conversation: CONVERSATION_ID });
+  await interceptAgentApis(page, baseResult());
+  await page.route("**/api/teaching/threads/*/interrupt?**", route => route.fulfill({ status: 404, body: "{}" }));
+  await page.route("**/api/teaching/threads/*/state?**", async route => {
+    requested(); await held;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      conversation_id: CONVERSATION_ID, mode: "learn_concepts", result: baseResult({ response: {
+        orientation: "STALE_RESTORED_ANSWER", claims: [], next_question: "STALE_PROBE", status: "grounded", limitations: [],
+      } }),
+    }) }).catch(() => undefined);
+  });
+  await page.goto("/agent");
+  await started;
+  await page.getByRole("button", { name: "新建学习记录", exact: true }).click();
+  release();
+  await expect(page.getByText("STALE_RESTORED_ANSWER", { exact: true })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("qa_conversation_id"))).toBeNull();
+});
+
+test("late teaching response cannot populate a different selected course", async ({ page }) => {
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const secondCourse = { ...STUDENT_CONTEXT.courses[0], course_id: "abababab-abab-4bab-8bab-abababababab", edition_title: "隔离课程 B" };
+  await page.route("**/api/agent/context", route => route.fulfill({ contentType: "application/json",
+    body: JSON.stringify({ ...STUDENT_CONTEXT, courses: [...STUDENT_CONTEXT.courses, secondCourse] }) }));
+  await page.route("**/api/teaching/turns/stream**", async route => {
+    const requestMode = route.request().postDataJSON().mode;
+    await held;
+    await route.fulfill({ contentType: "text/event-stream", body: sse("workflow.completed", baseResult({
+      policy: { ...baseResult().policy, mode: requestMode }, response: {
+        orientation: "WRONG_COURSE_ANSWER", claims: [], next_question: "WRONG_COURSE_PROBE", status: "grounded", limitations: [],
+      },
+    })) });
+  });
+  await page.goto("/agent");
+  await page.getByLabel("给 Quantum Agent 的问题").fill("Synthetic delayed question");
+  const sent = page.waitForRequest("**/api/teaching/turns/stream**");
+  await page.getByRole("button", { name: /发送 \/ 运行/ }).click();
+  await sent;
+  await page.getByRole("button", { name: "打开命令面板", exact: true }).click();
+  await page.getByRole("button", { name: /隔离课程 B/ }).click();
+  release();
+  await expect(page.getByText("隔离课程 B", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("给 Quantum Agent 的问题")).toHaveValue("");
+  await expect(page.getByText("WRONG_COURSE_ANSWER", { exact: true })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("qa_conversation_id"))).toBeNull();
+});
+
+test("retry after a lost first response preserves the original client request ID", async ({ page }) => {
+  const ids: string[] = [];
+  await page.route("**/api/agent/context", route => route.fulfill({ contentType: "application/json", body: JSON.stringify(STUDENT_CONTEXT) }));
+  await page.route("**/api/teaching/turns/stream**", async route => {
+    const input = route.request().postDataJSON();
+    ids.push(input.client_request_id);
+    if (ids.length === 1) { await route.abort("failed"); return; }
+    await route.fulfill({ contentType: "text/event-stream", body: sse("workflow.completed", baseResult({ policy: { ...baseResult().policy, mode: input.mode } })) });
+  });
+  await page.goto("/agent");
+  await page.getByLabel("给 Quantum Agent 的问题").fill("Synthetic retry question");
+  await page.getByRole("button", { name: /发送 \/ 运行/ }).click();
+  await page.getByRole("button", { name: "重试同一次提交", exact: true }).click();
+  await expect.poll(() => ids.length).toBe(2);
+  expect(ids[1]).toBe(ids[0]);
+  expect(ids[0]).toMatch(/^[a-f0-9-]{36}$/);
+});
+
+test("teacher review requires reasons and sends the selected next teaching action", async ({ page }) => {
+  const result = baseResult();
+  const traceId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const summary = { id: traceId, teaching_turn_id: TURN_ID, conversation_id: CONVERSATION_ID,
+    student_user_id: STUDENT_CONTEXT.user_id, mode: "run_experiments", sequence_number: 1,
+    task_kind: "concept_question", teaching_action: "ask_diagnostic_question", release_level: "question_only",
+    turn_status: "completed", workflow_version: result.workflow_version, model_gateway_status: "completed",
+    citation_validation_status: "passed", created_at: "2026-10-19T00:00:00Z", completed_at: "2026-10-19T00:00:01Z" };
+  await page.route("**/api/teacher/traces?**", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({
+    course_id: COURSE_ID, curriculum_edition_id: EDITION_ID, items: [summary], total: 1, limit: 25, offset: 0, has_more: false,
+  }) }));
+  await page.route(`**/api/teacher/traces/${traceId}?**`, route => route.fulfill({ contentType: "application/json", body: JSON.stringify({
+    ...summary, user_message: "Synthetic question", student_attempt: "Synthetic initial answer",
+    workflow_steps: result.trace, policy_snapshot: result.policy, evidence_packet: result.evidence_packet,
+    evidence_bundle: null, diagnosis: result.diagnosis, release_decision: result.release,
+    response: result.response, scientific_results: [], validation: result.validation, hitl_events: [], failure_code: null,
+  }) }));
+  await page.route("**/api/teacher/course-packages?**", route => route.fulfill({ contentType: "application/json", body: "[]" }));
+  let saved: Record<string, unknown> | null = null;
+  await page.route("**/api/teacher/conversations/*/reviews?**", async route => {
+    if (route.request().method() === "POST") saved = route.request().postDataJSON();
+    const record = saved ? {
+      ...saved, review_id: traceId, conversation_id: CONVERSATION_ID, reviewer_user_id: STUDENT_CONTEXT.user_id, created_at: "2026-10-19T00:00:02Z",
+    } : null;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(route.request().method() === "POST" ? record : record ? [record] : []) });
+  });
+  await page.goto(`/teacher/traces?course_id=${COURSE_ID}&curriculum_edition_id=${EDITION_ID}`);
+  const panel = page.getByTestId("classroom-review");
+  await expect(panel).toBeVisible();
+  const submit = panel.getByRole("button", { name: "记录教师决定", exact: true });
+  await expect(submit).toBeDisabled();
+  await panel.getByLabel("教师判断依据", { exact: true }).fill("Synthetic review: the boundary condition was omitted.");
+  await panel.getByLabel("后续教学动作", { exact: true }).selectOption("revisit_prerequisite");
+  await panel.getByLabel("下一轮具体追问", { exact: true }).fill("State which derivative is continuous and why.");
+  await submit.click();
+  await expect(panel.getByRole("status")).toContainText("教师决定已记录");
+  expect(saved).toMatchObject({ source_turn_id: TURN_ID, follow_up: "revisit_prerequisite",
+    reason: "Synthetic review: the boundary condition was omitted.", probe: "State which derivative is continuous and why." });
+  await panel.getByText("2026-10-19T00:00:02Z · needs_follow_up", { exact: true }).click();
+  await expect(panel.getByText("Synthetic review: the boundary condition was omitted.", { exact: true })).toBeVisible();
+  if (process.env.QA_CAPTURE_CLASSROOM_SCREENSHOT === "1") {
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ fullPage: true, path: "docs/implementation/evidence/classroom-20261019/teacher-review-scripted.png" });
+  }
+});
+
+test("failed request cannot be retried into a new record or a different course", async ({ page }) => {
+  const second = { ...STUDENT_CONTEXT.courses[0], course_id: "abababab-abab-4bab-8bab-abababababab", edition_title: "隔离课程 B" };
+  await page.route("**/api/agent/context", route => route.fulfill({ contentType: "application/json",
+    body: JSON.stringify({ ...STUDENT_CONTEXT, courses: [...STUDENT_CONTEXT.courses, second] }) }));
+  let calls = 0;
+  await page.route("**/api/teaching/turns/stream**", async route => { calls += 1; await route.abort("failed"); });
+  await page.goto("/agent");
+  await page.getByLabel("给 Quantum Agent 的问题").fill("Synthetic private first-course answer");
+  await page.getByRole("button", { name: /发送 \/ 运行/ }).click();
+  await expect(page.getByRole("button", { name: "重试同一次提交" })).toBeVisible();
+  await page.getByRole("button", { name: "新建学习记录", exact: true }).click();
+  await expect(page.getByRole("button", { name: "重试同一次提交" })).toHaveCount(0);
+  await page.getByLabel("给 Quantum Agent 的问题").fill("Another synthetic private answer");
+  await page.getByRole("button", { name: /发送 \/ 运行/ }).click();
+  await expect(page.getByRole("button", { name: "重试同一次提交" })).toBeVisible();
+  await page.getByRole("button", { name: "打开命令面板", exact: true }).click();
+  await page.getByRole("button", { name: /隔离课程 B/ }).click();
+  await expect(page.getByRole("button", { name: "重试同一次提交" })).toHaveCount(0);
+  expect(calls).toBe(2);
+});
+
+test("versioned course and the preserved Solo first answer survive the browser contract", async ({ page }) => {
+  await interceptAgentApis(page, baseResult({ learning_loop_completed: true, learning_native: {
+    course_package: { package_id: "finite-barriers", version: "1.0.0", content_sha256: "a".repeat(64),
+      objective_ids: ["FB-O1", "FB-O4"], rubric_ids: ["FB-R1", "FB-R4"] },
+    solo_first_attempt: { task_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", teaching_turn_id: TURN_ID,
+      response: "Synthetic initial answer: T is zero.", confidence: 0.8,
+      submitted_at: "2026-10-19T00:00:00Z", assistance_locked: true },
+    teacher_follow_up: null, commitment: null, learning_action: "give_hint", teach_back: null,
+    transfer: null, solo: null, cognitive_mirror: null, evidence_persisted: ["solo_attempt"],
+    phase: "complete", current_stage: "solo", completed_stages: ["solo"],
+    required_action: "none", loop_required: true,
+  } }));
+  await submitAndAssertCard(page, "Synthetic completed classroom episode", "preserved-first-attempt", async () => {
+    await expect(page.getByTestId("course-package-version")).toContainText("finite-barriers · v1.0.0");
+    await page.getByText("Solo 首次独立作答（提交后保留）", { exact: true }).click();
+    await expect(page.getByText("Synthetic initial answer: T is zero.", { exact: true })).toBeVisible();
   });
 });

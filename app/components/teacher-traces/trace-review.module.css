@@ -18,6 +18,13 @@
   background: var(--trace-paper);
 }
 
+.pendingQueue { margin: 20px clamp(18px, 3vw, 46px); padding: 20px; border: 1px solid #b9c0bb; background: #fbfaf6; color: #17201e; }
+.pendingQueue h2 { margin-top: 0; }
+.pendingQueue button { margin: 4px; padding: 8px 12px; border: 1px solid #b9c0bb; border-radius: 4px; background: #e2eee8; cursor: pointer; }
+.pendingQueue button:disabled { opacity: .5; cursor: default; }
+.pendingQueue textarea { display: block; width: min(100%, 720px); min-height: 90px; padding: 8px; }
+.pendingQueue pre { max-height: 500px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 .masthead {
   position: sticky;
   z-index: 40;
@@ -1810,3 +1817,13 @@
     animation: none;
   }
 }
+
+.classroomReview { display: grid; gap: 16px; }
+.classroomReview form, .classroomReview label { display: grid; gap: 8px; }
+.classroomReview form { gap: 16px; }
+.classroomReview textarea, .classroomReview select { width: 100%; border: 1px solid #cad0db; border-radius: 6px; background: white; padding: 10px; color: #182332; }
+.classroomReview textarea { min-height: 90px; resize: vertical; }
+.classroomReview button { justify-self: start; padding: 10px 18px; border-radius: 6px; background: #263b52; color: white; }
+.classroomReview button:disabled { opacity: 0.5; }
+.classroomReview details { border: 1px solid #d9dfe7; padding: 12px; border-radius: 6px; }
+.classroomReview small { overflow-wrap: anywhere; }

@@ -32,6 +32,7 @@ from quantum_agent.db_models import (
 from quantum_agent.knowledge.evidence_packets import EvidencePacket
 from quantum_agent.llm.gateway import GatewayError, Message, ModelGateway, ModelTier
 from quantum_agent.teaching.models import (
+    AssessmentEvidence,
     CognitiveCommitment,
     CognitiveMirror,
     CommitmentGateDecision,
@@ -1050,29 +1051,18 @@ class LearningNativePolicy:
             and row.evidence_json.get("pedagogical_complete") is True
             for row in observations
         )
-        # PRD V3.0 P1-1: a transfer task being ASSIGNED is not evidence of
-        # transfer competence.  Only a VERIFIED, task-correlated, unaided
-        # attempt counts.  We honour both the new separated kinds
-        # (TRANSFER_VERIFIED) and the legacy SOLO_ATTEMPT / TRANSFER rows,
-        # but only when their evidence_json marks the attempt as verified.
-        verified_transfer_kinds = {
-            LearningEvidenceKind.TRANSFER_VERIFIED,
-        }
-        verified_transfer_rows = [
-            row
-            for row in observations
-            if row.kind in verified_transfer_kinds
-            and bool(row.evidence_json.get("verified", False))
-            and row.evidence_json.get("unaided") is True
-        ]
-        # Legacy compatibility: pre-remediation SOLO_ATTEMPT rows recorded
-        # outcome='SOLO_VERIFIED' + verified=True for successful attempts.
-        # Count them only when verified; the unverified legacy rows must NOT
-        # contribute to readiness.
+        # Legacy `verified`/`unaided` booleans do not say whether a number,
+        # physical explanation or rubric criterion was checked. Preserve those
+        # observations without retroactively turning them into mastery evidence.
+        assessment = LearningNativePolicy.assessment_from_observations(observations)
+        verified_transfer_rows = []
         for row in observations:
-            if row.kind is LearningEvidenceKind.SOLO_ATTEMPT and bool(
-                row.evidence_json.get("verified", False)
-            ):
+            raw_assessment = row.evidence_json.get("assessment_evidence")
+            if (row.kind is LearningEvidenceKind.TRANSFER_VERIFIED
+                    and row.evidence_json.get("verified") is True
+                    and isinstance(raw_assessment, dict)
+                    and raw_assessment.get("valid_independent_submission") is True
+                    and raw_assessment.get("explanation_assessment") == "model_supported"):
                 verified_transfer_rows.append(row)
         has_verified_transfer = bool(verified_transfer_rows)
         has_assigned_transfer = (
@@ -1085,38 +1075,49 @@ class LearningNativePolicy:
             and row.evidence_json.get("status") == "pass"
             for row in observations
         )
-        if has_verified_transfer and has_teach_back:
-            label = ConceptStateLabel.TRANSFER_READY
-        elif has_teach_back and has_tool_pass:
-            label = ConceptStateLabel.DEMONSTRATED
-        elif has_verified_transfer:
-            # A verified transfer without a recorded teach-back is still
-            # demonstrated, not merely developing.
-            label = ConceptStateLabel.DEMONSTRATED
-        elif has_attempt or has_commitment or has_assigned_transfer:
+        # A task-specific model judgment is still not a demonstrated mastery
+        # finding. A teacher may rate the original answer against the versioned
+        # rubric; that attributed decision is exposed separately.
+        has_submission = bool(kinds & {
+            LearningEvidenceKind.SOLO_ATTEMPT, LearningEvidenceKind.TRANSFER_VERIFIED,
+            LearningEvidenceKind.TRANSFER_ATTEMPTED,
+        })
+        if (has_attempt or has_commitment or has_assigned_transfer or has_verified_transfer
+                or has_submission
+                or has_teach_back or has_tool_pass):
             label = ConceptStateLabel.DEVELOPING
         elif observations:
             label = ConceptStateLabel.EXPOSED
         else:
             label = ConceptStateLabel.UNKNOWN
 
-        # Fragile when the latest diagnosis observed a misconception, or when
-        # a transfer attempt was submitted but failed verification.
+        # A candidate misconception or insufficient task evidence calls for
+        # review. It does not establish a learner deficit or mastery level.
         if (
             diagnosis is not None
             and diagnosis.status is DiagnosisStatus.MODEL_INFERENCE
             and diagnosis.likely_misconception
         ):
-            label = ConceptStateLabel.FRAGILE
-        if LearningEvidenceKind.TRANSFER_FAILED in kinds:
-            label = ConceptStateLabel.FRAGILE
+            label = ConceptStateLabel.NEEDS_REVIEW
+        latest_transfer = next((row for row in observations if row.kind in {
+            LearningEvidenceKind.TRANSFER_VERIFIED, LearningEvidenceKind.TRANSFER_FAILED,
+        }), None)
+        if (
+            latest_transfer is not None
+            and latest_transfer.kind is LearningEvidenceKind.TRANSFER_FAILED
+        ):
+            label = ConceptStateLabel.NEEDS_REVIEW
 
         confidence_history: list[tuple[float, bool]] = []
         for row in observations:
             value = row.evidence_json.get("confidence")
-            if isinstance(value, (int, float)):
-                correct = bool(row.evidence_json.get("verified", False))
-                confidence_history.append((float(value), correct))
+            raw = row.evidence_json.get("assessment_evidence")
+            if isinstance(value, (int, float)) and isinstance(raw, dict):
+                # This legacy pair has no way to encode an unknown judgment or
+                # an explanation inference. Include only explicit numeric checks.
+                correctness = raw.get("numeric_correctness")
+                if correctness in {"correct", "incorrect"}:
+                    confidence_history.append((float(value), correctness == "correct"))
 
         hint_dependency: list[str] = []
         for row in observations:
@@ -1127,7 +1128,13 @@ class LearningNativePolicy:
             elif row.kind is LearningEvidenceKind.TRANSFER_ASSIGNED:
                 hint_dependency.append("系统指派了迁移任务（尚未验证）。")
             elif row.kind is LearningEvidenceKind.TRANSFER_VERIFIED:
-                hint_dependency.append("学生通过确定性验证完成了独立迁移。")
+                raw = row.evidence_json.get("assessment_evidence")
+                hint_dependency.append(
+                    "首答在应用辅助锁定时提交；任务核验范围另列，掌握尚未评阅。"
+                    if isinstance(raw, dict)
+                    and raw.get("valid_independent_submission") is True
+                    else "记录了任务核验；不据此认定独立首答通过或整体掌握。"
+                )
 
         misconception_candidates: list[str] = []
         if diagnosis is not None and diagnosis.likely_misconception:
@@ -1136,6 +1143,7 @@ class LearningNativePolicy:
         return ConceptMirrorState(
             concept_candidate_id=concept_id or _UNTAGGED_CONCEPT_BUCKET,
             label=label,
+            assessment_evidence=assessment,
             evidence_summary=[row.observation[:200] for row in observations[:10]],
             confidence_history=confidence_history[:24],
             calibration_gap=None,
@@ -1145,9 +1153,33 @@ class LearningNativePolicy:
             ][:6],
             hint_dependency=hint_dependency[:6],
             misconception_candidates=misconception_candidates[:6],
-            last_demonstrated_at=(
-                observations[0].created_at.isoformat() if observations else None
+            last_demonstrated_at=None,
+        )
+
+    @staticmethod
+    def assessment_from_observations(
+        observations: Sequence[
+            LearningEvidence | _CurrentTurnEvidenceView | LearningNativeEvidence
+        ],
+    ) -> AssessmentEvidence:
+        assessments: list[AssessmentEvidence] = []
+        for row in observations:
+            raw = row.evidence_json.get("assessment_evidence")
+            if isinstance(raw, dict):
+                try:
+                    assessments.append(AssessmentEvidence.model_validate(raw))
+                except ValueError:
+                    continue
+        numeric = next((item.numeric_correctness for item in assessments
+                        if item.numeric_correctness != "not_assessed"), "not_assessed")
+        explanation = next((item.explanation_assessment for item in assessments
+                            if item.explanation_assessment != "not_assessed"), "not_assessed")
+        return AssessmentEvidence(
+            valid_independent_submission=any(
+                item.valid_independent_submission for item in assessments
             ),
+            numeric_correctness=numeric, explanation_assessment=explanation,
+            basis=list(dict.fromkeys(basis for item in assessments for basis in item.basis))[:8],
         )
 
     @staticmethod
@@ -1185,6 +1217,7 @@ class LearningNativePolicy:
         cognitive_mirror: CognitiveMirror | None,
         evidence_kinds: Sequence[str],
         durable_phase: DurableLearningPhase | None,
+        assessment_evidence: AssessmentEvidence | None = None,
     ) -> LearningNativeTurnState:
         """Assemble the per-turn Learning-Native result fragment.
 
@@ -1202,6 +1235,11 @@ class LearningNativePolicy:
         )
         loop_required = durable_phase.loop_required if durable_phase is not None else False
         return LearningNativeTurnState(
+            course_package=durable_phase.course_package if durable_phase is not None else None,
+            assessment_evidence=assessment_evidence or AssessmentEvidence(),
+            solo_first_attempt=(
+                durable_phase.solo_first_attempt if durable_phase is not None else None
+            ),
             commitment=commitment,
             learning_action=learning_action,
             teach_back=teach_back,

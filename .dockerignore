@@ -11,6 +11,8 @@
 dist
 node_modules
 playwright-report
+outputs
+test-results
 
 .env
 .env.*
@@ -18,8 +20,8 @@ playwright-report
 *.pem
 
 # The web image copies only the application paths named in Dockerfile.web.
-# Course sources and the Python service are mounted/built through separate,
-# deliberately scoped contexts.
+# The API Dockerfile has its own services/api/Dockerfile.dockerignore and
+# explicit source/test-material COPY paths.
 content
 courseware-source
 design-system

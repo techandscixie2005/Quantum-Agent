@@ -246,6 +246,8 @@ async def test_diagnosis_skips_model_without_student_attempt() -> None:
     assert diagnosis.first_error is None
     assert diagnosis.confidence == 0.0
     assert diagnosis.reason.strip()
+    assert diagnosis.missing_prerequisites == []
+    assert diagnosis.prerequisite_topics == ["线性代数"]
 
 
 async def test_invalid_specialist_output_uses_validated_directed_fallback() -> None:
@@ -279,7 +281,8 @@ async def test_invalid_specialist_output_uses_validated_directed_fallback() -> N
     assert diagnosis.confidence == 0.0
     assert diagnosis.reason.strip()
     assert diagnosis.target_concepts[0] == "波函数统计解释"
-    assert diagnosis.missing_prerequisites == ["线性代数"]
+    assert diagnosis.missing_prerequisites == []
+    assert diagnosis.prerequisite_topics == ["线性代数"]
     assert diagnosis.progress_state is DiagnosisProgressState.STRUGGLING
 
 
@@ -323,7 +326,8 @@ async def test_specialist_confidence_reason_and_verification_request_are_preserv
     assert diagnosis.reason.startswith("The attempt equates")
     assert diagnosis.verification_needed is True
     assert diagnosis.progress_state is DiagnosisProgressState.PROGRESSING
-    assert diagnosis.missing_prerequisites == ["线性代数"]
+    assert diagnosis.missing_prerequisites == []
+    assert diagnosis.prerequisite_topics == ["线性代数"]
     assert diagnosis.first_error is not None
 
 
@@ -378,6 +382,34 @@ def test_diagnosis_output_retains_baseline_compatibility_but_rejects_blank_reaso
             confidence=0.5,
             reason="   ",
         )
+
+
+@pytest.mark.parametrize(
+    ("quote", "expected"),
+    [("不会求向量内积", ["线性代数"]), ("学生不会线性代数", []), ("我", [])],
+)
+async def test_prerequisite_gap_requires_current_answer_quote(
+    quote: str, expected: list[str],
+) -> None:
+    diagnosis, degraded = await DiagnosisAgent(FakeModelGateway({
+        "diagnose_student_progress_structured": {
+            "status": "model_inference", "summary": "仅提出需核查的先修知识候选。",
+            "missing_prerequisites": ["线性代数", "未出现在课程图中的主题"],
+            "prerequisite_support": [
+                {"prerequisite": "线性代数", "student_quote": quote},
+                {"prerequisite": "未出现在课程图中的主题", "student_quote": "不会求向量内积"},
+            ],
+        },
+    })).diagnose(diagnosis_input=DiagnosisInput(
+        request=TeachingTurnInput(
+            mode=TeachingMode.REVIEW_DERIVATIONS, message="请检查我的尝试",
+            student_attempt="我不会求向量内积, 所以停在这里。",
+        ),
+        evidence_bundle=await _bundle(),
+    ))
+    assert not degraded
+    assert diagnosis.missing_prerequisites == expected
+    assert [item.prerequisite for item in diagnosis.prerequisite_support] == expected
 
 
 async def test_model_proposal_provenance_is_assembled_before_public_validation() -> None:

@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { TeachingContractError } from "@/app/components/teaching/contracts";
 import { makeStreamingValidator, parseSseDocument } from "./_shared";
+import { teachingProxyTimeoutMs } from "@/lib/teaching-timeout";
+import { boundedStatusJson, parseTeachingRequestStatus, recoveryMatchesView } from "@/lib/teaching-request-status";
 
 const TEST_SCOPE = {
   courseId: "11111111-1111-1111-1111-111111111111",
@@ -208,4 +210,62 @@ test("streaming validator preserves a recording budget failure as the terminal",
   assert.match(output.chunk, /RECORDING_BUDGET_UNAVAILABLE/);
   assert.doesNotMatch(output.chunk, /INVALID_UPSTREAM_CONTRACT/);
   assert.equal(validator.finished, true);
+});
+
+test("teaching proxy timeout follows active execution with bounded recovery margin", () => {
+  assert.equal(teachingProxyTimeoutMs({}), 210_000);
+  assert.equal(teachingProxyTimeoutMs({ TEACHING_EXECUTION_SECONDS: "120" }), 150_000);
+  assert.equal(teachingProxyTimeoutMs({ TEACHING_EXECUTION_SECONDS: "600", TEACHING_PROXY_TIMEOUT_SECONDS: "630" }), 630_000);
+  for (const env of [
+    { TEACHING_EXECUTION_SECONDS: "NaN" }, { TEACHING_EXECUTION_SECONDS: "0" },
+    { TEACHING_EXECUTION_SECONDS: "601" }, { TEACHING_PROXY_TIMEOUT_SECONDS: "190" },
+    { TEACHING_PROXY_TIMEOUT_SECONDS: "661" },
+  ]) assert.throws(() => teachingProxyTimeoutMs(env));
+});
+
+function requestStatus() {
+  return { client_request_id: "same-request", conversation_id: "11111111-1111-4111-8111-111111111111",
+    turn_id: "22222222-2222-4222-8222-222222222222", status: "failed",
+    execution_budget: { state: "exhausted", active_used_seconds: 180, human_wait_seconds: 3600,
+      provider_requests: 3, lease: { secret: "must-not-reach-browser" } },
+    recovery_action: "new_explicit_turn", private_response: "must-not-reach-browser" };
+}
+
+test("saved request status rejects wrong identities and strips private data", () => {
+  const parsed = parseTeachingRequestStatus(requestStatus(), "same-request");
+  assert.equal(parsed.execution_budget.human_wait_seconds, 3600);
+  assert.doesNotMatch(JSON.stringify(parsed), /must-not-reach-browser|lease|private_response/);
+  assert.throws(() => parseTeachingRequestStatus(requestStatus(), "different-request"));
+  assert.throws(() => parseTeachingRequestStatus({ ...requestStatus(), recovery_action: "replay_same_request" }, "same-request"));
+  assert.throws(() => parseTeachingRequestStatus({ ...requestStatus(), execution_budget: { state: "running", active_used_seconds: -1 } }, "same-request"));
+});
+
+test("recovery response cannot update a newer view, account or course", () => {
+  const requested = { epoch: 1, userId: "student-a", courseId: "course-a", editionId: "edition-a" };
+  const current = { ...requested };
+  assert.equal(recoveryMatchesView(requested, current), true);
+  for (const changes of [{ epoch: 2 }, { userId: "student-b" }, { courseId: "course-b" }, { editionId: "edition-b" }]) {
+    assert.equal(recoveryMatchesView(requested, { ...current, ...changes }), false);
+  }
+});
+
+test("saved status response has an actual UTF8 byte cap and cancels oversized streams", async () => {
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({ start(controller) {
+    controller.enqueue(new TextEncoder().encode("x".repeat(32_769)));
+  }, cancel() { cancelled = true; } });
+  await assert.rejects(boundedStatusJson(new Response(stream)), /exceeds limit/);
+  assert.equal(cancelled, true);
+  const parsed = await boundedStatusJson(Response.json({ safe: true }));
+  assert.deepEqual(parsed, { safe: true });
+});
+
+test("stream preserves aggregate exhausted and busy failures for safe recovery", async () => {
+  for (const code of ["EXECUTION_BUDGET_EXHAUSTED", "EXECUTION_BUDGET_BUSY"]) {
+    const validator = makeStreamingValidator();
+    await validator.handleBlock(startedBlock(), TEST_CONTEXT);
+    const output = await validator.handleBlock(failedBlock(code), TEST_CONTEXT);
+    assert.equal(output.kind, "terminal");
+    assert.match(output.chunk, new RegExp(code));
+  }
 });

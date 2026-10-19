@@ -846,6 +846,8 @@ class HybridEvidenceRetriever:
             )
 
     async def _run_semantic(self, scope: RetrievalScope, query: str) -> _ChannelRun:
+        from quantum_agent.teaching.execution_budget import ExecutionBudgetError
+
         if self._embedding_gateway is None:
             return _ChannelRun(
                 channel=RetrievalChannel.SEMANTIC,
@@ -887,6 +889,8 @@ class HybridEvidenceRetriever:
                 degraded=is_local_hashing,
                 warnings=local_hashing_warning,
             )
+        except ExecutionBudgetError:
+            raise
         except Exception as exc:
             return _ChannelRun(
                 channel=RetrievalChannel.SEMANTIC,

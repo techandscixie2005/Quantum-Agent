@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Awaitable
+from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
 import httpx
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from neo4j import AsyncGraphDatabase
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -16,6 +19,7 @@ from sqlalchemy import text
 from quantum_agent.config import Settings
 from quantum_agent.database import create_database_engine
 
+API_ROOT = Path(__file__).resolve().parents[2]
 
 def _require_live_stack() -> None:
     if os.environ.get("QA_LIVE_INFRA") != "1":
@@ -59,7 +63,9 @@ async def test_compose_dependencies_are_real_healthy_and_migrated() -> None:
                 await connection.scalar(text("SELECT count(*) FROM student_visible_chunks")) or 0
             )
         assert vector_version is not None
-        assert migration == "0008"
+        config = Config(str(API_ROOT / "alembic.ini"))
+        config.set_main_option("script_location", str(API_ROOT / "alembic"))
+        assert migration == ScriptDirectory.from_config(config).get_current_head()
         assert checkpoint_tables == {
             "checkpoints",
             "checkpoint_blobs",

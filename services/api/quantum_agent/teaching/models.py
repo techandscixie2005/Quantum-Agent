@@ -17,7 +17,9 @@ from quantum_agent.db_models import (
 )
 from quantum_agent.knowledge.evidence_packets import EvidencePacket
 from quantum_agent.science import ScientificVerificationRequest, ScientificVerificationResult
+from quantum_agent.teaching.course_packages import CoursePackageRef, CoursePackageSelection
 from quantum_agent.teaching.derivation import DerivationBridge
+from quantum_agent.teaching.reviews import TeacherFollowUp
 
 
 class WorkflowStepName(StrEnum):
@@ -146,6 +148,15 @@ class FirstErrorLocalization(BaseModel):
     description: str = Field(default="", max_length=400)
 
 
+class PrerequisiteSupport(BaseModel):
+    """A checkable student quotation supporting a *candidate* prerequisite gap."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    prerequisite: str = Field(min_length=1, max_length=160)
+    student_quote: str = Field(min_length=1, max_length=800)
+
+
 class DiagnosisProposal(BaseModel):
     """Model-proposed content; provenance labels require server assembly."""
 
@@ -165,6 +176,7 @@ class DiagnosisProposal(BaseModel):
         default_factory=list, max_length=4
     )
     missing_prerequisites: list[str] = Field(default_factory=list, max_length=6)
+    prerequisite_support: list[PrerequisiteSupport] = Field(default_factory=list, max_length=6)
     progress_state: DiagnosisProgressState = DiagnosisProgressState.NO_ATTEMPT
     confidence: float = Field(default=0.0, ge=0, le=1)
     verification_needed: bool = False
@@ -185,6 +197,8 @@ class DiagnosisProposal(BaseModel):
 
 class DiagnosisOutput(DiagnosisProposal):
     """Validated public diagnosis, explicitly not a scientific or mastery fact."""
+
+    prerequisite_topics: list[str] = Field(default_factory=list, max_length=6)
 
     @model_validator(mode="after")
     def inference_is_labeled(self) -> DiagnosisOutput:
@@ -246,6 +260,7 @@ class DraftTeachingResponse(BaseModel):
 class TeachingResponse(DraftTeachingResponse):
     status: ResponseStatus
     limitations: list[str] = Field(default_factory=list, max_length=8)
+    student_answer_anchor: str | None = Field(default=None, max_length=800)
 
 
 class PolicySnapshot(BaseModel):
@@ -292,6 +307,7 @@ class TeachingTurnInput(BaseModel):
 
     conversation_id: UUID | None = None
     mode: TeachingMode
+    course_package: CoursePackageSelection | None = None
     message: str = Field(min_length=1, max_length=4000)
     student_attempt: str | None = Field(default=None, max_length=12000)
     attachment_ids: list[UUID] = Field(default_factory=list, max_length=8)
@@ -305,6 +321,16 @@ class TeachingTurnInput(BaseModel):
     # idempotent replay, so a retry cannot create duplicate AgentTrace /
     # LearningEvidence rows or duplicate phase transitions.
     client_request_id: str | None = Field(default=None, max_length=128)
+
+    @field_validator("client_request_id")
+    @classmethod
+    def meaningful_request_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("client_request_id must not be blank")
+        return value
 
     @model_validator(mode="after")
     def reference_execution_has_explicit_contract(self) -> TeachingTurnInput:
@@ -392,6 +418,14 @@ class SoloAttemptSubmission(BaseModel):
 
     response: str = Field(min_length=1, max_length=12000)
     confidence: float | None = Field(default=None, ge=0, le=1)
+    transfer_task_id: UUID | None = None
+
+    @field_validator("response")
+    @classmethod
+    def nonblank_response(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("a Solo attempt must not be blank")
+        return value.strip()
 
 
 class LearningPhase(StrEnum):
@@ -461,6 +495,26 @@ class TeachingTurnResult(BaseModel):
         return self
 
 
+class AssessmentEvidence(BaseModel):
+    """Separate submission conditions, task checks and unassessed mastery.
+
+    A locked first submission is an observed action. A matching number is a
+    numeric check. Neither constitutes an explanation/rubric judgment or a
+    demonstrated mastery claim. Actual teacher ratings remain attributed
+    TeachingReview records rather than being inferred from these fields.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    valid_independent_submission: bool = False
+    numeric_correctness: Literal["not_assessed", "correct", "incorrect"] = "not_assessed"
+    explanation_assessment: Literal[
+        "not_assessed", "model_supported", "needs_revision"
+    ] = "not_assessed"
+    mastery_status: Literal["not_assessed"] = "not_assessed"
+    basis: list[str] = Field(default_factory=list, max_length=8)
+
+
 class LearningNativeTurnState(BaseModel):
     """Per-turn Learning-Native artefacts produced by the deterministic policy.
 
@@ -473,6 +527,10 @@ class LearningNativeTurnState(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    course_package: CoursePackageRef | None = None
+    solo_first_attempt: SoloFirstAttempt | None = None
+    teacher_follow_up: TeacherFollowUp | None = None
+    assessment_evidence: AssessmentEvidence = Field(default_factory=AssessmentEvidence)
     commitment: CognitiveCommitment | None = None
     learning_action: LearningPolicyAction | None = None
     teach_back: TeachBackAnalysis | None = None
@@ -617,8 +675,22 @@ class TransferVerificationSpec(BaseModel):
     metric_name: str = Field(default="", max_length=80)
     expected_value: float | None = None
     absolute_tolerance: float = Field(default=1e-6, gt=0, le=0.1)
+    relative_tolerance: float = Field(default=0.01, gt=0, le=0.1)
     evaluation_mode: Literal["numeric", "barrier_trend"] = "numeric"
     baseline_request: dict[str, object] = Field(default_factory=dict)
+
+
+class SoloFirstAttempt(BaseModel):
+    """Server-recorded initial answer, preserved before any task feedback."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    task_id: UUID
+    teaching_turn_id: UUID
+    response: str = Field(min_length=1, max_length=12000)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    submitted_at: str
+    assistance_locked: Literal[True] = True
 
 
 class DurableLearningPhase(BaseModel):
@@ -632,6 +704,11 @@ class DurableLearningPhase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     phase: LearningPhase = LearningPhase.OPEN
+    course_package: CoursePackageRef | None = None
+    solo_first_attempt: SoloFirstAttempt | None = None
+    solo_attempt_count: int = Field(default=0, ge=0)
+    pending_teacher_follow_up: TeacherFollowUp | None = None
+    last_applied_teacher_review_id: UUID | None = None
     active_transfer_task_id: UUID | None = None
     active_transfer_task_prompt: str = Field(default="", max_length=2000)
     solo_started_at: str | None = None
@@ -668,6 +745,7 @@ class ConceptMirrorState(BaseModel):
 
     concept_candidate_id: UUID
     label: ConceptStateLabel = ConceptStateLabel.UNKNOWN
+    assessment_evidence: AssessmentEvidence = Field(default_factory=AssessmentEvidence)
     evidence_summary: list[str] = Field(default_factory=list, max_length=10)
     confidence_history: list[tuple[float, bool]] = Field(
         default_factory=list, max_length=24
@@ -707,6 +785,7 @@ class LearningPolicyAction(StrEnum):
 
 __all__ = [
     "WORKFLOW_ORDER",
+    "AssessmentEvidence",
     "CognitiveCommitment",
     "CognitiveMirror",
     "CommitmentGateDecision",

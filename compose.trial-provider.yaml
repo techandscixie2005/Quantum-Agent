@@ -1,0 +1,44 @@
+# Synthetic production-runtime smoke only. Never use this provider in a classroom.
+# No applicability review fixture is loaded into the production API.
+services:
+  provider-stub:
+    image: quantum-agent-api:${QA_IMAGE_TAG:-local}
+    init: true
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    networks: [backend]
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: 0.5
+    environment:
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+    volumes:
+      - type: bind
+        source: ./tests/e2e/backend-live/provider_stub.py
+        target: /opt/test-provider/provider_stub.py
+        read_only: true
+    command: [python, /opt/test-provider/provider_stub.py, --host, 0.0.0.0, --port, "9312"]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9312/health', timeout=2).read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    labels:
+      quantum-agent.test-only: "synthetic-http-provider-not-classroom-results"
+  api:
+    environment:
+      USTC_BASE_URL: http://provider-stub:9312/v1
+      USTC_TEXT_MODEL_OVERRIDE: synthetic-production-smoke-provider
+      EMBEDDING_PROVIDER: disabled
+    depends_on:
+      provider-stub:
+        condition: service_healthy

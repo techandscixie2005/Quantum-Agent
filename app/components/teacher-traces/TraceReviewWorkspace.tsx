@@ -39,6 +39,8 @@ import {
   type TraceScope,
 } from "@/app/components/teacher-traces/contracts";
 import styles from "@/app/components/teacher-traces/trace-review.module.css";
+import { ClassroomReviewPanel } from "./ClassroomReviewPanel";
+import { PendingReviewQueue } from "./PendingReviewQueue";
 
 const PAGE_SIZE = 25;
 
@@ -602,6 +604,9 @@ function TraceRecord({ detail, scope, current }: Readonly<{ detail: AgentTraceDe
       <Section eyebrow="08 / HUMAN LOOP" title="人工复核历史" icon={<Clock3 size={17} />}>
         <HitlHistory detail={detail} />
       </Section>
+      <Section eyebrow="09 / CLASSROOM REVIEW" title="教师评价与后续教学" icon={<CheckCircle2 size={17} />}>
+        <ClassroomReviewPanel key={`${detail.conversation_id}:${detail.teaching_turn_id}`} detail={detail} scope={scope} />
+      </Section>
     </main>
   );
 }
@@ -822,6 +827,10 @@ function ReviewRail({
 }
 
 export function TraceReviewWorkspace({ scope }: Readonly<{ scope: TraceScope }>) {
+  return <><PendingReviewQueue key={`${scope.courseId}:${scope.curriculumEditionId}`} scope={scope} /><CompletedTraceWorkspace scope={scope} /></>;
+}
+
+function CompletedTraceWorkspace({ scope }: Readonly<{ scope: TraceScope }>) {
   const [offset, setOffset] = useState(0);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
   const list = useQuery({

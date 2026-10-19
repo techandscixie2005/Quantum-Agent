@@ -1,0 +1,1389 @@
+{
+  "kind": "local_source_snapshot_not_deployment_attestation",
+  "base_revision": "68fd4cdaf4169be40863dfd0b3bed096d885b03e",
+  "branch": "codex/classroom-teaching-evidence",
+  "dirty": true,
+  "source_tree_sha256": "efaf923c10fee7acc4e7cc413b083df6d80a5a6f8bd773af04661ce45a4f28c0",
+  "files": [
+    {
+      "path": ".github/dependabot.yml",
+      "sha256": "d1ceaf713a3e363322b5a1e8d92ea564225e81fbe7cf99cfd44d0c3688167605"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "3e5bc485030d3768ebfa4987b1d888667e28ef0296e22571d90d2b3d3bd90dd7"
+    },
+    {
+      "path": "app/agent/page.tsx",
+      "sha256": "6c58c163f00106dd101915e566e2f12f9c2d3b7455e49c09aa9adbbb9d314e16"
+    },
+    {
+      "path": "app/api/agent/_shared.ts",
+      "sha256": "3da910f979b4ccf91ac5c3162cfeb5dcc809002330021e021cb259b1810c45c0"
+    },
+    {
+      "path": "app/api/agent/attachments/[attachmentId]/confirm/route.ts",
+      "sha256": "ec436170e443826696af4e0f609fb5609e2e5805f8b90b5079c516b2ddcc1f1f"
+    },
+    {
+      "path": "app/api/agent/attachments/route.ts",
+      "sha256": "b7dd28c464a26f883cf2454e25a992f7ccbfbde24be370c660818e9984046d85"
+    },
+    {
+      "path": "app/api/agent/context/route.ts",
+      "sha256": "f7b1743442dd70b4def8ae582d427da9e4008febcd3c8fae9d031f2b12740f79"
+    },
+    {
+      "path": "app/api/agent/sources/[documentVersionId]/original/route.ts",
+      "sha256": "feed266f81ff493dd91e996d1eb55f3c37dde0f6c97748de8139751b1194fc29"
+    },
+    {
+      "path": "app/api/auth/login/route.ts",
+      "sha256": "41bcc7d333ab50a3aa0ae3d69c2afc0c116a4f74ebc91384f821d6a429ceaf13"
+    },
+    {
+      "path": "app/api/auth/logout/route.ts",
+      "sha256": "9e4edd37fce1f28c2f60670580e976f46b4eb760dbc91efe8cba4aa5f8342cf4"
+    },
+    {
+      "path": "app/api/capabilities/route.ts",
+      "sha256": "30b6e52e0daa23448d472b18f3a44f39d5e60592027f7145d9a60f2faf0e2b0e"
+    },
+    {
+      "path": "app/api/courseware/route.ts",
+      "sha256": "5ff26b382c52a4e41ff6ae03fc49d42efc77f425f56e2b74c25bc5a3273b6e0e"
+    },
+    {
+      "path": "app/api/evaluation/route.ts",
+      "sha256": "6fb7259f7a85b6d26ee7c97c5a300299b3739cecebbbfac2cae0446dc44bcefc"
+    },
+    {
+      "path": "app/api/health/route.ts",
+      "sha256": "d4e87aa8cd4006c1008f4ccd2652ea0f92a89f0088322bdf59402fcf01625aeb"
+    },
+    {
+      "path": "app/api/legacy.ts",
+      "sha256": "55fa3ab42d4275fd030fe76e231025976e840b3be120132408876488e6984f34"
+    },
+    {
+      "path": "app/api/models/route.ts",
+      "sha256": "0a0d8756a88079183956aa391c904712c9b070a6b079d9205c41a159f5642d86"
+    },
+    {
+      "path": "app/api/observatory/route.ts",
+      "sha256": "bee5a84885edd4ee755cfcfa2c8381f59c52c2539abe3040a17578f045315c6f"
+    },
+    {
+      "path": "app/api/phase1/_shared.ts",
+      "sha256": "7828c0477aadd1e0147bd70e49c9c780469038a9e1c23a0dba17ae687233a710"
+    },
+    {
+      "path": "app/api/phase1/graph/prerequisites/route.ts",
+      "sha256": "3ba863e8e2aa4c51cc587bb903ea2673600bba981bd498fb27526bda756e2616"
+    },
+    {
+      "path": "app/api/phase1/graph/search/route.ts",
+      "sha256": "45f0bd13829ea355eb1813b56951a58e6ed15ade263cf60766b0aa0fabb65d0a"
+    },
+    {
+      "path": "app/api/phase1/graph/subgraph/route.ts",
+      "sha256": "d822769fef069acabe93c2a69f458bb7a05ded689c2c8b737f4f98f906958123"
+    },
+    {
+      "path": "app/api/phase1/review/decision/route.ts",
+      "sha256": "dfca7fc11fa8e3d6bc109a9b81b7e89ddc07ab1a5981838e59093edaa73e3714"
+    },
+    {
+      "path": "app/api/phase1/review/detail/route.ts",
+      "sha256": "fbb294e6a9b0ef8355d13694e95fecc6377586cb1c196e06cbf0a699b4a8973c"
+    },
+    {
+      "path": "app/api/phase1/review/queue/route.ts",
+      "sha256": "127139de1ed89cba44c0b27f911505432246af4b26468e9208be91818479bb10"
+    },
+    {
+      "path": "app/api/projects/route.ts",
+      "sha256": "6fb7259f7a85b6d26ee7c97c5a300299b3739cecebbbfac2cae0446dc44bcefc"
+    },
+    {
+      "path": "app/api/ready/route.ts",
+      "sha256": "2d541c1ee6188712fab3ce64d9957a7883bfee978592b56793ce38791f7c7dee"
+    },
+    {
+      "path": "app/api/sessions/route.ts",
+      "sha256": "88638fa42f8ae1e1197eba5c8c78640c49e6d227ad4584c1381c5fe922801006"
+    },
+    {
+      "path": "app/api/student/state/route.ts",
+      "sha256": "88638fa42f8ae1e1197eba5c8c78640c49e6d227ad4584c1381c5fe922801006"
+    },
+    {
+      "path": "app/api/teacher/analytics/route.ts",
+      "sha256": "88638fa42f8ae1e1197eba5c8c78640c49e6d227ad4584c1381c5fe922801006"
+    },
+    {
+      "path": "app/api/teacher/conversations/[conversationId]/reviews/route.ts",
+      "sha256": "5ca4159d9c4f542eaf8ac3840d49f4fc610a69c4aeb5da8b1caa523fee429c6a"
+    },
+    {
+      "path": "app/api/teacher/course-packages/route.ts",
+      "sha256": "0268ae92f95547df4809fb961b5d29e92ff027445d6b7f6068015aaabedb92b1"
+    },
+    {
+      "path": "app/api/teacher/intervene/route.ts",
+      "sha256": "1d77b8ca99819cc0b11b1860099e763f65fe8381acce4569ae1d553e616b63d1"
+    },
+    {
+      "path": "app/api/teacher/login/route.ts",
+      "sha256": "120fcf7ab223e9fdd36891f9afec9faa9ea42cd283beefcbdbb98dd8ff732f3d"
+    },
+    {
+      "path": "app/api/teacher/logout/route.ts",
+      "sha256": "47d9ccfb82e2efafc5a33d994e911728174d3b32451eb1e502a98c5cfa4b13ea"
+    },
+    {
+      "path": "app/api/teacher/respond/route.ts",
+      "sha256": "1d77b8ca99819cc0b11b1860099e763f65fe8381acce4569ae1d553e616b63d1"
+    },
+    {
+      "path": "app/api/teacher/traces/[traceId]/review/route.ts",
+      "sha256": "4185b02d47f6843401d363efb37a10529754e351fb51d3146a92970e1e414504"
+    },
+    {
+      "path": "app/api/teacher/traces/[traceId]/route.ts",
+      "sha256": "23bb2cb52f40252b0b7a985d956919ea1d3248db32a82df90156c22efa67108c"
+    },
+    {
+      "path": "app/api/teacher/traces/_shared.ts",
+      "sha256": "d2e339055f8e380d0f5d461c35d714795474d308d88490061b126e7eee733c99"
+    },
+    {
+      "path": "app/api/teacher/traces/route.ts",
+      "sha256": "7cb23ba4bba365467870e0ab5ad81bd7a082153f81d25a431bd474fc6962b69a"
+    },
+    {
+      "path": "app/api/teaching/_shared.test.ts",
+      "sha256": "078ce813b0d2fbea73aa2f08ccd6794705e99bff5bf8565624cbe439a3121ad1"
+    },
+    {
+      "path": "app/api/teaching/_shared.ts",
+      "sha256": "a444d921eae38f7e9a9032cd9d5dbda1cdcd492f0317415a950806d6a3315051"
+    },
+    {
+      "path": "app/api/teaching/threads/[conversationId]/export/route.ts",
+      "sha256": "a71aa117d8bcaca6c5d66c17c5e6411bd0b2643db5230766b927600afebc55c0"
+    },
+    {
+      "path": "app/api/teaching/threads/[conversationId]/interrupt/route.ts",
+      "sha256": "ce55cb50f04b70d26fe2d70178ae5ee0f6501a6ac1db420c4dfeb2b0fd9be646"
+    },
+    {
+      "path": "app/api/teaching/threads/[conversationId]/resume/route.ts",
+      "sha256": "f0e566ce6ff95977778a4f2afaf868b060326216c56d35a275ca43f0e3362012"
+    },
+    {
+      "path": "app/api/teaching/threads/[conversationId]/state/route.ts",
+      "sha256": "011a20396b050ca47d379f50d710dd66d3d5d33649e24b3ae3c6478962570914"
+    },
+    {
+      "path": "app/api/teaching/turns/stream/route.ts",
+      "sha256": "fc02dfca423efd7db015400b5354ba7ea0aa6aef39cec1e13e899c8ac6c97a08"
+    },
+    {
+      "path": "app/api/user/delete/route.ts",
+      "sha256": "ed88a8f16ff0db25ca0f744427f685fcb50d4b57ccb967ce5c7580e9c7686a46"
+    },
+    {
+      "path": "app/api/user/export/route.ts",
+      "sha256": "edda01c8725298311a6e85398238560821f867faa13ac915871f00f40bad9ddd"
+    },
+    {
+      "path": "app/api/verify/route.ts",
+      "sha256": "1d77b8ca99819cc0b11b1860099e763f65fe8381acce4569ae1d553e616b63d1"
+    },
+    {
+      "path": "app/chatgpt-auth.ts",
+      "sha256": "1407f614cc83d7049fdb08cd713d2516866ba58e24e820f7f4fd9d718b9d3007"
+    },
+    {
+      "path": "app/components/agent/AgentCodeEditor.tsx",
+      "sha256": "e01dd38ff574e0c360677531068cf1466ec3ed0880fda102fc00dfd62d22f717"
+    },
+    {
+      "path": "app/components/agent/AgentEquation.tsx",
+      "sha256": "da94c7897bf373a96603d1baeea96d87158becbb1998c95fdd19c0202d110e57"
+    },
+    {
+      "path": "app/components/agent/AgentExperience.tsx",
+      "sha256": "9138bf1b8cb6d75e0b21466461fb3e177fd5ddde4df55ac98a8bf96ee0c5b1c8"
+    },
+    {
+      "path": "app/components/agent/AgentPlot.tsx",
+      "sha256": "c997daa454452d0dc99dc31dc040a5f1f1c0ae10c9f76d4564d7ed0b37da4c0a"
+    },
+    {
+      "path": "app/components/agent/AgentQueryProvider.tsx",
+      "sha256": "ba6ff5017ddfb8aba6663cb67609f03dc4efd644ec04bfd09d5be46729036ec3"
+    },
+    {
+      "path": "app/components/agent/CodingArtifactPanel.tsx",
+      "sha256": "a3aeb5f4749247ed915f634e09d9bd38ad9662bbb8a4465d0d56e1475594faf1"
+    },
+    {
+      "path": "app/components/agent/DerivationBridgePanel.tsx",
+      "sha256": "0f0bbb7848536814e655a3fddfb16cf15654dd59ed4cad82455f3c5d89f1d533"
+    },
+    {
+      "path": "app/components/agent/EpisodeEvidence.tsx",
+      "sha256": "ebb53ed033487c3d175296490598102bfc2f4367b46532dea92f1dc935aa6d57"
+    },
+    {
+      "path": "app/components/agent/LearningJourney.tsx",
+      "sha256": "edf6d7aa6484d7ecbbdfe092366ab96592487c296b9f2e85191da71ffb04644f"
+    },
+    {
+      "path": "app/components/agent/LearningNative.tsx",
+      "sha256": "66f38a53242f7a643d51ba5dd236b1d9b42ab9728bc76887bb624f544b4d8c8c"
+    },
+    {
+      "path": "app/components/agent/StageReview.tsx",
+      "sha256": "6afcd99a569220b14a8e8c0d3eb1ac6a931b5d2a529f52958b4496affca0268b"
+    },
+    {
+      "path": "app/components/agent/agent.module.css",
+      "sha256": "0326fab8b705ff944a24bad5566b19c0e77db1b7245e5f6df26deabff5df122a"
+    },
+    {
+      "path": "app/components/agent/coding-status.test.ts",
+      "sha256": "a4a851ecec3e3c034ec41830b9fd524ab63b05676a5d769195496ec22617e19f"
+    },
+    {
+      "path": "app/components/agent/coding-status.ts",
+      "sha256": "80c3721e115c293f44a7ad52188373a88ac2b2e98311829451de7e66154ca169"
+    },
+    {
+      "path": "app/components/agent/contracts.test.ts",
+      "sha256": "758bf515b34bb1151f8538f4a9dec893adef3ebf7e3ff99862a34c186168c8f9"
+    },
+    {
+      "path": "app/components/agent/contracts.ts",
+      "sha256": "72722d87a2bf3a90c8f6434fcff843574231d787a338439b49fd488ce37d72b0"
+    },
+    {
+      "path": "app/components/knowledge/EvidenceLedger.tsx",
+      "sha256": "eb8a08ff48bc228eb689bb85ed5c1543f14e4b7c424087534a889acc7980f826"
+    },
+    {
+      "path": "app/components/knowledge/FormulaDisplay.tsx",
+      "sha256": "c28a74009723c3c496a458290717c54a506fa17e31193c71c8a926a06792ef41"
+    },
+    {
+      "path": "app/components/knowledge/PhaseOneChrome.tsx",
+      "sha256": "42aecf2a57c52ec134b73ed22e212de6fa014b5f5f45a30ed2f9ee9acf945b9e"
+    },
+    {
+      "path": "app/components/knowledge/StudentGraphExplorer.tsx",
+      "sha256": "7f1fa43e6a8cd6b41bacb612fc37e74d1bc8ca7af11d936e172cbbf47a4ea440"
+    },
+    {
+      "path": "app/components/knowledge/TeacherKnowledgeReview.tsx",
+      "sha256": "186a048e21bbd98cd28f3d6619e55dece077e37ebb42e2331395b5b9b92e7681"
+    },
+    {
+      "path": "app/components/knowledge/contracts.test.ts",
+      "sha256": "65332d4760764112dc2fbc932be54ec992806ee13f5bf5039e85cd2fff5265fc"
+    },
+    {
+      "path": "app/components/knowledge/contracts.ts",
+      "sha256": "aaf45a16726b1a7764891b54c5a57b494c765c764a2104dc0a10406773b31a3e"
+    },
+    {
+      "path": "app/components/knowledge/phase-one.module.css",
+      "sha256": "18a1da69b0f9c485eac8d7346113df6d73d827883f1df902f4d78fdf07e7faba"
+    },
+    {
+      "path": "app/components/teacher-traces/ClassroomReviewPanel.tsx",
+      "sha256": "5caa20bb2a0afc47d92162ab6178ce747eded992eefa24744fa7ac7c860a97a9"
+    },
+    {
+      "path": "app/components/teacher-traces/TraceQueryProvider.tsx",
+      "sha256": "c77460efc161ec78134756f2a2a369e64a3483a2bc576aae64ad2a239ed67ca5"
+    },
+    {
+      "path": "app/components/teacher-traces/TraceReviewWorkspace.tsx",
+      "sha256": "438c1acad11844963123ecf1717637adb65838c516c78f5144d0d96c02e83fb1"
+    },
+    {
+      "path": "app/components/teacher-traces/contracts.test.ts",
+      "sha256": "9695a44abaced83f106ed827ecca586b7605ae77ce722f44f6b5a21d93eee0af"
+    },
+    {
+      "path": "app/components/teacher-traces/contracts.ts",
+      "sha256": "77416e96596fe0d44f74cd1317f3fcdb5e0b713d0cd72eb4ba032e2993fd8b4b"
+    },
+    {
+      "path": "app/components/teacher-traces/trace-review.module.css",
+      "sha256": "e11ae95c70b5639f363d738f78003ee029c7bd62dda096e43ba1932802c4ad51"
+    },
+    {
+      "path": "app/components/teaching/ModeIcon.tsx",
+      "sha256": "f27d95e9e494df76626c8db8eb7facc5b1a9a861a26ba4e7b6dab2161b90f882"
+    },
+    {
+      "path": "app/components/teaching/ScientificRequestFields.tsx",
+      "sha256": "f632bd26d759b244efe40556bf52e00fdde4d99e4e96d6c41bcc404c924c6385"
+    },
+    {
+      "path": "app/components/teaching/TeachingChrome.tsx",
+      "sha256": "fa51e1981b60eaeb49d30344775d58da3fe67d65884dd4b0d189612e9b2f39e7"
+    },
+    {
+      "path": "app/components/teaching/TeachingResult.tsx",
+      "sha256": "5ba293089cfeabf1cc8581e5184ce2133c825941b76274ef7fb81389fbbbee7f"
+    },
+    {
+      "path": "app/components/teaching/TeachingWorkspace.tsx",
+      "sha256": "b0da02764fea315767a030494da0c5260786fcbfa22ce59411b68aa523feb437"
+    },
+    {
+      "path": "app/components/teaching/contracts.test.ts",
+      "sha256": "9a019698abecb925f45d19b91e52a0b815ee03349f865f2d6a3fd8da78cb7449"
+    },
+    {
+      "path": "app/components/teaching/contracts.ts",
+      "sha256": "67d3918981dee1750384a2ef172edf0f61c538d91dfcc5559bfe66f3e4cba41c"
+    },
+    {
+      "path": "app/components/teaching/derivation.ts",
+      "sha256": "4a2d9393e518cc49992a12ec45f197ebf6f59bfb25a27b311a88ee8879cded4a"
+    },
+    {
+      "path": "app/components/teaching/presentation.ts",
+      "sha256": "9d31e44ca363e4e0e72a44393ad06ca859d43505c5bfb02cc1b26164c32f228d"
+    },
+    {
+      "path": "app/components/teaching/teaching.module.css",
+      "sha256": "ea5d231a1d1d94cda9fe791f2e1f7fed5b0733506149ada74e3e441322d8ddb5"
+    },
+    {
+      "path": "app/course/page.tsx",
+      "sha256": "0464e2f9314980aa20a74d80a349910646c20e791533b00b703ffdead6b0ef29"
+    },
+    {
+      "path": "app/globals.css",
+      "sha256": "6a263b78949be0c51f18c004b3351e58c99e231cc6ae2ad6d8a1c4e4ede4f8db"
+    },
+    {
+      "path": "app/knowledge-graph/page.tsx",
+      "sha256": "303a4ac309c43e135cc2cec46ace5df1fdf30c89b09c209d2f9b1afa280bb226"
+    },
+    {
+      "path": "app/layout.tsx",
+      "sha256": "022781748d9bdf28ec9c9b36c7e80b30a72fd61dfd07c8ae44ae06421e5e4e2c"
+    },
+    {
+      "path": "app/page.tsx",
+      "sha256": "08d52e4ef1fbb34ef76ac2811fe70d4ec93371716539d1ed02cd4ba25c472f79"
+    },
+    {
+      "path": "app/teacher/knowledge/page.tsx",
+      "sha256": "3e61df7654e59627c145755e19efc3be4c9b254973507b99b918aba104c7e46f"
+    },
+    {
+      "path": "app/teacher/traces/page.tsx",
+      "sha256": "496b4c815a97ccc2ad4261394643bde8d377ad28053b48849e7ec0e2ce213c18"
+    },
+    {
+      "path": "compose.yaml",
+      "sha256": "55aebd8c2d74b0808ee0cc1245e3412a595bfc509e97a1dba1acd4e8e440d35f"
+    },
+    {
+      "path": "content/barrier_demo/README.md",
+      "sha256": "bad4adc7c7c2dde34086a1b1b4dd13dc952d09393d3cb1acfb154b2be7464656"
+    },
+    {
+      "path": "content/barrier_demo/compose.example.yaml",
+      "sha256": "68ed6aec82a64950e897be7afeb0c75baff7137ac5a29b8ec4f7314df2dca97e"
+    },
+    {
+      "path": "content/barrier_demo/compose.flash-test.yaml",
+      "sha256": "bffabb6d5ee672b87dc39c61ca211608ab6526ed0f0e2617ff7cbe0f5de2cb5f"
+    },
+    {
+      "path": "content/barrier_demo/lecture.html",
+      "sha256": "14428ed2aed3ae1a5305677b79e8021650f50920ff2fb18117f5fc65d9c97c37"
+    },
+    {
+      "path": "content/barrier_demo/manifest.toml",
+      "sha256": "62be114e177ed48dafb87a8e12c1a4ff424d0c9b8396d065b839f17c658728fe"
+    },
+    {
+      "path": "content/barrier_demo/reviews.json",
+      "sha256": "67989a179aa16e7657afbfebe43165001527d832a88c94c1915290e6e46cc048"
+    },
+    {
+      "path": "content/quantum_course/manifest.toml",
+      "sha256": "b602fc3cf43439ed07cf9410a192699a45e1a21c92c332d5021506df174a23f5"
+    },
+    {
+      "path": "db/index.ts",
+      "sha256": "c05de938b785dbb40b3854197510f5ef30d14e82408a326d51ceb6b00d2a371c"
+    },
+    {
+      "path": "db/schema.ts",
+      "sha256": "c41c924ac707f1e134a72a93f63e6bc2c94cc0f86a3a7f46392066290b2fc8b5"
+    },
+    {
+      "path": "lib/citation-allowlist.ts",
+      "sha256": "8ede7f1b85c2cc2405dbca7c24a8079c470817f6e4e4c5ccbd7c39313912aacd"
+    },
+    {
+      "path": "lib/course-knowledge.ts",
+      "sha256": "8f8f4e4d8397dc5e8f9e58bdfb7479a4c53552b81fd21a5ba41f9f828c9c6752"
+    },
+    {
+      "path": "lib/courseware.generated.json",
+      "sha256": "43b494e89a27f557ff7f9d2ddcfb84f4a32a28827f234c126a9177137a33bfe5"
+    },
+    {
+      "path": "lib/diatomic.ts",
+      "sha256": "afbecd8571b622329021ef71ebe069e23a12cba1857c1511a3351c9660bac6d4"
+    },
+    {
+      "path": "lib/evaluation.ts",
+      "sha256": "45e1e6f03659b1a0cccc5aafe1dee8c82ac80f0fee9df0582eb4f312bc1fba94"
+    },
+    {
+      "path": "lib/helium.ts",
+      "sha256": "e55adf23333c8ef94f4ac46233ded94fba1bb4caee2597c75539898efea222c1"
+    },
+    {
+      "path": "lib/hydrogen.ts",
+      "sha256": "716ba2badd990a2b3ef2505e23af667516a0fce930829eebc9aeba207c52e15e"
+    },
+    {
+      "path": "lib/policy.ts",
+      "sha256": "ef1cf07f2a08747449990e7dc67d910f7f01a2da2173aaad22e4f0764be71d32"
+    },
+    {
+      "path": "lib/projects.ts",
+      "sha256": "3486dd3d35452b7aae5f6b89a8de1599aaf6cce3691f844158d489107066f72a"
+    },
+    {
+      "path": "lib/providers.ts",
+      "sha256": "11f4fcc8efa885d22fadeaa243b9d9f191b509c1271fdbd0c1ac159489474c9d"
+    },
+    {
+      "path": "lib/repository.ts",
+      "sha256": "aa1321dd291e753f79340222e998dac9440d62e86c5373a5954d276a0c2798b0"
+    },
+    {
+      "path": "lib/request-user.ts",
+      "sha256": "f2cb7a5ffd32ae38b625e02a5fcd1db14eac7f121adf6b30feac01bcacaa2299"
+    },
+    {
+      "path": "lib/retrieval.ts",
+      "sha256": "aa15bf3944a22708582afa0e3e2e159e670bae2fd31a05747389030b9c288603"
+    },
+    {
+      "path": "lib/runtime-env.ts",
+      "sha256": "ae83cf1ef4244b3e920faf082b83e2d8ae9ddbc884a37a7329551ac591ce1c4c"
+    },
+    {
+      "path": "lib/sandbox.ts",
+      "sha256": "7b43bf61a93753a21577bd605036b856435253c9f119842dbc53440544fc929c"
+    },
+    {
+      "path": "lib/security.ts",
+      "sha256": "efdda2bcfe5e54397b430c85e592015024f62867171da7d0251ad8672a2308d0"
+    },
+    {
+      "path": "lib/teacher-auth.ts",
+      "sha256": "09e8e7e006c7e17628b1297ee13d2ebcb85bf625b386df792e58381901776548"
+    },
+    {
+      "path": "lib/tutor-engine.ts",
+      "sha256": "3069984bc38e620d0bf01daa71a1cbb81408fe28ea572b5b748faf6439bb88aa"
+    },
+    {
+      "path": "lib/types.ts",
+      "sha256": "dd8f55c7927ad1509997b0cddda8635ceffa52bdff2d99f83c2ca5c7cd881647"
+    },
+    {
+      "path": "lib/verifiers.ts",
+      "sha256": "089ed10257b1b6441b69e13a082cbae694ecdbd2aac804c5345a53bffc5a2ed9"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "bfd958ff1f1d2a079ebb85d2732daaf0ad912fddabec8b2678771d14b5747023"
+    },
+    {
+      "path": "package.json",
+      "sha256": "649d5a37b015d96b7690f97b091df653645fbac8c680ccaa301291d361eb1f30"
+    },
+    {
+      "path": "playwright.config.ts",
+      "sha256": "e7fa79c2e62ee12be6762d6603beb321abd92f996362a506a955597c1a1457aa"
+    },
+    {
+      "path": "scripts/audit-core-content.py",
+      "sha256": "168fa203cfa3bb5b27e4a46ceaf20c766563cda4574f2bca17ea3b439c3bfcb9"
+    },
+    {
+      "path": "scripts/benchmark-science.py",
+      "sha256": "2778ed1ae6cb2d666a5bfb5ed0557c500e6a8d8b7a4cd835bfd93aaca17168da"
+    },
+    {
+      "path": "scripts/build-courseware-index.mjs",
+      "sha256": "4c7deb50e8a7175806969197a0fb2462b0dcbc8045e813e45f57b6c1e391553b"
+    },
+    {
+      "path": "scripts/build-verified.sh",
+      "sha256": "bc3771742250e41438c8fa7ccf9eb205bcd6a5edcd9f03b68c8f57889df5d3e1"
+    },
+    {
+      "path": "scripts/capture-source-manifest.py",
+      "sha256": "fd9406029622f5edebd5216df8a646bac158931989bd897b3fb822483e50ec7c"
+    },
+    {
+      "path": "scripts/check-history-secrets.py",
+      "sha256": "f4d68863cd411acd3d605fc4774da2e18eb239cbe8d8461bac0d50e98104099a"
+    },
+    {
+      "path": "scripts/check-secrets.mjs",
+      "sha256": "53b44b97d77220842c3698b6cc23432e847dcbc09a166f605bfe173fa9f5c8c4"
+    },
+    {
+      "path": "scripts/check-secrets.sh",
+      "sha256": "2a28a9a66a8e0ea48b2c0585b254a784546060e2df447971abf17f84d221f998"
+    },
+    {
+      "path": "scripts/evaluate-classroom-live.py",
+      "sha256": "486655a23b817bd26a81cd48170d8297a78b72a43fe92de31ff2e9468f24a32e"
+    },
+    {
+      "path": "scripts/evaluate.ts",
+      "sha256": "de1399143e6d804fdcd15416de35eb6efcc2bae041fb09d0e270f553f1de9000"
+    },
+    {
+      "path": "scripts/install-ci.sh",
+      "sha256": "8de883779d0a99f2d2c27ddf5f9956c9ed15932e2d504784a7e0a7d91379f3cd"
+    },
+    {
+      "path": "scripts/live-loop-proof.mjs",
+      "sha256": "d29defff33d7eea9b99ebff06cbefa05679e3586cae5271d5414cb78e06cde29"
+    },
+    {
+      "path": "scripts/run-live-e2e.sh",
+      "sha256": "393f67fd79f3c913814d15c5faa24790077f5f8fc0cee0960db7715c69d4b253"
+    },
+    {
+      "path": "scripts/sites-env.sh",
+      "sha256": "29bc00ff806de5fe25039b869e32e9a458e273555b139a09b4f9c1ed8f59df73"
+    },
+    {
+      "path": "scripts/test-history-secrets.py",
+      "sha256": "0dc579862d7c04d063b48d3d1d00802b5169b943e81afa6b3ebeee2e0b1003df"
+    },
+    {
+      "path": "scripts/test-sandbox-attacks.sh",
+      "sha256": "d2cd4cf90dfe907104fbee6e7767cd4732349a60821120c1e37fa9da57409ff8"
+    },
+    {
+      "path": "scripts/test-ustc-live.ts",
+      "sha256": "3fa88bcfdc3b07a58ee67814f700cb604d4e4e447bd228ad9f0b99df09038868"
+    },
+    {
+      "path": "scripts/validate-artifact.sh",
+      "sha256": "2f0bf0f83a1760d04162eb62c0a84be7f72f53726208aadcd82e3cd6c61a032e"
+    },
+    {
+      "path": "scripts/video-parity/acceptance.mjs",
+      "sha256": "a1596c026034814164d073eb5a3219af864025abc4d2ab6d7a70c454e58ac7e7"
+    },
+    {
+      "path": "scripts/video-parity/diagnostic-inputs.mjs",
+      "sha256": "b1f635a2f31fec5e522afdfc5826aa070bc0b1749b1608d6a37e731d4a8c0774"
+    },
+    {
+      "path": "scripts/video-parity/health.mjs",
+      "sha256": "6a1e84643f54bb81f2dd97611f70f0b453854eca141f0ab4edd01070941103f2"
+    },
+    {
+      "path": "scripts/video-parity/live.mjs",
+      "sha256": "7e6f91fd2f230ed382aab7041dbfa9bbbb81d725003dcb419664a74be837402f"
+    },
+    {
+      "path": "scripts/video-parity/parameters.mjs",
+      "sha256": "d1e08996a5baa0b317d188b0381b959cd8e40ebc7366a039843b1460397424b7"
+    },
+    {
+      "path": "scripts/video-parity/prepare-demo.sh",
+      "sha256": "42b1d88fd7e2ac2a4c474db042f2fcb82c311454cc0d5eefcb86cf49d31e4f7a"
+    },
+    {
+      "path": "scripts/video-parity/recovery.mjs",
+      "sha256": "f80cacee2540a3c4a285ccfa8aa2ca82403abaf6c1c7adb307025bdb9fbe59a3"
+    },
+    {
+      "path": "scripts/video-parity/review.mjs",
+      "sha256": "c419756fa66c6119758ec69406106e4d645fd205c0c11bbf3d1a645708525069"
+    },
+    {
+      "path": "scripts/video-parity/teachback-inputs.mjs",
+      "sha256": "1e9ec6dbb618fa5e6e2a058ca2e0d9c89d79bcd3241ba4b5932750c1400a38e3"
+    },
+    {
+      "path": "services/api/alembic/env.py",
+      "sha256": "c2b917cfc6b1c227a8259c2089fb801ea565dd9957d6c1d1dae1cc74fc11061c"
+    },
+    {
+      "path": "services/api/alembic/script.py.mako",
+      "sha256": "614702189bdc775f9d85a5fd463d95b006d9e9440232025529842ec6e30e021c"
+    },
+    {
+      "path": "services/api/alembic/versions/0001_phase_1_knowledge_graph_foundation.py",
+      "sha256": "12d0f46dae17428411d0f3312f7268a793c596fdcad645040213112acc07aef7"
+    },
+    {
+      "path": "services/api/alembic/versions/0002_teaching_policy_and_learning_evidence.py",
+      "sha256": "ac185362a0252ed06c06508a8dd7996d8a11742a7ee91fa857d1320ec6d7a8a3"
+    },
+    {
+      "path": "services/api/alembic/versions/0003_parser_scoped_document_versions.py",
+      "sha256": "7b8f2d4f9fe9a4ea0337ffc732f58e76b7ce68c79b62676fa4255d412b258fd8"
+    },
+    {
+      "path": "services/api/alembic/versions/0004_multimodal_attachments_and_document_runs.py",
+      "sha256": "7d4ea518fb09a8c0b65c580985fbfec44948ef2fbab233c3eb2d32c144be2c26"
+    },
+    {
+      "path": "services/api/alembic/versions/0005_extend_learning_evidence_kind.py",
+      "sha256": "dba2d6f412887315b9ce3cf731696e84d02920b039e3820f4ad8d941170cb8c6"
+    },
+    {
+      "path": "services/api/alembic/versions/0006_teaching_conversation_learning_phase.py",
+      "sha256": "f694640c816fd69f1bb0829d8a53b4e3b4a1631d746f06a78bf27f4e9914bb57"
+    },
+    {
+      "path": "services/api/alembic/versions/0007_separate_transfer_solo_evidence_kinds.py",
+      "sha256": "3f05f45c4439b45583ce3c905f0dc670e7cacf0c46e03f0dc025104cdb66bcba"
+    },
+    {
+      "path": "services/api/alembic/versions/0008_pedagogical_graph_nodes.py",
+      "sha256": "f2de26a30c05676b3b373f80f606f8ec9a4d91c23c04d6034e624655b4f160db"
+    },
+    {
+      "path": "services/api/alembic/versions/0009_durable_turn_idempotency.py",
+      "sha256": "1b6366ee0bfd2bf853e171e6a39b66449fec6c15306456d190e93049f39f26ad"
+    },
+    {
+      "path": "services/api/alembic/versions/0010_teaching_reviews.py",
+      "sha256": "022b239b3e9c79551626b75bd6a47a897b83ff123b6722f8e07af82734db0a4c"
+    },
+    {
+      "path": "services/api/pyproject.toml",
+      "sha256": "564870c939ecd42c00c560a04bdec298d2f96f7cbabb7718c130d96bbcb3a4eb"
+    },
+    {
+      "path": "services/api/quantum_agent/__init__.py",
+      "sha256": "cd5b97cd595273cf1a02181a2a01ccde6ffb5e93a7306d0d64fcd95ad789a6a7"
+    },
+    {
+      "path": "services/api/quantum_agent/api/__init__.py",
+      "sha256": "ae852bc946fb6f6d8f87265592137a4ada0fcafc5f19ca46361a920bed828add"
+    },
+    {
+      "path": "services/api/quantum_agent/api/attachments.py",
+      "sha256": "df11fba31259c886ccf5bfd2f94a9e14457c86105450cec8b00c7519662f9b8e"
+    },
+    {
+      "path": "services/api/quantum_agent/api/auth.py",
+      "sha256": "f9e18d65cf0b79808761f64be5fde20daa89f79b6ff148fe8a5170af95da2202"
+    },
+    {
+      "path": "services/api/quantum_agent/api/course_context.py",
+      "sha256": "cdbb938091d87a243eed7f244498bdde67d6b267dc3dfcf445980adfd53771d8"
+    },
+    {
+      "path": "services/api/quantum_agent/api/graph.py",
+      "sha256": "8d5d19216721b83456abb3591cffe9697c148daefe3ad7118366b0e2c850ae7f"
+    },
+    {
+      "path": "services/api/quantum_agent/api/learning_records.py",
+      "sha256": "4f4275d3d62783915b6e7d8826f8516b02179ff6e1df038e4870fd2c467749bd"
+    },
+    {
+      "path": "services/api/quantum_agent/api/retrieval.py",
+      "sha256": "f6d471b50ec0c2a499f4e34ec54e6392a8437b3941794b5196ea721494d98e5d"
+    },
+    {
+      "path": "services/api/quantum_agent/api/review.py",
+      "sha256": "b97c58792915994c4005a7012d65c1ac44fec6acf03f9934f1fd0f74cfd4a910"
+    },
+    {
+      "path": "services/api/quantum_agent/api/source_files.py",
+      "sha256": "291e6c4620fddad56d135578b4a13db3187310b701bf6ddf543c64fdd6551751"
+    },
+    {
+      "path": "services/api/quantum_agent/api/teacher_insights.py",
+      "sha256": "aa07bb8570c94becc32891509e4a169d15dfa5e5af47d4906b9b8353514dd35b"
+    },
+    {
+      "path": "services/api/quantum_agent/api/teaching.py",
+      "sha256": "f899b4d46c89ef5d34e1437875e5d65ed1fdbfa949e034313c17c764b36a3e9a"
+    },
+    {
+      "path": "services/api/quantum_agent/auth.py",
+      "sha256": "4766b7d1c4dffd0b8d0463c0c593c9f3e876d2696572c8497674a4266a185aca"
+    },
+    {
+      "path": "services/api/quantum_agent/classroom.py",
+      "sha256": "5e863a41d4b2a412702e6ed58628fea43cfbe15603cd12fbe13ea5bbb5d48f15"
+    },
+    {
+      "path": "services/api/quantum_agent/cli.py",
+      "sha256": "7c41ff3e12e582f0851999bdad45385b3aa15a6ae5c70fd61c5dfe2a5d4f1e75"
+    },
+    {
+      "path": "services/api/quantum_agent/coding/__init__.py",
+      "sha256": "8323969ccfd0d12ba31e30580d7fd87c9a43d87713eaaf35d985407ef1fb35fe"
+    },
+    {
+      "path": "services/api/quantum_agent/coding/agent.py",
+      "sha256": "f685d5afa38e5e1f418208a906bf617a9b2e634388e7aeda40e3a9cda7b6adf8"
+    },
+    {
+      "path": "services/api/quantum_agent/coding/models.py",
+      "sha256": "0c1a9b93497ba3b92d31ba7ec8f9619ab3ca255289a8bc678385ac8576d18e14"
+    },
+    {
+      "path": "services/api/quantum_agent/coding/safety.py",
+      "sha256": "be81b1f94d3bcf416d23a27f9ecf699e33de65ffcf0f83e01a4aae6b7b549dc7"
+    },
+    {
+      "path": "services/api/quantum_agent/coding/sandbox.py",
+      "sha256": "7a603f80ab124cd086ee474f8372aadb37b190935781f94a6b337e260ea84045"
+    },
+    {
+      "path": "services/api/quantum_agent/config.py",
+      "sha256": "db39c29dd122628ec2a0a8cc081131244d408c1f877499d4bd4ebfdb07384611"
+    },
+    {
+      "path": "services/api/quantum_agent/credential_router.py",
+      "sha256": "d81ae829c67b39c6b5152feef5340b7efea487f47b32f83dcaf572d16f3daecb"
+    },
+    {
+      "path": "services/api/quantum_agent/credential_vault.py",
+      "sha256": "e22e589928fee38975505efb840497edcf82ae9b7cd77835dca819f6467c61d9"
+    },
+    {
+      "path": "services/api/quantum_agent/database.py",
+      "sha256": "b709b3c377e05d09d03837565d91f085a12671a82b3901cf2eecdbe96bae07e3"
+    },
+    {
+      "path": "services/api/quantum_agent/db_models.py",
+      "sha256": "e53004a74af5bba082485382dce784b99ee6937dfd30a3b754a9fc9d76d33ba2"
+    },
+    {
+      "path": "services/api/quantum_agent/evaluation/__init__.py",
+      "sha256": "a4da920a824297dd3fa7a60ac07998dd1c5fabfe5624724ca169efd4519ff61f"
+    },
+    {
+      "path": "services/api/quantum_agent/evaluation/__main__.py",
+      "sha256": "ca9474276af4bcf12d8c8c5b203f24114bb527750c4fe090ea7359d8e53b3b0f"
+    },
+    {
+      "path": "services/api/quantum_agent/evaluation/fixtures.py",
+      "sha256": "b7df32b6a55960ab8da7cc53b34e02acd116b7d2b43d5be51069d9b07fda38c2"
+    },
+    {
+      "path": "services/api/quantum_agent/evaluation/metrics.py",
+      "sha256": "6ee45e96eab12362fbc4ebe060bacccab276d6aae8b80ea709ec7398c80b0d26"
+    },
+    {
+      "path": "services/api/quantum_agent/evaluation/models.py",
+      "sha256": "ba7450f7c30b5ef6cf129321a200df6dc11140c55f4f9494968bcab4ab3710ac"
+    },
+    {
+      "path": "services/api/quantum_agent/evaluation/runner.py",
+      "sha256": "e548595eb13d843adbfd8c68659decb7b13c9e5b5fe2748f2765114e12497819"
+    },
+    {
+      "path": "services/api/quantum_agent/gateways.py",
+      "sha256": "a9b2684dd0ded67810a320626fdf11e7932bab38f1ae02fd9ffd56cf309729f4"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/barrier_scope.py",
+      "sha256": "f22d5e01e13d07731700f6f4b32825998c621c40d8fb7464aecfbf704a396bb6"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/evidence_packets.py",
+      "sha256": "fa3c00168f7923f20628d9091689712fe54a08fca3d6ce3066b892df6c5b2317"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/explorer.py",
+      "sha256": "473b88c4e5b82d5dcbfac6a5d98c89e2ad4bccc4467a6db15f92d2484f333d42"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/extraction.py",
+      "sha256": "56e80e27428da06576e67fd188a9a45ae3b4d44c3125a654b977fb1756484f58"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/fusion.py",
+      "sha256": "89651cba2cde96cbbb11ca6dccbec0ebd81f014dee0bc4214e5d6c419713bdbf"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/graph_store.py",
+      "sha256": "6849d2185d6b9b5c2d02f0a75cad08c708a8ba57a184b5feb54df467139731ed"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/graph_sync.py",
+      "sha256": "6711f3dc71f46f4ff562c2900147f495328512a28d392b262fb15b6b46fc0e87"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/ingestion.py",
+      "sha256": "1d5dbd2e7989c8c156edff31a68f0ff7afb91799215d2227dcce3ffcb230f0bb"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/ontology.py",
+      "sha256": "13e6883579dd21aa12ee1f9bce506aa3fb66fdbd6e4debaf3c073c9ebbd20c1e"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/pedagogical_import.py",
+      "sha256": "7edb6748bc23ba136a3a3b6de06bf3b0f2e5fb8623d01ac50e56575845775c08"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/pipeline.py",
+      "sha256": "8bee46deb61ef955199cc99960f14f2d14b67554e2e716b4cb844ab518cdc4c2"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/retrieval.py",
+      "sha256": "0761805c56216a6372d68ff35b300fb281cd71a42bc470921093002e68ca97dd"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/review.py",
+      "sha256": "be43a555dc45e8acb9522287f30e51b5ca5d33169985817715b5e9aafec091b5"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/source_manifest.py",
+      "sha256": "4557720f7667231d1037d42684895e9b8946dc5117de664cebefb5d886f602a8"
+    },
+    {
+      "path": "services/api/quantum_agent/knowledge/structural_import.py",
+      "sha256": "b0ff380f8c65855c301c35652b6d8d669beeb65940f0847b34c52202690fe4bd"
+    },
+    {
+      "path": "services/api/quantum_agent/llm/__init__.py",
+      "sha256": "9b4b123a5d37e3bd65df681858f4e419d06f1c8683a9eca1ed4d61741bfe4c3c"
+    },
+    {
+      "path": "services/api/quantum_agent/llm/embeddings.py",
+      "sha256": "186ef1e43223bc660bfa23367ec0eeb755416b5de9704d2f240ae5cc6435572d"
+    },
+    {
+      "path": "services/api/quantum_agent/llm/gateway.py",
+      "sha256": "e7bc911fbb09612f18a8de654402ebfeef6952dd4ce99e19ee266fe41d5af049"
+    },
+    {
+      "path": "services/api/quantum_agent/llm/observability.py",
+      "sha256": "ccc13a9a8203711139ee52534b7744726ee1c198a2157b6930543e16f3f95043"
+    },
+    {
+      "path": "services/api/quantum_agent/llm/recording_budget.py",
+      "sha256": "b148c974410a129a8aa185c85d17ccc8c59e43d8af8dd23c23ddebae25939992"
+    },
+    {
+      "path": "services/api/quantum_agent/llm/routing.py",
+      "sha256": "4e8c24a954d140a4292263525518207863873de343747297f3043aad6affb5f3"
+    },
+    {
+      "path": "services/api/quantum_agent/llm/vision.py",
+      "sha256": "e371cff7ca7c559a1b797109b0e406ee98c6946ecdcfe72e44d43f67d4eb8673"
+    },
+    {
+      "path": "services/api/quantum_agent/main.py",
+      "sha256": "28315bfc17a9dfc1d149c2a3ecb61ef94b38b191e544805ffc7c9ec958a63803"
+    },
+    {
+      "path": "services/api/quantum_agent/multimodal/__init__.py",
+      "sha256": "50f8e0f937f7c0e589fda5a00193131ee50a988dbdff5208f01688252082d626"
+    },
+    {
+      "path": "services/api/quantum_agent/multimodal/contracts.py",
+      "sha256": "16358eb220770163c8ebaa7fec1c11aa147bcbb8fc2ac1789d8223c7462f65e6"
+    },
+    {
+      "path": "services/api/quantum_agent/multimodal/document_capabilities.py",
+      "sha256": "b06fe1ecb26cb5374dce63a3cbc2509c37f41abbc312e72f4337beee2a19e5cf"
+    },
+    {
+      "path": "services/api/quantum_agent/multimodal/documents.py",
+      "sha256": "f7d6f76a0823f3e68fb380b93129e1a425699f8ec9f3f8a9f0dcbc9d1bdf091f"
+    },
+    {
+      "path": "services/api/quantum_agent/multimodal/perception.py",
+      "sha256": "a83681484f6cc01a27e75a5a7916dba68e96c681d587f6fe502ba496c0c693b6"
+    },
+    {
+      "path": "services/api/quantum_agent/multimodal/runtime.py",
+      "sha256": "0a239ce06630cf75af2da94ed8b7f4aad66bdc6927371754ebfca7d64fd05768"
+    },
+    {
+      "path": "services/api/quantum_agent/multimodal/security.py",
+      "sha256": "3ddba74734383ae9e7c103901037f293ac421edbc53fea177102d29583b46237"
+    },
+    {
+      "path": "services/api/quantum_agent/multimodal/storage.py",
+      "sha256": "5e3b02a0a177cb0a938529ebd9536c5dca289ad5c2c2ccf03708b0207ded1435"
+    },
+    {
+      "path": "services/api/quantum_agent/multimodal/teaching.py",
+      "sha256": "94bd474a2c45e8939550406dc16f25d1b08db8f66332eb5d1a361e19d353f035"
+    },
+    {
+      "path": "services/api/quantum_agent/sandbox_runner.py",
+      "sha256": "9e3b91b731644c94407a00bd35a3f79b1d5cb9ff402f74af98c13400d8e3cdad"
+    },
+    {
+      "path": "services/api/quantum_agent/science/__init__.py",
+      "sha256": "10bf75d95eeddac9e720614e5c10e4f7ae8498399b647f88005109e69ae2860d"
+    },
+    {
+      "path": "services/api/quantum_agent/science/barrier_reference.py",
+      "sha256": "176308fba41bcd97baef4feb34f217ee9bc33c180712feca81a5275bc1a621f2"
+    },
+    {
+      "path": "services/api/quantum_agent/science/models.py",
+      "sha256": "b0205c43f66b497cd7d890a814d3890fc9115489ee43b5d661b6ffaa7fbd26d2"
+    },
+    {
+      "path": "services/api/quantum_agent/science/toolbox.py",
+      "sha256": "432718f10787fbd05f54346b666d58d14a15c8a8c848b767d238bb05c33a3247"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/__init__.py",
+      "sha256": "860ac6febe2fd41ca020037b6a6496ca36c14b974ae8b56ee6ceb0b8fab1ea2c"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/access.py",
+      "sha256": "15f48a5c1039a62cd7781cef0b11ae2360dc5f7a06c35dc83ba2f87cc633d6f4"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/agents.py",
+      "sha256": "df2c47a0c6d47202a67173bced5a0c2f428d9197171d687c845daf8d871cd140"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/barrier_trend.py",
+      "sha256": "625dc636f22889b9721945a7d84608608856e8ac9548b201150651fc6be07949"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/course_packages.py",
+      "sha256": "88c830c1234e5661b11e836f53c127d66051ff7cbf0ae2f9325bc7b73596deba"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/derivation.py",
+      "sha256": "706e8d82ef2a6e9ed461d4e041707f39622ad4587f0a45ee48930b195d643dd6"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/hitl.py",
+      "sha256": "0d196343027a4d734f3ef06bc285f9aad41d428105d6f8af1b92597bec769755"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/learning_native.py",
+      "sha256": "c1c5c1a4a6978cb9954b9ee4b3d110f33c6b1aa0468b14be63d0e1afc5e8a5ce"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/models.py",
+      "sha256": "7db4410d51dfc8fae7e6c960d46f230eed14b6688c0c1a34b043088096c59f99"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/policy.py",
+      "sha256": "c7d342b345048854622f81ffe61c80f472afec83147e3c987b84fbf1ba5d74fa"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/repository.py",
+      "sha256": "7d4ceb9314ee270dc71cb95304ee34dd37baf3f256858420e5435e5b8beeff02"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/reviews.py",
+      "sha256": "da7e732e916802b66c2814c9678545a8b3d64e26c6e4137929493df9fcdc799c"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/solo_visibility.py",
+      "sha256": "ff5dc504b8f17abd69c24937da0847e4251c4755cd55cee69f30d7d6076817da"
+    },
+    {
+      "path": "services/api/quantum_agent/teaching/state_machine.py",
+      "sha256": "cd3ababc127c10ff3317018c89935925e7f8ab21284fa8c4f6912d5fdcc2548c"
+    },
+    {
+      "path": "services/api/quantum_agent/tutor/graph.py",
+      "sha256": "402c5b1712211740573b560242a14d8da852cea7849709fba587d985b0c94fcd"
+    },
+    {
+      "path": "services/api/quantum_agent/tutor/nodes.py",
+      "sha256": "564758cdbc7e2a19a49b641a3f9a50d1796aa3a7a4801930b2f8640d7cff91f2"
+    },
+    {
+      "path": "services/api/quantum_agent/tutor/state.py",
+      "sha256": "c14093f0ef2bf42f92f95e0d76a9beb74274a16b22194f412bdf4509a1e81539"
+    },
+    {
+      "path": "services/api/quantum_agent/versioning.py",
+      "sha256": "b7215bb8cbdf20bd196abf3c2aa6638f683f04345eb689846a2899f51d1913b4"
+    },
+    {
+      "path": "services/api/tests/__init__.py",
+      "sha256": "375bc4e5688bad62ea05d17fa888f8f200be56428799d63776fc5d489d2e8a13"
+    },
+    {
+      "path": "services/api/tests/live/test_live_multimodal_workflow.py",
+      "sha256": "099033421e6fe8d7fc5550eef88babea4d8b9e4b9f581031483b2a6f232ecce7"
+    },
+    {
+      "path": "services/api/tests/live/test_live_stack.py",
+      "sha256": "0f5e4dd5e3853e589281cfd28f9f110ad02f4c54c0f78b6e7546ccff50606f1e"
+    },
+    {
+      "path": "services/api/tests/real_course_support.py",
+      "sha256": "ef9504a3fb54a10cc570891093aea618897c31472145fae4802a31205052b1b6"
+    },
+    {
+      "path": "services/api/tests/test_attachments_api.py",
+      "sha256": "348518c639ba267385d0304515d21c13ce9f41d041bdcd1412c22f10235453c0"
+    },
+    {
+      "path": "services/api/tests/test_auth.py",
+      "sha256": "8dbfb47ffbdfc048d546cc696debcc81906e94ee69e9880b7feb60e9d7b70796"
+    },
+    {
+      "path": "services/api/tests/test_auth_login.py",
+      "sha256": "7cac772790eb31b636ebebbca5dfd067841b508534220cb7c5251862d37c54fd"
+    },
+    {
+      "path": "services/api/tests/test_barrier_patch.py",
+      "sha256": "c67761a109f9372d23ce7fce9ad79d04a2b2251e1c6482c916b67fb3ac82a3fc"
+    },
+    {
+      "path": "services/api/tests/test_barrier_trend.py",
+      "sha256": "a7884010c214768cf0b56a99124f02554ec2235e18a8b2002564f56f756cf636"
+    },
+    {
+      "path": "services/api/tests/test_barrier_validation_regressions.py",
+      "sha256": "f8ef6c4658c7f97120c8d172f2695eb79c9e4f4c72dcdf583f0d5891d5bbbd50"
+    },
+    {
+      "path": "services/api/tests/test_classroom_auth.py",
+      "sha256": "5e86ba4a1a83dd07939ae349f1fa38f740e6f21feb7efe6ec76390958604713f"
+    },
+    {
+      "path": "services/api/tests/test_classroom_packages_and_reviews.py",
+      "sha256": "7db5f3f59d0d2dbac58bd11c44e914b470f4a4304e5659e0a241195eed66b695"
+    },
+    {
+      "path": "services/api/tests/test_cli.py",
+      "sha256": "51de63c7a2f34b98cad5981db82434e8216dffd3d92bfb5a32b35aaaa8a4ab98"
+    },
+    {
+      "path": "services/api/tests/test_cli_live_e2e.py",
+      "sha256": "308c1b741fe3c5b50199c45cad0f64d346c557d2c0f41101ee498569ef8cb183"
+    },
+    {
+      "path": "services/api/tests/test_coding_agent.py",
+      "sha256": "d8910c848351c725759dbbcfc242cdb2eaa3783f2fb656750946708d12f476c3"
+    },
+    {
+      "path": "services/api/tests/test_coding_sandbox.py",
+      "sha256": "79263c72de78378642b535236c941930e8c100b9fc9e1c2ffd56920d6df37f78"
+    },
+    {
+      "path": "services/api/tests/test_contract_v34.py",
+      "sha256": "efbd03f45e9825db48d4970544b4dcbcdf39ac91216d12d91ad27982ed02549e"
+    },
+    {
+      "path": "services/api/tests/test_credential_vault.py",
+      "sha256": "d117ef5e127b3cf8e7f3391770f1abdb64226f7872283f80a1d38e723a45d807"
+    },
+    {
+      "path": "services/api/tests/test_db_models.py",
+      "sha256": "16e998dfba241dd72f9bab40c524899032c942e9382bf2a42430f25048ef1db0"
+    },
+    {
+      "path": "services/api/tests/test_derivation_bridge.py",
+      "sha256": "50beee502c625f60447d0e19f6153c834c0f31e544f0efddc27c89ba1adde62e"
+    },
+    {
+      "path": "services/api/tests/test_evaluation_metrics.py",
+      "sha256": "24002c42934a358fde7f85cbb3e577e39951da9d47a5fdd2039ba0e1162fa064"
+    },
+    {
+      "path": "services/api/tests/test_evaluation_runner.py",
+      "sha256": "6c6604abe874ed66093af134a3fc848a9ddc0162fef04782b33744dfc375c2ad"
+    },
+    {
+      "path": "services/api/tests/test_evidence_packets.py",
+      "sha256": "eee2f9ad0882ab2dc79e6b391d2de62b0316ca75875006c318eb59997c487b4a"
+    },
+    {
+      "path": "services/api/tests/test_explorer.py",
+      "sha256": "473e5fce5775df380b9d464f1f0d198c3d52359b845e988b45a69f821d1516ed"
+    },
+    {
+      "path": "services/api/tests/test_extraction.py",
+      "sha256": "bfdefd5860940953f7befc59b12bc005dd229cabb3cdadc3cbb650f8497acd9d"
+    },
+    {
+      "path": "services/api/tests/test_final_case.py",
+      "sha256": "dca081f07ee825baeed955f9765583b6e5bb73374b947b08a21ceaef7380a837"
+    },
+    {
+      "path": "services/api/tests/test_fusion.py",
+      "sha256": "e8ac7bc3ed7cb049cd166f561d085745bd0e266b34bf8c8e50a5ab4e13239507"
+    },
+    {
+      "path": "services/api/tests/test_gateways.py",
+      "sha256": "5f92cccd67dc6dc61629a0c443f8ba241b1fd49b741c2b01afbbaf608f1a7528"
+    },
+    {
+      "path": "services/api/tests/test_golden_loop_phase_sequence.py",
+      "sha256": "83d99fd51950e98fde57aa328ede1b01b23e4f1b2c61ce0eb3b3185d19bf2a19"
+    },
+    {
+      "path": "services/api/tests/test_graph_api.py",
+      "sha256": "311e7e7dc886e8ead824a822fa5920e56c1558128123f699982c68135553c2df"
+    },
+    {
+      "path": "services/api/tests/test_graph_store.py",
+      "sha256": "b3b947edc10f94e3843522fb38983d6e35466977e3c181ae48c6fc4e6771617c"
+    },
+    {
+      "path": "services/api/tests/test_graph_sync.py",
+      "sha256": "cdb95a5ee753cd48c21228f70225111bdcc171d47182ed5c4aa9dc00cdf52557"
+    },
+    {
+      "path": "services/api/tests/test_hitl_verification_scope.py",
+      "sha256": "8fc8f51032a5b25b276ad87f9cf6c5c912217f40a7ac60fb39d0bb84289c9fdf"
+    },
+    {
+      "path": "services/api/tests/test_ingestion.py",
+      "sha256": "7d8d2398761ba5e66d784d7676818aa409d29bec5f55c46dbb546e36246a0a63"
+    },
+    {
+      "path": "services/api/tests/test_ingestion_real_materials.py",
+      "sha256": "6035f6ed803e90e68310379f3e2fdadae91df2d97cd707782df99155660374c5"
+    },
+    {
+      "path": "services/api/tests/test_knowledge_pipeline.py",
+      "sha256": "8166d1ec6d25e0304d026fe6f9adf4a6d95b24f4d0cc1a59c01f9198b8ed1ae3"
+    },
+    {
+      "path": "services/api/tests/test_learning_native.py",
+      "sha256": "6166fdfbc3e1dc1c515cd46df9f2b47550d3159ba7acf09ff4f8cb15aa18fbae"
+    },
+    {
+      "path": "services/api/tests/test_learning_records_export.py",
+      "sha256": "6d3f1c2969b3851970d1a516134eccaafcff9189dc3e757f7c2fda59b891c17b"
+    },
+    {
+      "path": "services/api/tests/test_llm_gateway.py",
+      "sha256": "ae3f7366323144b451f9f2abbfbe59adda17ca9dbb6feaf16103ce094866f474"
+    },
+    {
+      "path": "services/api/tests/test_model_routing.py",
+      "sha256": "6630a83bb3ebbe5168e2720d1ce7351de3f3b9e4388092f647160cc715c7f210"
+    },
+    {
+      "path": "services/api/tests/test_multimodal_derivation_normalization.py",
+      "sha256": "4adcb51531202233f839aff2d72acca564db63fa5af6462b5f9914f16bde9489"
+    },
+    {
+      "path": "services/api/tests/test_multimodal_documents.py",
+      "sha256": "1c1c6e382e54c1b66ff985056ab679e298b2a2f65126385d64e730bbf07078fd"
+    },
+    {
+      "path": "services/api/tests/test_multimodal_migration.py",
+      "sha256": "782aa5a54becf5b7bb0c0dd640de0829c36bdb62cbea6337ccaec47d886224bd"
+    },
+    {
+      "path": "services/api/tests/test_multimodal_perception.py",
+      "sha256": "1b7e4f6dbe6239be9e29a2ae1fb7fbbc9fc40d95d7c38f7389ac12bce9025110"
+    },
+    {
+      "path": "services/api/tests/test_multimodal_security.py",
+      "sha256": "86de4c94579cd54d2a51c5ce9bcb4a3f555b3d1e743408bdcdb661b4d198cc74"
+    },
+    {
+      "path": "services/api/tests/test_narrative_course.py",
+      "sha256": "1c46a6064ed59dc0cd81e4191b3989d28eb6c69a12b020a035a01fdb955a4890"
+    },
+    {
+      "path": "services/api/tests/test_ocr.py",
+      "sha256": "40fa0f98338d224c70077e605b0e7bd8762fac1c06e8958f14dd2bef4afd8347"
+    },
+    {
+      "path": "services/api/tests/test_ontology.py",
+      "sha256": "ba2e0c26c3a72a76fac234d0cbb434fb01e5c80c5387c296ae32db7434823dc9"
+    },
+    {
+      "path": "services/api/tests/test_pedagogical_import.py",
+      "sha256": "c960beabee316e3e98dd75c90f6960edefc78e02b7edbd9d5443a65faea763e6"
+    },
+    {
+      "path": "services/api/tests/test_phase1_real_e2e.py",
+      "sha256": "dabcf6ece89b856da8a72c4bad039a73effbe08459f8d0b34f43a521a6927694"
+    },
+    {
+      "path": "services/api/tests/test_phase2_real_e2e.py",
+      "sha256": "b844b1534a023a0d178179d338a7277a80972fa5fd1543428f5087b53fcbc4b7"
+    },
+    {
+      "path": "services/api/tests/test_pipeline_safety.py",
+      "sha256": "82429731797a4e2a49a8758fa78f480eb1530ffe333296a9d90338c9d42e9f98"
+    },
+    {
+      "path": "services/api/tests/test_retrieval.py",
+      "sha256": "bf8836a4d165bc4dec9087496f45ceef954fef514e64f1bbe7d4b68d0e9714b9"
+    },
+    {
+      "path": "services/api/tests/test_review.py",
+      "sha256": "901d29668a404929b2af13649ddd9f9583e5e1ceb7e839ae765fc9a9aed8671d"
+    },
+    {
+      "path": "services/api/tests/test_sandbox_platform.py",
+      "sha256": "b58ff630f3d53caddf0c195495fcfe0af7fcf1ded9a93ce7719ec2c2964c8370"
+    },
+    {
+      "path": "services/api/tests/test_scientific_render_cache.py",
+      "sha256": "6807b2f8ad358c0c042b202c6a65e4e639d0e0390795c982432a0cfd87b5fa2b"
+    },
+    {
+      "path": "services/api/tests/test_scientific_tools.py",
+      "sha256": "c538d0bf6f084d4bf7450b21b383462fcff2991ee4c22e43c5b97f7807efb3e7"
+    },
+    {
+      "path": "services/api/tests/test_solo_scope_access.py",
+      "sha256": "ebaa5a0db9edab11f08d6d6d2ef939a1e04e723876309c1ee0eb9e0c287bae87"
+    },
+    {
+      "path": "services/api/tests/test_source_manifest.py",
+      "sha256": "844f11e58581cd798ac6c14e31e96e51acd9a39deb45ef347cabd91ad475eb32"
+    },
+    {
+      "path": "services/api/tests/test_specialist_agents.py",
+      "sha256": "5f05e0d73d45bfeef60ed1dcff669c1e5c28cf1e585036fa8f15be1a21014c6c"
+    },
+    {
+      "path": "services/api/tests/test_teachback_current_position.py",
+      "sha256": "87d0efbff98c17edeaa0f3927e2e1e370ff0c5567630ace57f91041f79e43805"
+    },
+    {
+      "path": "services/api/tests/test_teaching_api.py",
+      "sha256": "fdf758642ebdac004063ecbaf9bcc1f4f46ac2dd7258f1b41d9c882a0a823c9d"
+    },
+    {
+      "path": "services/api/tests/test_teaching_state_machine.py",
+      "sha256": "0d674065e2b2ed9d69e9d21eef3e90a6ba9dd01f630dbe0375098a3ec6fa5b8a"
+    },
+    {
+      "path": "services/api/tests/test_text_model_override.py",
+      "sha256": "1e2499f75a2cd78a31d6f3cf04924ec77ba3563e68cf8d30fe4358daa2c55af1"
+    },
+    {
+      "path": "services/api/tests/test_tutor_coding_node.py",
+      "sha256": "73f84207c2376774ed074c462af96459038396b298695c7a3f4c684226b79b54"
+    },
+    {
+      "path": "services/api/tests/test_tutor_graph.py",
+      "sha256": "15f442eed717aeccb373a05daed62377f234ea19d659574ade973a96d6e7e265"
+    },
+    {
+      "path": "services/api/tests/test_version_provenance.py",
+      "sha256": "8acbf158ce53cb3f80a7729306edb4760a9c8b6d463d68cba851a9257fb5efa2"
+    },
+    {
+      "path": "services/api/tests/test_video_barrier_reference.py",
+      "sha256": "5cc25f353786f538ba3a88b802dc619561751dc5e0b6a954ec82e85c36dd4d23"
+    },
+    {
+      "path": "services/api/uv.lock",
+      "sha256": "63bbaff2efc5c2b3154b0d4bc6f924c47f23b3ea3347d2d142089156b1352759"
+    },
+    {
+      "path": "tests/backend.test.ts",
+      "sha256": "78c226a7f8ecdd475d1541fa7286565ed40693f07f58c1156d328317233f275c"
+    },
+    {
+      "path": "tests/barrier-presentation.test.ts",
+      "sha256": "429d6fdbfeaa3f9714d7c35394ae915cbcdf89c76ea31ecc32b9e671b6cb4256"
+    },
+    {
+      "path": "tests/check-secrets.test.mjs",
+      "sha256": "74aec164acfe6ccb26f3d1340d924693d791593e96bce16d13365918f34cd1ae"
+    },
+    {
+      "path": "tests/classroom-login-rate.test.ts",
+      "sha256": "d155258929a3f79d535ffdbae2a9833ad216f8f07b388d7052da4f090170d987"
+    },
+    {
+      "path": "tests/e2e/golden-loop.spec.ts",
+      "sha256": "c260c795d2c22d036ae0f50845a502e889232fa4ca64cc966fbe00c9f49cf49b"
+    },
+    {
+      "path": "tests/e2e/learning-native.spec.ts",
+      "sha256": "b4ada6eb89ff6645c4da07f07bbdd2c07c3d894a9e18de3469448c5846113f6a"
+    },
+    {
+      "path": "tests/e2e/live/agent-live.spec.ts",
+      "sha256": "a1f2e4da40f724d659c11c7b978eef104fadae5f534e4e430855bdda3b34ffdd"
+    },
+    {
+      "path": "tests/e2e/live/golden-loop-deterministic.spec.ts",
+      "sha256": "12b3880198711ac0c281ac0c615f42902f3f81efa576b3ecffd4d0e80a56b47a"
+    },
+    {
+      "path": "tests/e2e/live/golden-loop-live.spec.ts",
+      "sha256": "d96133d395cf0deae6ca0b5f4b32a8e65c36e1542d951361cd946e0d39df12b2"
+    },
+    {
+      "path": "tests/e2e/live/video-parity-full.spec.ts",
+      "sha256": "07d5d8c3c74b83a81a1fcd1e871ab5e7518510b3366efd033d10e30426a53c4c"
+    },
+    {
+      "path": "tests/e2e/live/video-parity-layout.spec.ts",
+      "sha256": "71b56b0504531267625fb96d80a670ba6420bf712a8eaca1926791fa74d24ec4"
+    },
+    {
+      "path": "tests/e2e/live/visual-qa.spec.ts",
+      "sha256": "3408759ecef015704bf689cb9db803b42e915d3b69d8e53cbd5b200e853cab00"
+    },
+    {
+      "path": "tests/golden/eval.json",
+      "sha256": "cf03f394fb6f3fed59315d31aed91c205ee061c19e0b7bf7eec6e653d6a59ca4"
+    },
+    {
+      "path": "tests/golden/eval.test.ts",
+      "sha256": "52f4ff25fee8cdd29f708bd04c62e516edc2d4473cc0ebc2a76e2996e4811045"
+    },
+    {
+      "path": "tests/rendered-html.test.mjs",
+      "sha256": "2a65cb8f5fb5b11cce2f0d8b2d65580dbe80d222d26571d88c1d1697799ab6c6"
+    },
+    {
+      "path": "tests/validators-citations-auth.test.ts",
+      "sha256": "b2159eeaa41aaaafe1427eede6f89bccea869d989bff068b59a9d6f318255ed3"
+    },
+    {
+      "path": "tests/video-parity-acceptance.test.mjs",
+      "sha256": "09c8bf0dc615c8a6536703546b4ce2bd1521e8c2836416589c63105b83787a45"
+    },
+    {
+      "path": "vite.config.ts",
+      "sha256": "fac5d92d3f5fe6952af89adfc0ac8b7d8a00a1172f295ccc56c18cfad5874133"
+    },
+    {
+      "path": "worker/index.ts",
+      "sha256": "2214903a741fbdf463fe5be3972f10e419d3744d4cd6c0e8bd38f3a481b26927"
+    }
+  ]
+}

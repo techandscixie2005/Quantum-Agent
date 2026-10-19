@@ -268,6 +268,15 @@ test("request boundary accepts only bounded, typed scientific input", () => {
   );
 });
 
+test("Solo request preserves task correlation and rejects malformed task IDs", () => {
+  const request = { conversation_id: null, mode: "run_experiments", message: "独立作答",
+    student_attempt: null, scientific_request: null,
+    learning_native: { solo_attempt: { transfer_task_id: TURN_ID, response: "T=0", confidence: 0.5 } } };
+  assert.equal(parseTeachingTurnRequest(request).learning_native?.solo_attempt?.transfer_task_id, TURN_ID);
+  assert.throws(() => parseTeachingTurnRequest({ ...request,
+    learning_native: { solo_attempt: { ...request.learning_native.solo_attempt, transfer_task_id: "wrong" } } }));
+});
+
 test("request boundary preserves at most eight unique attachment ids", () => {
   const request = parseTeachingTurnRequest({
     conversation_id: null,
@@ -661,4 +670,28 @@ test("preserves a failed calculation with valid empty repair stderr", () => {
   assert.equal(parsed.code_artifact?.repairs[0]?.stderr_excerpt, "");
   raw.code_artifact = { artifact: { code: 7 } };
   assert.throws(() => parseTeachingTurnResult(raw), /计算产物不符合后端合同/);
+});
+
+test("retains independent submission and numeric evidence without inventing mastery", () => {
+  const raw = validResult();
+  const assessment = {
+    valid_independent_submission: true,
+    numeric_correctness: "correct",
+    explanation_assessment: "not_assessed",
+    mastery_status: "not_assessed",
+    basis: ["Locked first submission; numerical check only"],
+  };
+  raw.learning_native = {
+    commitment: null, learning_action: null, teach_back: null, transfer: null,
+    solo: null, cognitive_mirror: null, minimal_intervention_prompt: "",
+    evidence_persisted: [], phase: "complete", current_stage: "solo",
+    completed_stages: ["solo"], required_action: "none", loop_required: true,
+    assessment_evidence: assessment,
+  };
+  const result = parseTeachingTurnResult(raw);
+  assert.equal(result.learning_native?.assessment_evidence?.valid_independent_submission, true);
+  assert.equal(result.learning_native?.assessment_evidence?.numeric_correctness, "correct");
+  assert.equal(result.learning_native?.assessment_evidence?.mastery_status, "not_assessed");
+  assessment.mastery_status = "demonstrated";
+  assert.throws(() => parseTeachingTurnResult(raw), /mastery_status/);
 });

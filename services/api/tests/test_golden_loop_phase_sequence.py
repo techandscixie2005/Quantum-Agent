@@ -175,6 +175,9 @@ async def _seed_actor(session: AsyncSession) -> _Seed:
     return _Seed(actor=actor, edition_id=edition.id)
 
 
+_FIXTURE_SOLO_TASK_ID = UUID("7fd4d63a-1aeb-49af-b179-d95c789c1ab1")
+
+
 async def _seed_conversation(
     session: AsyncSession,
     seed: _Seed,
@@ -184,6 +187,8 @@ async def _seed_conversation(
     mode: TeachingMode = TeachingMode.LEARN_CONCEPTS,
 ) -> UUID:
     learning_phase_json: dict[str, object] = {"phase": phase}
+    if phase == "solo_active":
+        learning_phase_json["active_transfer_task_id"] = str(_FIXTURE_SOLO_TASK_ID)
     if extra_phase is not None:
         learning_phase_json.update(extra_phase)
     conversation = TeachingConversation(
@@ -792,6 +797,7 @@ class TestGoldenLoopAntiSkip:
             conversation_id=conversation_id,
             learning_native=LearningNativeSubmission(
                 solo_attempt=SoloAttemptSubmission(
+                    transfer_task_id=_FIXTURE_SOLO_TASK_ID,
                     response="透射率随势垒宽度增加而指数下降。",
                     confidence=0.3,
                 )
@@ -842,6 +848,7 @@ class TestGoldenLoopAntiSkip:
             conversation_id=conversation_id,
             learning_native=LearningNativeSubmission(
                 solo_attempt=SoloAttemptSubmission(
+                    transfer_task_id=_FIXTURE_SOLO_TASK_ID,
                     response="透射率 T ≈ 0.001。",
                     confidence=0.5,
                 )
@@ -962,6 +969,7 @@ class TestGoldenLoopAntiSkip:
             conversation_id=conversation_id,
             learning_native=LearningNativeSubmission(
                 solo_attempt=SoloAttemptSubmission(
+                    transfer_task_id=_FIXTURE_SOLO_TASK_ID,
                     response="透射率 T = 0.9",
                     confidence=0.5,
                 )
@@ -984,6 +992,7 @@ class TestGoldenLoopAntiSkip:
             update={
                 "learning_native": LearningNativeSubmission(
                     solo_attempt=SoloAttemptSubmission(
+                        transfer_task_id=_FIXTURE_SOLO_TASK_ID,
                         response=f"透射率 T = {expected_t!r}",
                         confidence=0.8,
                     )
@@ -1053,6 +1062,7 @@ class TestGoldenLoopAntiSkip:
             conversation_id=conversation_id,
             learning_native=LearningNativeSubmission(
                 solo_attempt=SoloAttemptSubmission(
+                    transfer_task_id=_FIXTURE_SOLO_TASK_ID,
                     response=f"透射率 T = {expected_t!r}",
                     confidence=0.8,
                 )
@@ -1380,6 +1390,7 @@ class TestGoldenLoopAntiSkip:
             conversation_id=conversation_id,
             learning_native=LearningNativeSubmission(
                 solo_attempt=SoloAttemptSubmission(
+                    transfer_task_id=_FIXTURE_SOLO_TASK_ID,
                     response="透射率 T = 0.9",
                     confidence=0.6,
                 )
@@ -1396,11 +1407,9 @@ class TestGoldenLoopAntiSkip:
             await session.commit()
         assert result.learning_native is not None
         assert result.learning_native.phase is LearningPhase.SOLO_ACTIVE
-        assert result.scientific_results, "the solo oracle must still run"
-        for item in result.scientific_results:
-            assert item.status is ScientificVerificationStatus.PASS
-            assert item.metrics == {}, "oracle metrics must be redacted pre-verification"
-            assert item.visualization is None
+        tool_step = next(step for step in result.trace if step.name.value == "run_scientific_tools")
+        assert tool_step.status.value == "completed", "the solo oracle must still run"
+        assert result.scientific_results == [], "active Solo never exposes reference results"
 
     async def test_solo_turn_never_leaks_coding_agent_oracle_metrics(
         self,
@@ -1465,6 +1474,7 @@ class TestGoldenLoopAntiSkip:
             conversation_id=conversation_id,
             learning_native=LearningNativeSubmission(
                 solo_attempt=SoloAttemptSubmission(
+                    transfer_task_id=_FIXTURE_SOLO_TASK_ID,
                     response="透射率 T = 0.9",
                     confidence=0.6,
                 )
@@ -1486,7 +1496,9 @@ class TestGoldenLoopAntiSkip:
         assert result.learning_native is not None
         assert result.learning_native.phase is LearningPhase.SOLO_ACTIVE
         # Deterministic oracle ran; a (failing) coding artifact must NOT exist.
-        assert result.scientific_results, "the solo oracle must still run"
+        tool_step = next(step for step in result.trace if step.name.value == "run_scientific_tools")
+        assert tool_step.status.value == "completed", "the solo oracle must still run"
+        assert result.scientific_results == [], "active Solo never exposes reference results"
         assert result.code_artifact is None, (
             "the Coding Agent must not run during Solo verification: its "
             "oracle_metrics would leak the correct answer before the student "
@@ -1583,6 +1595,7 @@ class TestGoldenLoopAntiSkip:
             conversation_id=conversation_id,
             learning_native=LearningNativeSubmission(
                 solo_attempt=SoloAttemptSubmission(
+                    transfer_task_id=_FIXTURE_SOLO_TASK_ID,
                     response="T ≈ 0.001",
                     confidence=0.9,
                 )
@@ -2098,10 +2111,12 @@ async def test_episode_student_artefacts_survive_complete_and_idempotent_retry(
         with pytest.raises(HitlConflictError, match="Solo locks historical"):
             await graph.run(session=session, actor=seed.actor,
                             curriculum_edition_id=seed.edition_id, request=previous_request)
+    assert armed.learning_native.transfer is not None
     complete = await turn(
         "独立作答。",
         LearningNativeSubmission(
             solo_attempt=SoloAttemptSubmission(
+                transfer_task_id=armed.learning_native.transfer.task_id,
                 response="势垒更宽使衰减距离变长，传出振幅减小，因此透射更低。"
             )
         ),
@@ -2192,7 +2207,7 @@ async def test_qualitative_solo_records_separate_semantic_and_reference_evidence
             extra_phase={
                 "loop_required": True,
                 "solo_assistance_locked": True,
-                "active_transfer_task_id": str(uuid4()),
+                "active_transfer_task_id": str(_FIXTURE_SOLO_TASK_ID),
                 "active_transfer_task_prompt": "宽度从0.12增至0.18 nm，说明趋势及依据，无需数值。",
                 "transfer_verification": {
                     "scientific_request": changed.model_dump(mode="json"),
@@ -2233,7 +2248,9 @@ async def test_qualitative_solo_records_separate_semantic_and_reference_evidence
                     conversation_id=conversation_id,
                     message="提交独立尝试。",
                     learning_native=LearningNativeSubmission(
-                        solo_attempt=SoloAttemptSubmission(response=text),
+                        solo_attempt=SoloAttemptSubmission(
+                            response=text, transfer_task_id=_FIXTURE_SOLO_TASK_ID,
+                        ),
                     ),
                 ),
             )

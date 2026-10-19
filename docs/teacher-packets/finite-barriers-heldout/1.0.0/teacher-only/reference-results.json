@@ -1,0 +1,503 @@
+{
+  "schema_version": "heldout-barrier-reference/1.0.0",
+  "label": "AUTOMATED REFERENCE CHECKS; UNREVIEWED; NO CLASSROOM RESULTS",
+  "precision_decimal_digits": 100,
+  "mpmath_version": "1.3.0",
+  "case_file_sha256": "8b7c24895f25daec6784d61e9459a7bfb8e218892a290cda187300ca7870bc03",
+  "script_sha256": "72bde31255b69316a11daa46b36b3908ab2558112f31bc2c53cb6ce42b88b973",
+  "constants": {
+    "electron_volt_J": "1.602176634e-19",
+    "hbar_J_s": "1.054571817e-34",
+    "electron_mass_kg": "9.1093837015e-31"
+  },
+  "method": "interface-centered boundary solve versus closed transfer amplitude",
+  "limitations": "Constants are supplied approximations; numerical agreement is not teacher approval.",
+  "cases": [
+    {
+      "case_id": "A1-narrow",
+      "inputs": {
+        "case_id": "A1-narrow",
+        "energy_eV": "1.3",
+        "height_eV": "6.1",
+        "width_nm": "0.08"
+      },
+      "width_nm": "0.08",
+      "T": "0.3903359745674185241824659767796319880976",
+      "R": "0.6096640254325814758175340232203680119024",
+      "amplitude_squared": "0.3903359745674185241824659767796319880976",
+      "velocity_ratio": "1.0",
+      "log10_T": "-0.4085614209551360351672978280351529893855",
+      "kappa_a": "0.8979437612180223100603331180641119124142",
+      "relative_reference_error": "1.83013e-101",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "4.28361e-105",
+      "regime": "below",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "A1-wide",
+      "inputs": {
+        "case_id": "A1-wide",
+        "energy_eV": "1.3",
+        "height_eV": "6.1",
+        "width_nm": "0.16"
+      },
+      "width_nm": "0.16",
+      "T": "0.07249963175977021120798417337499033720825",
+      "R": "0.9275003682402297887920158266250096627917",
+      "amplitude_squared": "0.07249963175977021120798417337499033720825",
+      "velocity_ratio": "1.0",
+      "log10_T": "-1.139664199292536734105755746911314690542",
+      "kappa_a": "1.795887522436044620120666236128223824828",
+      "relative_reference_error": "2.46335e-101",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "3.56335e-105",
+      "regime": "below",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "B1-narrow",
+      "inputs": {
+        "case_id": "B1-narrow",
+        "energy_eV": "2.1",
+        "height_eV": "7.4",
+        "width_nm": "0.11"
+      },
+      "width_nm": "0.11",
+      "T": "0.2209214988824958653310318002427530786255",
+      "R": "0.7790785011175041346689681997572469213745",
+      "amplitude_squared": "0.2209214988824958653310318002427530786255",
+      "velocity_ratio": "1.0",
+      "log10_T": "-0.6557620188876656325614856611692062500195",
+      "kappa_a": "1.297385834151768601805014343416204184414",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "5.09481e-105",
+      "regime": "below",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "B1-wide",
+      "inputs": {
+        "case_id": "B1-wide",
+        "energy_eV": "2.1",
+        "height_eV": "7.4",
+        "width_nm": "0.19"
+      },
+      "width_nm": "0.19",
+      "T": "0.0362688814143503055154697428168218318444",
+      "R": "0.9637311185856496944845302571831781681556",
+      "amplitude_squared": "0.0362688814143503055154697428168218318444",
+      "velocity_ratio": "1.0",
+      "log10_T": "-1.440465838493633680569457783471133326153",
+      "kappa_a": "2.240939168080327584935933865900716318534",
+      "relative_reference_error": "2.46205e-101",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "5.64877e-105",
+      "regime": "below",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "C1-narrow",
+      "inputs": {
+        "case_id": "C1-narrow",
+        "energy_eV": "0.9",
+        "height_eV": "5.8",
+        "width_nm": "0.09"
+      },
+      "width_nm": "0.09",
+      "T": "0.2645671236295736338070554035407700914614",
+      "R": "0.7354328763704263661929445964592299085386",
+      "amplitude_squared": "0.2645671236295736338070554035407700914614",
+      "velocity_ratio": "1.0",
+      "log10_T": "-0.5774641242957294553215272050373596118755",
+      "kappa_a": "1.020655267254728871744279172019510770462",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "5.54127e-105",
+      "regime": "below",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "C1-wide",
+      "inputs": {
+        "case_id": "C1-wide",
+        "energy_eV": "0.9",
+        "height_eV": "5.8",
+        "width_nm": "0.17"
+      },
+      "width_nm": "0.17",
+      "T": "0.04426466800767535062153585364732592548014",
+      "R": "0.9557353319923246493784641463526740745199",
+      "amplitude_squared": "0.04426466800767535062153585364732592548014",
+      "velocity_ratio": "1.0",
+      "log10_T": "-1.353942788712524278186360362689064077149",
+      "kappa_a": "1.927904393703376757739193991592409233094",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "1.97048e-105",
+      "regime": "below",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "A3-threshold",
+      "inputs": {
+        "case_id": "A3-threshold",
+        "energy_eV": "4.4",
+        "height_eV": "4.4",
+        "width_nm": "0.12"
+      },
+      "width_nm": "0.12",
+      "T": "0.7063394043100317803143160213306393366157",
+      "R": "0.2936605956899682196856839786693606633843",
+      "amplitude_squared": "0.7063394043100317803143160213306393366157",
+      "velocity_ratio": "1.0",
+      "log10_T": "-0.1509865652381989603518842460472762191436",
+      "kappa_a": "0.0",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "7.79968e-105",
+      "regime": "equal",
+      "runtime_support": "not_supported_threshold"
+    },
+    {
+      "case_id": "B3-threshold",
+      "inputs": {
+        "case_id": "B3-threshold",
+        "energy_eV": "5.2",
+        "height_eV": "5.2",
+        "width_nm": "0.15"
+      },
+      "width_nm": "0.15",
+      "T": "0.565700405497491728794216764451775802619",
+      "R": "0.434299594502508271205783235548224197381",
+      "amplitude_squared": "0.565700405497491728794216764451775802619",
+      "velocity_ratio": "1.0",
+      "log10_T": "-0.2474135099545528341747679717167236189987",
+      "kappa_a": "0.0",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "1.39525e-104",
+      "regime": "equal",
+      "runtime_support": "not_supported_threshold"
+    },
+    {
+      "case_id": "C3-threshold",
+      "inputs": {
+        "case_id": "C3-threshold",
+        "energy_eV": "3.8",
+        "height_eV": "3.8",
+        "width_nm": "0.18"
+      },
+      "width_nm": "0.18",
+      "T": "0.5531347279681050965099144687010451802384",
+      "R": "0.4468652720318949034900855312989548197616",
+      "amplitude_squared": "0.5531347279681050965099144687010451802384",
+      "velocity_ratio": "1.0",
+      "log10_T": "-0.2571690739635823774485362653562033477041",
+      "kappa_a": "0.0",
+      "relative_reference_error": "2.58298e-101",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "3.48812e-105",
+      "regime": "equal",
+      "runtime_support": "not_supported_threshold"
+    },
+    {
+      "case_id": "A4-half",
+      "inputs": {
+        "case_id": "A4-half",
+        "energy_eV": "8.6",
+        "height_eV": "4.2",
+        "inside_phase_pi": "0.5"
+      },
+      "width_nm": "0.1461689095618365344416423954510615247891",
+      "T": "0.8956213017751479289940828402366863905325",
+      "R": "0.1043786982248520710059171597633136094675",
+      "amplitude_squared": "0.8956213017751479289940828402366863905325",
+      "velocity_ratio": "1.0",
+      "log10_T": "-0.04787558555595599518902771778994532730303",
+      "kappa_a": "0.0",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "8.7203e-105",
+      "regime": "above",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "A4-full",
+      "inputs": {
+        "case_id": "A4-full",
+        "energy_eV": "8.6",
+        "height_eV": "4.2",
+        "inside_phase_pi": "1"
+      },
+      "width_nm": "0.2923378191236730688832847909021230495781",
+      "T": "1.0",
+      "R": "9.592163075948021538329745042399835238585e-205",
+      "amplitude_squared": "1.0",
+      "velocity_ratio": "1.0",
+      "log10_T": "0.0",
+      "kappa_a": "0.0",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "1.74406e-104",
+      "regime": "above",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "A4-three-half",
+      "inputs": {
+        "case_id": "A4-three-half",
+        "energy_eV": "8.6",
+        "height_eV": "4.2",
+        "inside_phase_pi": "1.5"
+      },
+      "width_nm": "0.4385067286855096033249271863531845743672",
+      "T": "0.8956213017751479289940828402366863905325",
+      "R": "0.1043786982248520710059171597633136094675",
+      "amplitude_squared": "0.8956213017751479289940828402366863905325",
+      "velocity_ratio": "1.0",
+      "log10_T": "-0.04787558555595599518902771778994532730303",
+      "kappa_a": "0.0",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "8.7203e-105",
+      "regime": "above",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "B4-half",
+      "inputs": {
+        "case_id": "B4-half",
+        "energy_eV": "10.1",
+        "height_eV": "5.6",
+        "inside_phase_pi": "0.5"
+      },
+      "width_nm": "0.1445356861270553184754728776406574127321",
+      "T": "0.8528804653781197222743479076749859260649",
+      "R": "0.1471195346218802777256520923250140739351",
+      "amplitude_squared": "0.8528804653781197222743479076749859260649",
+      "velocity_ratio": "1.0",
+      "log10_T": "-0.06911183268292554849726871093194156405438",
+      "kappa_a": "0.0",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "3.89991e-105",
+      "regime": "above",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "B4-full",
+      "inputs": {
+        "case_id": "B4-full",
+        "energy_eV": "10.1",
+        "height_eV": "5.6",
+        "inside_phase_pi": "1"
+      },
+      "width_nm": "0.2890713722541106369509457552813148254642",
+      "T": "1.0",
+      "R": "1.419868450570280373651673857107411565124e-204",
+      "amplitude_squared": "1.0",
+      "velocity_ratio": "1.0",
+      "log10_T": "0.0",
+      "kappa_a": "0.0",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "1.24142e-104",
+      "regime": "above",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "C4-half",
+      "inputs": {
+        "case_id": "C4-half",
+        "energy_eV": "7.7",
+        "height_eV": "3.5",
+        "inside_phase_pi": "0.5"
+      },
+      "width_nm": "0.1496086486382960627030321216907882264495",
+      "T": "0.9134948096885813148788927335640138408304",
+      "R": "0.08650519031141868512110726643598615916955",
+      "amplitude_squared": "0.9134948096885813148788927335640138408304",
+      "velocity_ratio": "1.0",
+      "log10_T": "-0.03929391588671679339389522998505542880373",
+      "kappa_a": "0.0",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "6.97624e-105",
+      "regime": "above",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "C4-full",
+      "inputs": {
+        "case_id": "C4-full",
+        "energy_eV": "7.7",
+        "height_eV": "3.5",
+        "inside_phase_pi": "1"
+      },
+      "width_nm": "0.2992172972765921254060642433815764528989",
+      "T": "1.0",
+      "R": "7.794977103309977789318716761150731522723e-205",
+      "amplitude_squared": "1.0",
+      "velocity_ratio": "1.0",
+      "log10_T": "0.0",
+      "kappa_a": "0.0",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "6.97624e-105",
+      "regime": "above",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "A5-unequal",
+      "inputs": {
+        "case_id": "A5-unequal",
+        "energy_eV": "4.6",
+        "height_eV": "8.9",
+        "right_eV": "1.1",
+        "width_nm": "0.14"
+      },
+      "width_nm": "0.14",
+      "T": "0.1838622509273754551349075053920713858521",
+      "R": "0.8161377490726245448650924946079286141479",
+      "amplitude_squared": "0.2107839148471204326629900778331610501701",
+      "velocity_ratio": "0.8722783759886469318756201717424466623594",
+      "log10_T": "-0.7355074273512899270577696873173625172003",
+      "kappa_a": "1.487307593228425195840082526703057078866",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "3.34151e-105",
+      "regime": "below",
+      "runtime_support": "not_supported_unequal_asymptotes"
+    },
+    {
+      "case_id": "B5-unequal",
+      "inputs": {
+        "case_id": "B5-unequal",
+        "energy_eV": "5.3",
+        "height_eV": "9.1",
+        "right_eV": "1.7",
+        "width_nm": "0.16"
+      },
+      "width_nm": "0.16",
+      "T": "0.149096568192157935820455104795690546805",
+      "R": "0.850903431807842064179544895204309453195",
+      "amplitude_squared": "0.1809065667589193587253546240636913702512",
+      "velocity_ratio": "0.8241633836921341438978078292294754106163",
+      "log10_T": "-0.8265323527399050647563657108609187757752",
+      "kappa_a": "1.59790263407469045726672896284637319659",
+      "relative_reference_error": "0.0",
+      "conservation_error": "7.14367e-102",
+      "dimensionless_boundary_residual": "4.07649e-105",
+      "regime": "below",
+      "runtime_support": "not_supported_unequal_asymptotes"
+    },
+    {
+      "case_id": "C5-unequal",
+      "inputs": {
+        "case_id": "C5-unequal",
+        "energy_eV": "3.9",
+        "height_eV": "7.8",
+        "right_eV": "0.8",
+        "width_nm": "0.13"
+      },
+      "width_nm": "0.13",
+      "T": "0.2492946800149477082674816831535911736338",
+      "R": "0.7507053199850522917325183168464088263662",
+      "amplitude_squared": "0.2796175765084630359826098610442339811586",
+      "velocity_ratio": "0.891555828241728714119537460778008509885",
+      "log10_T": "-0.6032869893053096388461993971069483355965",
+      "kappa_a": "1.315267798631544949768218031241126425718",
+      "relative_reference_error": "2.86555e-101",
+      "conservation_error": "7.14367e-102",
+      "dimensionless_boundary_residual": "5.76527e-105",
+      "regime": "below",
+      "runtime_support": "not_supported_unequal_asymptotes"
+    },
+    {
+      "case_id": "A6-tiny-positive",
+      "inputs": {
+        "case_id": "A6-tiny-positive",
+        "energy_eV": "0.7",
+        "height_eV": "17.6",
+        "width_nm": "2.4"
+      },
+      "width_nm": "2.4",
+      "T": "7.616254328324940824567586557751639503676e-45",
+      "R": "1.0",
+      "amplitude_squared": "7.616254328324940824567586557751639503676e-45",
+      "velocity_ratio": "1.0",
+      "log10_T": "-44.11825856205741648632173650207113955478",
+      "kappa_a": "50.54673704499609650543096851906148577524",
+      "relative_reference_error": "1.05148e-101",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "1.0699e-105",
+      "regime": "below",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "B6-tiny-positive",
+      "inputs": {
+        "case_id": "B6-tiny-positive",
+        "energy_eV": "1.1",
+        "height_eV": "18.3",
+        "width_nm": "2.7"
+      },
+      "width_nm": "2.7",
+      "T": "1.340581699624124706800415559228137680581e-50",
+      "R": "1.0",
+      "amplitude_squared": "1.340581699624124706800415559228137680581e-50",
+      "velocity_ratio": "1.0",
+      "log10_T": "-49.87270671348660618082971572812923155684",
+      "kappa_a": "57.36757859595354326811746888711791589911",
+      "relative_reference_error": "0.0",
+      "conservation_error": "7.14367e-102",
+      "dimensionless_boundary_residual": "1.16769e-105",
+      "regime": "below",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "C6-tiny-positive",
+      "inputs": {
+        "case_id": "C6-tiny-positive",
+        "energy_eV": "0.6",
+        "height_eV": "16.9",
+        "width_nm": "2.6"
+      },
+      "width_nm": "2.6",
+      "T": "1.065606361739107534411226315240648055688e-47",
+      "R": "1.0",
+      "amplitude_squared": "1.065606361739107534411226315240648055688e-47",
+      "velocity_ratio": "1.0",
+      "log10_T": "-46.97240319539980414245590621778060546542",
+      "kappa_a": "53.77812817113095914540564409712197314486",
+      "relative_reference_error": "1.46783e-101",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "2.33047e-105",
+      "regime": "below",
+      "runtime_support": "within_reference_parameter_scope"
+    },
+    {
+      "case_id": "opaque-underflow",
+      "inputs": {
+        "case_id": "opaque-underflow",
+        "energy_eV": "1.6",
+        "height_eV": "15.8",
+        "width_nm": "300"
+      },
+      "width_nm": "300.0",
+      "T": "3.809177907105971205372830076341173533164e-5031",
+      "R": "1.0",
+      "amplitude_squared": "3.809177907105971205372830076341173533164e-5031",
+      "velocity_ratio": "1.0",
+      "log10_T": "-5030.419168743204088470593996955149968185",
+      "kappa_a": "5791.672001947813731757648646533263851837",
+      "relative_reference_error": "0.0",
+      "conservation_error": "0.0",
+      "dimensionless_boundary_residual": "7.5166e-107",
+      "regime": "below",
+      "runtime_support": "not_supported_opaque_float64_range"
+    }
+  ]
+}

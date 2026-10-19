@@ -23,9 +23,12 @@ if not _LOG.handlers:
 
 def failure_category(exc: BaseException) -> str:
     from quantum_agent.llm.recording_budget import RecordingBudgetError
+    from quantum_agent.teaching.execution_budget import ExecutionBudgetError
 
     chain: BaseException | None = exc
     while chain is not None:
+        if isinstance(chain, ExecutionBudgetError):
+            return "execution_budget_exhausted"
         if isinstance(chain, RecordingBudgetError):
             return "recording_budget_exhausted"
         if isinstance(chain, TimeoutError) or "timeout" in type(chain).__name__.lower():
@@ -49,13 +52,16 @@ def event(capability: str, reason: str, *, attempt: int = 0, elapsed: float = 0)
 
 @contextmanager
 def turn_scope(session_id: UUID, turn_id: UUID) -> Iterator[None]:
+    from quantum_agent.versioning import version_scope
+
     configured = os.environ.get("QUANTUM_AGENT_RECORDING_RUN_ID")
     run_id = str(UUID(configured)) if configured else str(uuid4())
     token = _SCOPE.set({"run_id": run_id, "session_id": str(session_id),
                         "turn_id": str(turn_id)})
     event("turn", "started")
     try:
-        yield
+        with version_scope():
+            yield
     finally:
         event("turn", "ended")
         _SCOPE.reset(token)
@@ -103,6 +109,11 @@ async def provider_request(request: Any) -> None:
     budget = active_budget()
     if budget is not None:
         budget.reserve(request.content)
+    from quantum_agent.teaching.execution_budget import current_execution_budget
+
+    execution = current_execution_budget()
+    if execution is not None:
+        await execution.reserve_provider(request)
     request_id = str(uuid4())
     request.extensions["qa_request_id"] = request_id
     token = _SCOPE.set({**(_SCOPE.get() or {}), "request_id": request_id})
@@ -113,6 +124,11 @@ async def provider_request(request: Any) -> None:
 
 
 async def provider_response(response: Any) -> None:
+    from quantum_agent.teaching.execution_budget import current_execution_budget
+
+    execution = current_execution_budget()
+    if execution is not None:
+        await execution.record_usage(response)
     request_id = response.request.extensions.get("qa_request_id", "unknown")
     token = _SCOPE.set({**(_SCOPE.get() or {}), "request_id": request_id})
     try:

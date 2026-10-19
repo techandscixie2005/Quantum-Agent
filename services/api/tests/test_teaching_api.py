@@ -625,3 +625,66 @@ async def test_workflow_failure_emits_terminal_without_private_details(
     assert expected_code in response.text
     assert "workflow.completed" not in response.text
     assert "private-ledger" not in response.text
+
+
+@pytest.mark.parametrize("phase", ["solo_active", "commitment_required", "awaiting_revision"])
+async def test_state_never_exposes_pending_teacher_guidance(
+    teaching_api_database: async_sessionmaker[AsyncSession], phase: str,
+) -> None:
+    from quantum_agent.auth import hash_session_token
+
+    async with teaching_api_database() as session:
+        seeded = await _seed(session)
+        student = await session.scalar(select(UserSession.user_id).where(
+            UserSession.session_token_sha256 == hash_session_token(seeded.student_token)))
+        assert student
+        pending = {"review_id": str(uuid4()), "follow_up": "revisit_prerequisite",
+                   "probe": "PRIVATE SCHEDULED TEACHER PROBE"}
+        conversation = TeachingConversation(
+            course_id=seeded.course_id, curriculum_edition_id=seeded.edition_id,
+            student_user_id=student, mode=TeachingMode.LEARN_CONCEPTS,
+            learning_phase_json={"phase": phase, "loop_required": True,
+                                 "solo_assistance_locked": phase == "solo_active",
+                                 "pending_teacher_follow_up": pending},
+        )
+        session.add(conversation)
+        await session.commit()
+    app = create_app(Settings(_env_file=None, ENVIRONMENT="test",
+                             DATABASE_URL="sqlite+aiosqlite:///:memory:",
+                             USTC_API=None, NEO4J_PASSWORD=None))
+
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        async with teaching_api_database() as session:
+            yield session
+
+    app.dependency_overrides[session_dependency] = override_session
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        response = await client.get(
+            f"/api/v1/courses/{seeded.course_id}/editions/{seeded.edition_id}"
+            f"/teaching/threads/{conversation.id}/state",
+            headers={"Authorization": f"Bearer {seeded.student_token}"},
+        )
+    assert response.status_code == 200
+    assert response.json()["durable_phase"]["pending_teacher_follow_up"] is None
+    assert "PRIVATE SCHEDULED TEACHER PROBE" not in response.text
+    async with teaching_api_database() as session:
+        persisted = await session.get(TeachingConversation, conversation.id)
+        assert persisted is not None
+        assert persisted.learning_phase_json is not None
+        assert persisted.learning_phase_json["pending_teacher_follow_up"] == pending
+
+
+def test_solo_shared_replay_projection_removes_teacher_guidance() -> None:
+    from quantum_agent.teaching.solo_visibility import solo_visible_snapshot
+
+    snapshot = {
+        "learning_native": {"phase": "solo_active", "teacher_follow_up": {
+            "review_id": str(uuid4()), "follow_up": "request_revision",
+            "probe": "PRIVATE PREVIOUSLY APPLIED TEACHER PROBE"}},
+        "evidence_packet": {}, "response": {},
+    }
+    visible = solo_visible_snapshot(snapshot)
+    assert visible["learning_native"]["teacher_follow_up"] is None
+    assert "PRIVATE PREVIOUSLY APPLIED TEACHER PROBE" not in json.dumps(visible)
+    assert snapshot["learning_native"]["teacher_follow_up"] is not None

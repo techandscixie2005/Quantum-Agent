@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from quantum_agent.knowledge.source_manifest import (
     CourseSourceManifest,
+    ManifestSource,
     load_manifest,
     verify_sources,
 )
@@ -67,13 +68,37 @@ def test_manifest_has_one_canonical_six_chapter_edition() -> None:
 
 @pytest.mark.parametrize(
     "unsafe_root",
-    ["../knowledge", "/knowledge", r"C:\knowledge", "."],
+    [
+        "../knowledge", "/knowledge", r"C:\knowledge", ".",
+        r"\knowledge", r"C:knowledge", r"\\server\share\knowledge", r"safe\..\knowledge",
+    ],
 )
 def test_manifest_rejects_unsafe_knowledge_root(unsafe_root: str) -> None:
     payload = _valid_manifest_payload()
     payload["knowledge_root"] = unsafe_root
     with pytest.raises(ValidationError, match="safe non-root relative path"):
         CourseSourceManifest.model_validate(payload)
+
+
+@pytest.mark.parametrize("unsafe_path", [
+    "/source.pdf", r"\source.pdf", r"C:\source.pdf", r"C:source.pdf",
+    r"\\server\share\source.pdf", "../source.pdf", r"safe\..\source.pdf", ".",
+])
+def test_manifest_source_paths_reject_both_platforms_escape_syntax(unsafe_path: str) -> None:
+    with pytest.raises(ValidationError, match="safe relative paths"):
+        ManifestSource(
+            path=unsafe_path, sha256="a" * 64, kind="textbook",
+            authority="course_material", priority=50, locator="page",
+        )
+
+
+@pytest.mark.parametrize("safe_path", ["chapter/source.pdf", r"chapter\source.pdf"])
+def test_manifest_source_accepts_safe_portable_relative_paths(safe_path: str) -> None:
+    source = ManifestSource(
+        path=safe_path, sha256="a" * 64, kind="textbook",
+        authority="course_material", priority=50, locator="page",
+    )
+    assert source.path == safe_path
 
 
 def test_manifest_requires_canonical_flag_to_match_governance_key() -> None:

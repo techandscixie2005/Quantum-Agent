@@ -1,0 +1,399 @@
+{
+  "schema_version": "synthetic-postgresql-backup-restore/1",
+  "run_id": "e39bb9c7-dd3b-46ca-aa64-87ee863937c1",
+  "label": "SYNTHETIC ISOLATED RESTORE TEST; NO PRODUCTION/CLASSROOM RECOVERY CLAIM",
+  "started_at": "2026-10-19T17:49:21.113122+00:00",
+  "source_database": "quantum_backend_live_browser_20261020_a2",
+  "container": "qa-classroom-trial-postgres-1",
+  "script_sha256": "af10072ec4f5d0ae627cde0063acefad6c13326d07b52782fb8d551d7256798d",
+  "snapshot_method": "pg_export_snapshot shared with read-only fingerprint and pg_dump",
+  "check_constraint_comparison": "PostgreSQL planned projection (array coercion canonicalized); identity/validation/deferral flags and non-CHECK definitions preserved",
+  "limits": {
+    "tool_seconds_each": 120,
+    "sql_statement_seconds": 30,
+    "private_archive_bytes": 268435456,
+    "total_seconds": 600
+  },
+  "not_certified": [
+    "Redis credential vault or encryption-key restore",
+    "off-host backups",
+    "roles/global cluster restore",
+    "real-student retention/deletion policy",
+    "availability or live-writer sequence recovery"
+  ],
+  "tools": {
+    "pg_dump": "pg_dump (PostgreSQL) 15.19 (Debian 15.19-1.pgdg12+2)",
+    "pg_restore": "pg_restore (PostgreSQL) 15.19 (Debian 15.19-1.pgdg12+2)"
+  },
+  "server_version": "15.19 (Debian 15.19-1.pgdg12+2)",
+  "stage": "completed",
+  "source_snapshot": {
+    "tables": {
+      "public.agent_traces": {
+        "rows": 13,
+        "sha256": "ee25d47935629ad427cc261bdb1ce4e7a865cfbdce734a67227fa34856f0ee8e"
+      },
+      "public.alembic_version": {
+        "rows": 1,
+        "sha256": "93baa0a4af08d96ca41cc19151be011ce0e8bc04f5d558a0f9d30344a9753d78"
+      },
+      "public.answer_policies": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.audit_logs": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.candidate_merge_lineage": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.candidate_revisions": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.checkpoint_blobs": {
+        "rows": 421,
+        "sha256": "3d09a05effc3be35785ecd3968ad38324c8fab3d3457d9106cc6093b42939499"
+      },
+      "public.checkpoint_migrations": {
+        "rows": 10,
+        "sha256": "12a86faa3f4a0c0e066b20ab310b95a8862cbfe9a68f575f85085d17b96ca6d3"
+      },
+      "public.checkpoint_writes": {
+        "rows": 731,
+        "sha256": "14c953daddde0e81cb5edad341a13ba9052e0aa3de1734c74e85b38108518dd4"
+      },
+      "public.checkpoints": {
+        "rows": 146,
+        "sha256": "19b6d31d19c1817bc1acd3b433e4e67290505990a347aa16aa554b8becc10d43"
+      },
+      "public.course_memberships": {
+        "rows": 36,
+        "sha256": "1e73ea01503571ba1ca5ba1ad285d135042a239609b71b8facae279980434e46"
+      },
+      "public.courses": {
+        "rows": 1,
+        "sha256": "bcd7a6ded4fb7a8b064edff28ccff0e27679ac0aad43e381b9bd8b4356b645c0"
+      },
+      "public.curriculum_editions": {
+        "rows": 1,
+        "sha256": "7a37782eabd5b1e032cb05a672d41ee00d02f692bf1afd387f14ec89141a4356"
+      },
+      "public.curriculum_outline_sources": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.curriculum_units": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.document_chunks": {
+        "rows": 2,
+        "sha256": "21b007b687c356439d2085797d0dfa45bafcf5ac3de74f9875d12bd03720545b"
+      },
+      "public.document_parse_runs": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.document_publications": {
+        "rows": 1,
+        "sha256": "4115e3e9d06be66078c26a212c0a753a6bfa44cffd382edf9c4de8015bd23834"
+      },
+      "public.evidence": {
+        "rows": 2,
+        "sha256": "96b06cd32da9cb7fa1d19a1da79fce6c8c974b47d7e0cc64691ff469e877971e"
+      },
+      "public.extraction_runs": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.graph_node_candidates": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.graph_relation_candidates": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.graph_sync_outbox": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.learning_evidence": {
+        "rows": 11,
+        "sha256": "3b251df00fdff4e77423bfdfc65f4f09491aa54390d6b29d485e2c01b05c85c3"
+      },
+      "public.multimodal_extractions": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.node_candidate_evidence_support": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.relation_candidate_evidence_support": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.review_decisions": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.source_document_versions": {
+        "rows": 1,
+        "sha256": "ac0bfba9d46ae5a815ddea3164ca69b3699172d9056d34295285e7fc9b6aa5fc"
+      },
+      "public.source_documents": {
+        "rows": 1,
+        "sha256": "78924c11bdc0677539c0a7a07a9279e9b4364a4f6e9888f4299d0c8ce24e54b7"
+      },
+      "public.teaching_conversations": {
+        "rows": 43,
+        "sha256": "52f0b1d55c7abf3f3fbd901a045efcb72b92e6fa9eef5b7b59eddf38a02da224"
+      },
+      "public.teaching_reviews": {
+        "rows": 1,
+        "sha256": "d0d5527deb9f99a21d0eef24771efa61650c432f74870285510d1d66e7d55587"
+      },
+      "public.teaching_turns": {
+        "rows": 15,
+        "sha256": "b6c3b982187bed8bbacdd8e2ee58d62cd7ac67be478ebdf1e143d2f348405ba5"
+      },
+      "public.user_attachments": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.user_sessions": {
+        "rows": 48,
+        "sha256": "e421b36dec9606ad87c921a52804f2810ae245e02117e6837cb8df4c0047d89e"
+      },
+      "public.users": {
+        "rows": 36,
+        "sha256": "a67bd1c446bb5aada9db2812f12c8ffc00221896e38db6239a1cc791506014d1"
+      }
+    },
+    "schema_sha256": "0581728c3de7bc56d79019819f7e1ef7b1b1ba9a452b71c0a5813b9ea8042d6c",
+    "schema_categories": {
+      "columns": "8af21b75cbd3682beb7c89a44e95bc9419e6b60a0838296089b3f3d54ed280c4",
+      "constraints": "c2c73f34cd181c756a5e62c2e94853159a7cea7581c9d16d611d4615d72b2f4c",
+      "indexes": "dd80b29f7f42d5d987e72c693808d246c61b57d1c1953354954e76b7e2cc8df7",
+      "triggers": "222146c9f5dead2a725167075f2e005e6472320c24778168f0466fcb18ab3449",
+      "enums": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "extensions": "ee12667f13746e53bc499f675d1ab7dbc042d4e6445f27ad11793d3114963979",
+      "functions": "27cc90dabb58d64252657b4c58c3e3d8d77a2ac46975f8038e8110a6b72fcbcf",
+      "sequences": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "alembic_head": [
+      [
+        "0011"
+      ]
+    ],
+    "enum_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "enum_labels": 0,
+    "trigger_definitions": 7,
+    "budget_turns": 15
+  },
+  "private_archive": {
+    "bytes": 406158,
+    "sha256": "3e3c5ca6a18dbbfd9d8569584ac71771f6b3e31eb0efe2761bf7f7a64365e56f",
+    "mode": "0600",
+    "excluded_from_source_and_evidence_bundle": true
+  },
+  "restored_snapshot": {
+    "tables": {
+      "public.agent_traces": {
+        "rows": 13,
+        "sha256": "ee25d47935629ad427cc261bdb1ce4e7a865cfbdce734a67227fa34856f0ee8e"
+      },
+      "public.alembic_version": {
+        "rows": 1,
+        "sha256": "93baa0a4af08d96ca41cc19151be011ce0e8bc04f5d558a0f9d30344a9753d78"
+      },
+      "public.answer_policies": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.audit_logs": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.candidate_merge_lineage": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.candidate_revisions": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.checkpoint_blobs": {
+        "rows": 421,
+        "sha256": "3d09a05effc3be35785ecd3968ad38324c8fab3d3457d9106cc6093b42939499"
+      },
+      "public.checkpoint_migrations": {
+        "rows": 10,
+        "sha256": "12a86faa3f4a0c0e066b20ab310b95a8862cbfe9a68f575f85085d17b96ca6d3"
+      },
+      "public.checkpoint_writes": {
+        "rows": 731,
+        "sha256": "14c953daddde0e81cb5edad341a13ba9052e0aa3de1734c74e85b38108518dd4"
+      },
+      "public.checkpoints": {
+        "rows": 146,
+        "sha256": "19b6d31d19c1817bc1acd3b433e4e67290505990a347aa16aa554b8becc10d43"
+      },
+      "public.course_memberships": {
+        "rows": 36,
+        "sha256": "1e73ea01503571ba1ca5ba1ad285d135042a239609b71b8facae279980434e46"
+      },
+      "public.courses": {
+        "rows": 1,
+        "sha256": "bcd7a6ded4fb7a8b064edff28ccff0e27679ac0aad43e381b9bd8b4356b645c0"
+      },
+      "public.curriculum_editions": {
+        "rows": 1,
+        "sha256": "7a37782eabd5b1e032cb05a672d41ee00d02f692bf1afd387f14ec89141a4356"
+      },
+      "public.curriculum_outline_sources": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.curriculum_units": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.document_chunks": {
+        "rows": 2,
+        "sha256": "21b007b687c356439d2085797d0dfa45bafcf5ac3de74f9875d12bd03720545b"
+      },
+      "public.document_parse_runs": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.document_publications": {
+        "rows": 1,
+        "sha256": "4115e3e9d06be66078c26a212c0a753a6bfa44cffd382edf9c4de8015bd23834"
+      },
+      "public.evidence": {
+        "rows": 2,
+        "sha256": "96b06cd32da9cb7fa1d19a1da79fce6c8c974b47d7e0cc64691ff469e877971e"
+      },
+      "public.extraction_runs": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.graph_node_candidates": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.graph_relation_candidates": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.graph_sync_outbox": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.learning_evidence": {
+        "rows": 11,
+        "sha256": "3b251df00fdff4e77423bfdfc65f4f09491aa54390d6b29d485e2c01b05c85c3"
+      },
+      "public.multimodal_extractions": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.node_candidate_evidence_support": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.relation_candidate_evidence_support": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.review_decisions": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.source_document_versions": {
+        "rows": 1,
+        "sha256": "ac0bfba9d46ae5a815ddea3164ca69b3699172d9056d34295285e7fc9b6aa5fc"
+      },
+      "public.source_documents": {
+        "rows": 1,
+        "sha256": "78924c11bdc0677539c0a7a07a9279e9b4364a4f6e9888f4299d0c8ce24e54b7"
+      },
+      "public.teaching_conversations": {
+        "rows": 43,
+        "sha256": "52f0b1d55c7abf3f3fbd901a045efcb72b92e6fa9eef5b7b59eddf38a02da224"
+      },
+      "public.teaching_reviews": {
+        "rows": 1,
+        "sha256": "d0d5527deb9f99a21d0eef24771efa61650c432f74870285510d1d66e7d55587"
+      },
+      "public.teaching_turns": {
+        "rows": 15,
+        "sha256": "b6c3b982187bed8bbacdd8e2ee58d62cd7ac67be478ebdf1e143d2f348405ba5"
+      },
+      "public.user_attachments": {
+        "rows": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "public.user_sessions": {
+        "rows": 48,
+        "sha256": "e421b36dec9606ad87c921a52804f2810ae245e02117e6837cb8df4c0047d89e"
+      },
+      "public.users": {
+        "rows": 36,
+        "sha256": "a67bd1c446bb5aada9db2812f12c8ffc00221896e38db6239a1cc791506014d1"
+      }
+    },
+    "schema_sha256": "0581728c3de7bc56d79019819f7e1ef7b1b1ba9a452b71c0a5813b9ea8042d6c",
+    "schema_categories": {
+      "columns": "8af21b75cbd3682beb7c89a44e95bc9419e6b60a0838296089b3f3d54ed280c4",
+      "constraints": "c2c73f34cd181c756a5e62c2e94853159a7cea7581c9d16d611d4615d72b2f4c",
+      "indexes": "dd80b29f7f42d5d987e72c693808d246c61b57d1c1953354954e76b7e2cc8df7",
+      "triggers": "222146c9f5dead2a725167075f2e005e6472320c24778168f0466fcb18ab3449",
+      "enums": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "extensions": "ee12667f13746e53bc499f675d1ab7dbc042d4e6445f27ad11793d3114963979",
+      "functions": "27cc90dabb58d64252657b4c58c3e3d8d77a2ac46975f8038e8110a6b72fcbcf",
+      "sequences": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "alembic_head": [
+      [
+        "0011"
+      ]
+    ],
+    "enum_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "enum_labels": 0,
+    "trigger_definitions": 7,
+    "budget_turns": 15
+  },
+  "append_only_checks": {
+    "learning_evidence": {
+      "update": true,
+      "delete": true,
+      "restore_only_rolled_back_fixture": false
+    },
+    "agent_traces": {
+      "update": true,
+      "delete": true,
+      "restore_only_rolled_back_fixture": false
+    },
+    "teaching_reviews": {
+      "update": true,
+      "delete": true,
+      "restore_only_rolled_back_fixture": false
+    },
+    "audit_logs": {
+      "update": true,
+      "delete": true,
+      "restore_only_rolled_back_fixture": true
+    }
+  },
+  "snapshot_matches_dump_and_restore": true,
+  "restore_database_removed": true,
+  "passed": true,
+  "elapsed_seconds": 8.379,
+  "completed_at": "2026-10-19T17:49:29.495096+00:00"
+}

@@ -9,6 +9,7 @@ import {
   parseAgentTracePage,
   parseHitlRejectedResponse,
   parseReviewDecision,
+  teachingResponseSchema,
 } from "./contracts";
 
 const COURSE_ID = "11111111-1111-4111-8111-111111111111";
@@ -381,6 +382,27 @@ test("staff edits cannot manufacture citation or tool authority", () => {
       inspected,
     ),
   );
+});
+
+test("real trace responses accept absent/null bridges and enforce worked-step source authority", () => {
+  const raw = validDetail();
+  const response = raw.response as Record<string, unknown>;
+  assert.equal(parseAgentTraceDetail({ ...raw, response: { ...response, derivation_bridge: null } }, scope, TRACE_ID).response?.derivation_bridge, null);
+  const ref = { evidence_id: EVIDENCE_ID, quote: "边界条件要求波函数" };
+  const bridge = { source_step: "ψ(0-)=ψ(0+)", target_step: "连续匹配",
+    missing_steps: [{ formula: "ψ'(0-)=ψ'(0+)", justification: "同质量有限势能。", source_refs: [ref] }],
+    used_definitions: [], assumptions: [], prerequisites: [], validity_conditions: [],
+    source_refs: [ref], support_basis: "unverified_model_inference", partial: true };
+  const permitted = { ...raw, release_decision: { ...(raw.release_decision as object), release_level: "scaffold" },
+    response: { ...response, status: "mixed", derivation_bridge: bridge } };
+  const parsed = parseAgentTraceDetail(permitted, scope, TRACE_ID);
+  assert.equal(parsed.response?.derivation_bridge?.partial, true);
+  assert.throws(() => parseAgentTraceDetail({ ...raw, response: permitted.response }, scope, TRACE_ID), /release policy/);
+  assert.throws(() => parseAgentTraceDetail({ ...permitted, response: { ...response, status: "mixed",
+    derivation_bridge: { ...bridge, source_refs: [{ ...ref, quote: "not an actual source span" }] } } }, scope, TRACE_ID), /exact course evidence/);
+  const inspected = teachingResponseSchema.parse(permitted.response);
+  assert.doesNotThrow(() => assertEditedResponseAuthority({ ...inspected, orientation: "缩短措辞" }, inspected));
+  assert.throws(() => assertEditedResponseAuthority({ ...inspected, derivation_bridge: null }, inspected), /derivation bridge authority/);
 });
 
 test("rejected HITL outcomes remain strict and turn-scoped", () => {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { teachingProxyTimeoutMs } from "@/lib/teaching-timeout";
 
 import { requireSameOrigin, readJsonObject } from "@/app/api/phase1/_shared";
 import { assertEvidenceDigests } from "@/app/api/teaching/_shared";
@@ -37,7 +38,7 @@ type RouteContext = Readonly<{ params: Promise<{ traceId: string }> }>;
 type ValidContext = Extract<StaffContextResult, { ok: true }>["value"];
 type ReviewState = Readonly<{
   detail: AgentTraceDetail;
-  current: HitlInterruptResponse;
+  current: HitlInterruptResponse | null;
   traceId: string | null;
 }>;
 type ReviewStateResult =
@@ -50,6 +51,7 @@ async function loadCurrentReview(
   backend: ValidContext,
   scope: TraceScope,
   traceId: string,
+  replayInterruptId?: string,
 ): Promise<ReviewStateResult> {
   const traceResponse = await fetchStaffJson(backend, teacherTracePath(scope, `/${traceId}`));
   if (!traceResponse.ok) return traceResponse;
@@ -68,6 +70,15 @@ async function loadCurrentReview(
         traceResponse.traceId,
       ),
     };
+  }
+
+  // A committed decision remains addressable after its checkpoint disappears.
+  // The backend compares the entire authenticated decision before replaying;
+  // modified reasons, edited text, or reviewer identities receive a conflict.
+  if (replayInterruptId && detail.hitl_events.some((event) =>
+    event.interrupt.interrupt_id === replayInterruptId && event.resolution !== null
+  )) {
+    return { ok: true, value: { detail, current: null, traceId: traceResponse.traceId } };
   }
 
   const interruptResponse = await fetchStaffJson(
@@ -154,13 +165,15 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
   const backend = await staffBackendContext();
   if (!backend.ok) return backend.response;
-  const state = await loadCurrentReview(backend.value, route.scope, route.traceId);
+  const state = await loadCurrentReview(
+    backend.value, route.scope, route.traceId, decision.interrupt_id,
+  );
   if (!state.ok) return state.response;
   const { current, detail } = state.value;
-  if (
+  if (current && (
     current.interrupt.interrupt_id !== decision.interrupt_id ||
     !current.interrupt.staff_allowed_actions.includes(decision.action)
-  ) {
+  )) {
     return traceError(
       409,
       "STALE_REVIEW_DECISION",
@@ -169,7 +182,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     );
   }
 
-  if (decision.action === "edit" || decision.action === "take_over") {
+  if (current && (decision.action === "edit" || decision.action === "take_over")) {
     try {
       assertEditedResponseAuthority(
         decision.edited_response,
@@ -202,11 +215,12 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const resumeBody =
     decision.action === "edit" || decision.action === "take_over"
       ? {
+          interrupt_id: decision.interrupt_id,
           action: decision.action,
           note: decision.note,
           edited_response: decision.edited_response,
         }
-      : { action: decision.action, note: decision.note };
+      : { interrupt_id: decision.interrupt_id, action: decision.action, note: decision.note };
 
   const resumed = await fetchStaffJson(
     backend.value,
@@ -214,7 +228,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     {
       method: "POST",
       body: resumeBody,
-      timeoutMs: 120_000,
+      timeoutMs: teachingProxyTimeoutMs(),
     },
   );
   if (!resumed.ok) return resumed.response;
@@ -239,11 +253,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     } else {
       const workflow = parseTeachingWorkflowOutcome(resumed.payload);
       if ("interrupt" in workflow) {
-        assertHitlScope(workflow, route.scope, detail.mode);
+        assertHitlScope(workflow, route.scope, detail.policy_snapshot.mode);
         await assertEvidenceDigests(workflow.artifacts.evidence_packet);
         outcome = "interrupted";
       } else {
-        assertTeachingScope(workflow, route.scope, detail.mode);
+        assertTeachingScope(workflow, route.scope, detail.policy_snapshot.mode);
         await assertEvidenceDigests(workflow.evidence_packet);
         outcome = "completed";
       }

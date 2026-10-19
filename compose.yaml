@@ -18,8 +18,8 @@ x-redis-environment: &redis-environment
 x-api-runtime: &api-runtime
   image: quantum-agent-api:${QA_IMAGE_TAG:-local}
   build:
-    context: ./services/api
-    dockerfile: Dockerfile
+    context: .
+    dockerfile: services/api/Dockerfile
     target: runtime
   init: true
   user: "10001:10001"
@@ -157,6 +157,15 @@ services:
       # PRD V3.1 §3.3: session vault for user-supplied API keys.
       SESSION_VAULT_KEY: ${SESSION_VAULT_KEY:?Set SESSION_VAULT_KEY to a valid Fernet key}
       LOGIN_COURSE_EMAIL: ${LOGIN_COURSE_EMAIL:-demo-student@quantum-agent.local}
+      # Inject the exact built source revision for durable evidence provenance.
+      BUILD_REVISION: ${BUILD_REVISION:-unknown}
+      TEACHING_EXECUTION_SECONDS: ${TEACHING_EXECUTION_SECONDS:-180}
+      TEACHING_EXECUTION_PROVIDER_REQUESTS: ${TEACHING_EXECUTION_PROVIDER_REQUESTS:-12}
+      TEACHING_EXECUTION_TOKEN_UNITS: ${TEACHING_EXECUTION_TOKEN_UNITS:-131072}
+      TEACHING_EXECUTION_OUTPUT_TOKENS: ${TEACHING_EXECUTION_OUTPUT_TOKENS:-2048}
+      TEACHING_EXECUTION_REQUEST_BYTES: ${TEACHING_EXECUTION_REQUEST_BYTES:-65536}
+      # Development demonstrations only; production ignores this opt-in.
+      ALLOW_SHARED_DEMO_LOGIN: ${ALLOW_SHARED_DEMO_LOGIN:-false}
       # PRD V3.1 §6.2: Coding Agent sandbox.
       CODING_SANDBOX_ENABLED: ${CODING_SANDBOX_ENABLED:-true}
       CODING_SANDBOX_REQUIRE_ISOLATION: ${CODING_SANDBOX_REQUIRE_ISOLATION:-true}
@@ -170,6 +179,8 @@ services:
       - 0.0.0.0
       - --port
       - "8000"
+      - --workers
+      - "${API_WORKERS:-2}"
       - --proxy-headers
       - --forwarded-allow-ips=${API_FORWARDED_ALLOW_IPS:-127.0.0.1}
     ports:
@@ -282,6 +293,8 @@ services:
       HOST: 0.0.0.0
       PORT: "3000"
       QUANTUM_API_BASE_URL: http://api:8000
+      TEACHING_EXECUTION_SECONDS: ${TEACHING_EXECUTION_SECONDS:-180}
+      TEACHING_PROXY_TIMEOUT_SECONDS: ${TEACHING_PROXY_TIMEOUT_SECONDS:-210}
       XDG_CACHE_HOME: /tmp/quantum-agent-web-cache
       WRANGLER_LOG_PATH: /tmp/wrangler.log
       MINIFLARE_REGISTRY_PATH: /tmp/miniflare-registry
@@ -393,8 +406,8 @@ services:
   api-test:
     image: quantum-agent-api-test:${QA_IMAGE_TAG:-local}
     build:
-      context: ./services/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/api/Dockerfile
       target: test
     profiles:
       - tools
@@ -408,6 +421,15 @@ services:
     cap_drop:
       - ALL
     network_mode: none
+    volumes:
+      - type: bind
+        source: ./content
+        target: /workspace/content
+        read_only: true
+      - type: bind
+        source: ./knowledge
+        target: /workspace/knowledge
+        read_only: true
     command:
       - pytest
       - -q
@@ -429,8 +451,8 @@ services:
   api-live-test:
     image: quantum-agent-api-test:${QA_IMAGE_TAG:-local}
     build:
-      context: ./services/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/api/Dockerfile
       target: test
     profiles:
       - tools
@@ -465,8 +487,8 @@ services:
   api-live-model-test:
     image: quantum-agent-api-test:${QA_IMAGE_TAG:-local}
     build:
-      context: ./services/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/api/Dockerfile
       target: test
     profiles:
       - tools

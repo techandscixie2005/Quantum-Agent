@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from quantum_agent.auth import bearer_credential, hash_session_token
@@ -82,6 +82,10 @@ async def course_context(
                 UserSession.session_token_sha256 == hash_session_token(credential.token),
                 UserSession.status == SessionStatus.ACTIVE,
                 UserSession.expires_at > now,
+                or_(
+                    UserSession.user_agent.is_(None),
+                    UserSession.user_agent != "classroom-access",
+                ),
                 User.status == UserStatus.ACTIVE,
             )
         )

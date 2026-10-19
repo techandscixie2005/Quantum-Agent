@@ -1,7 +1,8 @@
 import type { TutorAttachment } from "./types";
 
 const allowedMimeTypes = new Set<TutorAttachment["mimeType"]>(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const windows = new Map<string, { startedAt: number; count: number }>();
+const MAX_RATE_BUCKETS = 10_000;
+const windows = new Map<string, { expiresAt: number; count: number }>();
 
 export function validateAttachments(value: unknown): TutorAttachment[] {
   if (value === undefined) return [];
@@ -25,11 +26,21 @@ export function validateAttachments(value: unknown): TutorAttachment[] {
 export function checkRateLimit(key: string, limit = 30, intervalMs = 60_000) {
   const now = Date.now();
   const current = windows.get(key);
-  if (!current || now - current.startedAt >= intervalMs) {
-    windows.set(key, { startedAt: now, count: 1 });
+  if (!current || now >= current.expiresAt) {
+    if (!current && windows.size >= MAX_RATE_BUCKETS) {
+      for (const [bucket, value] of windows) {
+        if (now >= value.expiresAt) windows.delete(bucket);
+      }
+      // Active buckets retain their counts: evicting them would let an
+      // attacker reset an exhausted quota by flooding the key space.
+      if (windows.size >= MAX_RATE_BUCKETS) {
+        return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil(intervalMs / 1000)) };
+      }
+    }
+    windows.set(key, { expiresAt: now + intervalMs, count: 1 });
     return { allowed: true, retryAfterSeconds: 0 };
   }
   current.count += 1;
   if (current.count <= limit) return { allowed: true, retryAfterSeconds: 0 };
-  return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((intervalMs - (now - current.startedAt)) / 1000)) };
+  return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((current.expiresAt - now) / 1000)) };
 }

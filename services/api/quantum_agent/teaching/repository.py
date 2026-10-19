@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +27,10 @@ from quantum_agent.db_models import (
 )
 from quantum_agent.multimodal.contracts import ConfirmedEvidence
 from quantum_agent.multimodal.teaching import PerceptionTraceEntry
+from quantum_agent.teaching.access import (
+    TeachingConversationConflictError,
+    require_conversation_assistance_access,
+)
 from quantum_agent.teaching.agents import EvidenceBundle
 from quantum_agent.teaching.hitl import HitlArtifacts, HitlEvent, HitlInterruptPayload
 from quantum_agent.teaching.models import (
@@ -44,10 +50,6 @@ class LearningEvidenceRecord(BaseModel):
     concept_candidate_id: UUID | None = None
     mastery_delta: float = Field(default=0.0, ge=-1.0, le=1.0)
     evidence_json: dict[str, object] = Field(default_factory=dict)
-
-
-class TeachingConversationConflictError(RuntimeError):
-    """Conversation does not belong to the authenticated student or scope."""
 
 
 class StartedTeachingTurn(BaseModel):
@@ -94,6 +96,56 @@ class TeachingRepository:
         curriculum_edition_id: UUID,
         request: TeachingTurnInput,
     ) -> StartedTeachingTurn:
+        # A database lock protects starts across workers, including requests
+        # that have no conversation id yet. No process-local cache can do this.
+        await self._session.scalar(
+            select(User.id).where(User.id == actor.user_id).with_for_update()
+        )
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                request.model_dump(mode="json", exclude={"conversation_id", "client_request_id"}),
+                sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        if request.client_request_id:
+            replay = (
+                await self._session.execute(
+                    select(TeachingConversation, TeachingTurn)
+                    .join(TeachingTurn, TeachingTurn.conversation_id == TeachingConversation.id)
+                    .where(
+                        TeachingConversation.course_id == actor.course_id,
+                        TeachingConversation.curriculum_edition_id == curriculum_edition_id,
+                        TeachingConversation.student_user_id == actor.user_id,
+                        TeachingTurn.client_request_id == request.client_request_id,
+                    )
+                    .order_by(TeachingTurn.created_at.asc())
+                    .limit(1)
+                    .with_for_update().execution_options(populate_existing=True)
+                )
+            ).one_or_none()
+            if replay is not None:
+                conversation, replay_turn = replay
+                if request.conversation_id not in {None, conversation.id}:
+                    raise TeachingConversationConflictError("request key belongs to another thread")
+                if replay_turn.request_fingerprint is not None:
+                    same_input = replay_turn.request_fingerprint == fingerprint
+                else:
+                    # Legacy rows retain only part of the original request.
+                    same_input = (
+                        replay_turn.user_message == request.message
+                        and replay_turn.student_attempt == request.student_attempt
+                    )
+                if not same_input:
+                    raise TeachingConversationConflictError(
+                        "request key was reused with changed input"
+                    )
+                await require_conversation_assistance_access(
+                    self._session, actor, conversation.id,
+                )
+                return await self._replayed_turn(conversation, replay_turn)
+        await require_conversation_assistance_access(
+            self._session, actor, request.conversation_id,
+        )
         if request.conversation_id is None:
             conversation = TeachingConversation(
                 course_id=actor.course_id,
@@ -118,82 +170,29 @@ class TeachingRepository:
                     TeachingConversation.student_user_id == actor.user_id,
                     TeachingConversation.status == TeachingConversationStatus.ACTIVE,
                 )
-                .with_for_update()
+                .with_for_update().execution_options(populate_existing=True)
             )
             if existing_conversation is None:
                 raise TeachingConversationConflictError(
                     "conversation is unavailable in this course, edition, mode, or account"
                 )
             conversation = existing_conversation
-            # PRD V3.0 P1-2: client-generated idempotency key.  When the
-            # browser retries a turn after a lost response, the same
-            # ``client_request_id`` is re-sent.  Recognise a matching key on
-            # an existing RUNNING *or* COMPLETED turn and return it as an
-            # idempotent replay so a retry cannot create duplicate
-            # AgentTrace / LearningEvidence rows or duplicate phase
-            # transitions.  We filter in Python because the JSON-column
-            # ``astext`` accessor is PostgreSQL-specific and the test
-            # database is SQLite.
-            client_request_id = request.client_request_id
-            if client_request_id:
-                candidate_turns = (
-                    await self._session.execute(
-                        select(TeachingTurn)
-                        .where(TeachingTurn.conversation_id == conversation.id)
-                        .order_by(TeachingTurn.sequence_number.desc())
-                        .limit(50),
-                    )
-                ).scalars().all()
-                replay_turn: TeachingTurn | None = None
-                for candidate in candidate_turns:
-                    # RUNNING turns store the key in validation_json; COMPLETED
-                    # turns store it in scientific_results_json (see
-                    # complete_turn, which keeps validation_json a clean
-                    # ValidationReport).
-                    if candidate.status is TeachingTurnStatus.RUNNING:
-                        stored = candidate.validation_json.get("client_request_id", "")
-                    else:
-                        stored = candidate.scientific_results_json.get(
-                            "__client_request_id", ""
-                        )
-                    if stored == client_request_id:
-                        replay_turn = candidate
-                        break
-                if replay_turn is not None:
-                    # Idempotent replay must return the turn in the state it
-                    # was stored: a retry carrying a different mode (the UI
-                    # changed during the lost-response window) must not
-                    # silently rewrite conversation.mode before the replay
-                    # check.  Rollback-only covers the four mapped exceptions;
-                    # returning here commits the mutation — so the mode must
-                    # still be untouched.
-                    prior_attempts = await self._attempt_count(
-                        conversation.id,
-                        excluding_turn_id=replay_turn.id,
-                    )
-                    recent_no_progress_count = await self._recent_no_progress_count(
-                        conversation.id,
-                        excluding_turn_id=replay_turn.id,
-                    )
-                    return StartedTeachingTurn(
-                        conversation=conversation,
-                        turn=replay_turn,
-                        prior_attempts=prior_attempts,
-                        recent_no_progress_count=recent_no_progress_count,
-                        idempotent_replay=True,
-                        durable_phase=await self.load_durable_learning_phase(
-                            conversation=conversation
-                        ),
-                    )
+            phase = await self.load_durable_learning_phase(conversation=conversation)
+            if (
+                request.course_package is not None
+                and phase.course_package is not None
+                and (
+                    request.course_package.package_id != phase.course_package.package_id
+                    or request.course_package.version != phase.course_package.version
+                )
+            ):
+                raise TeachingConversationConflictError("course package is pinned for this thread")
             # Golden Loop §6: the durable phase sequence must run on ONE
             # conversation_id.  A mode switch mid-loop (e.g. learn_concepts →
             # run_experiments for a coding turn) continues the same ACTIVE
             # conversation instead of forcing the student back through the
             # commitment gate; the durable phase carries over.  The mutation
-            # happens only after the replay check above so a replay can never
-            # commit a mode change.
-            if conversation.mode is not request.mode:
-                conversation.mode = request.mode
+            # happens only after the replay/running checks below.
             running_turn = await self._session.scalar(
                 select(TeachingTurn)
                 .where(
@@ -208,32 +207,18 @@ class TeachingRepository:
                     "input_attachment_ids", []
                 )
                 if (
-                    running_turn.user_message == request.message
+                    not request.client_request_id
+                    and running_turn.user_message == request.message
                     and running_turn.student_attempt == request.student_attempt
                     and stored_attachment_ids
                     == [str(attachment_id) for attachment_id in request.attachment_ids]
                 ):
-                    prior_attempts = await self._attempt_count(
-                        conversation.id,
-                        excluding_turn_id=running_turn.id,
-                    )
-                    recent_no_progress_count = await self._recent_no_progress_count(
-                        conversation.id,
-                        excluding_turn_id=running_turn.id,
-                    )
-                    return StartedTeachingTurn(
-                        conversation=conversation,
-                        turn=running_turn,
-                        prior_attempts=prior_attempts,
-                        recent_no_progress_count=recent_no_progress_count,
-                        idempotent_replay=True,
-                        durable_phase=await self.load_durable_learning_phase(
-                            conversation=conversation
-                        ),
-                    )
+                    return await self._replayed_turn(conversation, running_turn)
                 raise TeachingConversationConflictError(
                     "conversation has a teaching turn awaiting human review"
                 )
+            if conversation.mode is not request.mode:
+                conversation.mode = request.mode
             last_sequence = await self._session.scalar(
                 select(func.max(TeachingTurn.sequence_number)).where(
                     TeachingTurn.conversation_id == conversation.id
@@ -247,9 +232,15 @@ class TeachingRepository:
         turn = TeachingTurn(
             conversation_id=conversation.id,
             sequence_number=sequence_number,
+            client_request_id=request.client_request_id,
+            request_fingerprint=fingerprint,
             user_message=request.message,
             student_attempt=request.student_attempt,
             status=TeachingTurnStatus.RUNNING,
+            # Preserve the validated input before any provider/native work.
+            # Raw submissions are audit evidence, never qualification as a
+            # valid, independent, correct or mastered performance.
+            scientific_results_json={"__initial_request": request.model_dump(mode="json")},
             validation_json={
                 "input_attachment_ids": [
                     str(attachment_id) for attachment_id in request.attachment_ids
@@ -267,6 +258,21 @@ class TeachingRepository:
             durable_phase=await self.load_durable_learning_phase(
                 conversation=conversation
             ),
+        )
+
+    async def _replayed_turn(
+        self, conversation: TeachingConversation, turn: TeachingTurn,
+    ) -> StartedTeachingTurn:
+        from quantum_agent.teaching.execution_budget import raise_if_execution_exhausted
+
+        raise_if_execution_exhausted(turn)
+        return StartedTeachingTurn(
+            conversation=conversation, turn=turn, idempotent_replay=True,
+            prior_attempts=await self._attempt_count(conversation.id, excluding_turn_id=turn.id),
+            recent_no_progress_count=await self._recent_no_progress_count(
+                conversation.id, excluding_turn_id=turn.id,
+            ),
+            durable_phase=await self.load_durable_learning_phase(conversation=conversation),
         )
 
     async def _attempt_count(
@@ -302,13 +308,18 @@ class TeachingRepository:
         rows = (await self._session.execute(statement)).all()
         count = 0
         for turn, trace in rows:
-            no_progress = turn.status is TeachingTurnStatus.FAILED
+            # Provider failures and teacher rejections do not diagnose a learner.
+            no_progress = False
             if turn.status is TeachingTurnStatus.COMPLETED:
                 raw_results = turn.scientific_results_json.get("results", [])
+                assertion_kinds = {
+                    "symbolic_equivalence", "symbolic_residual",
+                    "numerical_normalization", "numerical_unitarity",
+                }
                 statuses = {
                     item.get("status")
                     for item in raw_results
-                    if isinstance(item, dict) and isinstance(item.get("status"), str)
+                    if isinstance(item, dict) and item.get("kind") in assertion_kinds
                 }
                 if "pass" in statuses:
                     no_progress = False
@@ -346,7 +357,7 @@ class TeachingRepository:
                     TeachingConversation.student_user_id == reference.student_user_id,
                     TeachingTurn.id == reference.turn_id,
                 )
-                .with_for_update()
+                .with_for_update().execution_options(populate_existing=True)
             )
         ).one_or_none()
         if row is None:
@@ -368,6 +379,38 @@ class TeachingRepository:
                 conversation=conversation
             ),
         )
+
+    async def resolved_interrupt(
+        self,
+        *,
+        actor: CourseActor,
+        curriculum_edition_id: UUID,
+        conversation_id: UUID,
+        interrupt_id: UUID,
+    ) -> tuple[StartedTeachingTurn, HitlEvent] | None:
+        """Find an exact durable decision even after its checkpoint has advanced."""
+
+        row = (
+            await self._session.execute(
+                select(TeachingConversation, TeachingTurn)
+                .join(TeachingTurn, TeachingTurn.conversation_id == TeachingConversation.id)
+                .where(
+                    TeachingConversation.id == conversation_id,
+                    TeachingConversation.course_id == actor.course_id,
+                    TeachingConversation.curriculum_edition_id == curriculum_edition_id,
+                    TeachingTurn.scientific_results_json["__hitl_decisions"][str(interrupt_id)]
+                    .as_string().is_not(None),
+                )
+                .with_for_update().execution_options(populate_existing=True)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        conversation, turn = row
+        decision = HitlEvent.model_validate(
+            turn.scientific_results_json["__hitl_decisions"][str(interrupt_id)]
+        )
+        return await self._replayed_turn(conversation, turn), decision
 
     async def student_actor_for_resume(
         self,
@@ -426,11 +469,32 @@ class TeachingRepository:
         turn.release_level = artifacts.release.release_level
         turn.evidence_packet_json = artifacts.evidence_packet.model_dump(mode="json")
         turn.response_json = None
+        from quantum_agent.teaching.state_machine import WORKFLOW_VERSION
+        from quantum_agent.versioning import build_evidence_provenance, current_model_calls
+
+        earlier_calls = turn.scientific_results_json.get("__model_calls_before_review", [])
+        calls = [*earlier_calls, *current_model_calls()][:128]
+        package = started.durable_phase.course_package
+        provenance = build_evidence_provenance(
+            packet=artifacts.evidence_packet, workflow_version=WORKFLOW_VERSION,
+            course_package=package.model_dump(mode="json") if package is not None else None,
+        )
+        previous_provenance = turn.scientific_results_json.get("__provenance", {})
+        segments = previous_provenance.get("execution_segments", [])
+        # A deployment may change while a teacher reviews a pause. Retain the
+        # code/content version of each execution, instead of relabeling earlier
+        # model calls with the version that eventually completes the turn.
+        provenance["execution_segments"] = [*segments, dict(provenance)][:16]
+        provenance["model_calls"] = calls
         turn.scientific_results_json = {
-            "results": [item.model_dump(mode="json") for item in artifacts.scientific_results]
+            **turn.scientific_results_json,
+            "results": [item.model_dump(mode="json") for item in artifacts.scientific_results],
+            "__model_calls_before_review": calls,
+            "__provenance": provenance,
         }
         turn.validation_json = {
             "input_attachment_ids": turn.validation_json.get("input_attachment_ids", []),
+            "client_request_id": turn.client_request_id or "",
             "hitl": {
                 "interrupt_id": str(payload.interrupt_id),
                 "interrupt": payload.model_dump(mode="json"),
@@ -439,6 +503,14 @@ class TeachingRepository:
             },
         }
         await self._session.flush()
+        # Stop the active clock atomically with the durable pause marker.
+        # Re-entering this node on resume returns above and cannot re-charge
+        # human waiting or close the new execution segment prematurely.
+        from quantum_agent.teaching.execution_budget import current_execution_budget
+
+        budget = current_execution_budget()
+        if budget is not None:
+            await budget.finish("waiting")
 
     async def record_resolution(
         self,
@@ -446,6 +518,7 @@ class TeachingRepository:
         started: StartedTeachingTurn,
         event: HitlEvent,
     ) -> None:
+        await self._session.refresh(started.turn, with_for_update=True)
         current = started.turn.validation_json.get("hitl")
         if not isinstance(current, dict) or current.get("interrupt_id") != str(
             event.interrupt.interrupt_id
@@ -458,10 +531,18 @@ class TeachingRepository:
         )
         if current.get("resolution") == serialized:
             return
+        if current.get("resolution") is not None:
+            raise TeachingConversationConflictError("interrupt already has another decision")
+        decisions = dict(started.turn.scientific_results_json.get("__hitl_decisions", {}))
+        decisions[str(event.interrupt.interrupt_id)] = event.model_dump(mode="json")
+        started.turn.scientific_results_json = {
+            **started.turn.scientific_results_json, "__hitl_decisions": decisions,
+        }
         started.turn.validation_json = {
             "input_attachment_ids": started.turn.validation_json.get(
                 "input_attachment_ids", []
             ),
+            "client_request_id": started.turn.client_request_id or "",
             "hitl": {
                 **current,
                 "resolution": serialized,
@@ -483,6 +564,7 @@ class TeachingRepository:
         learning_native_evidence: list[LearningEvidenceRecord] | None = None,
     ) -> None:
         turn = started.turn
+        await self._session.refresh(turn, with_for_update=True)
         if turn.status is TeachingTurnStatus.COMPLETED:
             return
         if turn.status is TeachingTurnStatus.FAILED:
@@ -500,10 +582,23 @@ class TeachingRepository:
         # the key.  The validation_json column is kept as the clean
         # ValidationReport so the teacher-insights trace-detail endpoint
         # can still ValidationReport.model_validate it.
+        from quantum_agent.versioning import build_turn_provenance
+
+        provenance = build_turn_provenance(result)
+        previous_provenance = turn.scientific_results_json.get("__provenance")
+        if isinstance(previous_provenance, dict):
+            segments = previous_provenance.get("execution_segments", [])
+            provenance["execution_segments"] = [*segments, dict(provenance)][:16]
+        provenance["model_calls"] = [
+            *turn.scientific_results_json.get("__model_calls_before_review", []),
+            *provenance["model_calls"],
+        ][:128]
         turn.scientific_results_json = {
+            **turn.scientific_results_json,
+            "__provenance": provenance,
             "results": [item.model_dump(mode="json") for item in result.scientific_results],
             "__result_snapshot": result.model_dump(mode="json"),
-            "__client_request_id": turn.validation_json.get("client_request_id", ""),
+            "__client_request_id": turn.client_request_id or "",
             "__input_attachment_ids": turn.validation_json.get("input_attachment_ids", []),
         }
         turn.validation_json = result.validation.model_dump(mode="json")
@@ -521,6 +616,7 @@ class TeachingRepository:
                     student_user_id=actor.user_id,
                     workflow_version=result.workflow_version,
                     steps_json={
+                        "provenance": provenance,
                         "steps": [step.model_dump(mode="json") for step in result.trace],
                         **(
                             {"evidence_bundle": evidence_bundle.model_dump(mode="json")}
@@ -701,13 +797,18 @@ class TeachingRepository:
         """
 
         raw = conversation.learning_phase_json
-        if not isinstance(raw, dict):
+        if raw is None:
             return DurableLearningPhase()
+        if not isinstance(raw, dict):
+            raise TeachingConversationConflictError("stored learning phase requires repair")
         try:
             return DurableLearningPhase.model_validate(raw)
-        except Exception:
-            # Corrupted JSON should not crash the turn; fall back to OPEN.
-            return DurableLearningPhase()
+        except ValidationError as exc:
+            # Resetting malformed Solo state to OPEN would release its answer
+            # lock and falsely credit an assisted retry as independent work.
+            raise TeachingConversationConflictError(
+                "stored learning phase requires repair"
+            ) from exc
 
     async def save_durable_learning_phase(
         self,

@@ -109,6 +109,12 @@ class OpenAICompatibleEmbeddingGateway:
             raise RecordingBudgetError("capability disabled during recording")
         owned_client = self._http_client is None
         client = self._http_client or httpx.AsyncClient(timeout=self._timeout_seconds)
+        from quantum_agent.llm.observability import provider_request, provider_response
+
+        for hook_name, hook in (("request", provider_request), ("response", provider_response)):
+            hooks = client.event_hooks.setdefault(hook_name, [])
+            if hook not in hooks:
+                hooks.append(hook)
         try:
             response = await client.post(
                 f"{self._base_url}/embeddings",
@@ -133,6 +139,8 @@ class OpenAICompatibleEmbeddingGateway:
                 await client.aclose()
 
     async def probe(self) -> EmbeddingProbe:
+        from quantum_agent.teaching.execution_budget import ExecutionBudgetError
+
         try:
             vectors = await self.embed(["量子态 normalization probe"])
             return EmbeddingProbe(
@@ -140,6 +148,8 @@ class OpenAICompatibleEmbeddingGateway:
                 dimensions=len(vectors[0]),
                 provider="openai_compatible",
             )
+        except ExecutionBudgetError:
+            raise
         except Exception as exc:
             return EmbeddingProbe(
                 available=False,

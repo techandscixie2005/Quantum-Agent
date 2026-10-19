@@ -249,7 +249,10 @@ def _verify_against_oracle(
             observations=[*observations, domain_error],
             tolerance=tolerance,
         )
-    # Compare all oracle-provided required values within tolerance.
+    # Transmission spans many orders of magnitude. An absolute 1e-6 floor
+    # would certify T=0 (or a value millions of times too large) for an opaque
+    # but finite barrier. Use relative error with no absolute floor for T;
+    # R and the conservation residual retain an absolute roundoff allowance.
     for key in required:
         if key not in oracle_metrics:
             return CodeVerificationResult(
@@ -262,7 +265,14 @@ def _verify_against_oracle(
             oracle_val = float(oracle_metrics[key])
         except (TypeError, ValueError):
             continue
-        if abs(agent_val - oracle_val) > tolerance:
+        transmission = key == "T" and task.oracle_kind == "rectangular_barrier_tunnelling"
+        matches = (
+            agent_val > 0.0
+            and math.isclose(agent_val, oracle_val, rel_tol=tolerance, abs_tol=0.0)
+            if transmission
+            else abs(agent_val - oracle_val) <= tolerance
+        )
+        if not matches:
             return CodeVerificationResult(
                 status=CodeVerificationStatus.FAIL,
                 oracle_kind=task.oracle_kind,
@@ -271,7 +281,8 @@ def _verify_against_oracle(
                 observations=[
                     *observations,
                     f"Agent {key}={agent_val!r} differs from oracle {key}={oracle_val!r} "
-                    f"beyond tolerance {tolerance}.",
+                    f"beyond {'relative' if transmission else 'absolute'} "
+                    f"tolerance {tolerance}.",
                 ],
                 tolerance=tolerance,
             )

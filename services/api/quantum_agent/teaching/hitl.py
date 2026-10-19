@@ -37,6 +37,7 @@ from quantum_agent.teaching.models import (
     InterpretationOutput,
     PolicySnapshot,
     ReleaseDecision,
+    ResponseStatus,
     SupportBasis,
     TeachingResponse,
     TeachingTurnInput,
@@ -114,6 +115,7 @@ class HitlResumeRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    interrupt_id: UUID | None = None
     action: HitlAction
     note: str | None = Field(default=None, max_length=4000)
     edited_response: TeachingResponse | None = None
@@ -414,11 +416,17 @@ _CLAIM_LIMIT = {
 def validate_human_response(
     *,
     response: TeachingResponse,
+    proposed_response: TeachingResponse,
     packet: EvidencePacket,
     scientific_results: list[ScientificVerificationResult],
     release: ReleaseDecision,
 ) -> ValidationReport:
-    """Apply the same citation/tool envelope to a reviewer-authored response."""
+    """Apply the citation/tool/release envelope to a reviewer-authored response.
+
+    A bridge is a separately structured, source-linked inference artifact.
+    Editing prose cannot replace that inspected artifact or bypass its release
+    budget. Even an unchanged bridge is checked against current source spans.
+    """
 
     evidence_by_id = {item.evidence_id: item for item in packet.evidence}
     scientific_ids = {
@@ -428,6 +436,25 @@ def validate_human_response(
     literal_claims_valid = True
     scientific_references_valid = True
     warnings: list[str] = []
+    bridge = response.derivation_bridge
+    if bridge != proposed_response.derivation_bridge:
+        warnings.append("human_response_changes_inspected_derivation_bridge")
+    if bridge is not None:
+        if release.release_level in {AnswerReleaseLevel.QUESTION_ONLY, AnswerReleaseLevel.HINT}:
+            warnings.append("human_bridge_exceeds_release_level")
+        if release.release_level is AnswerReleaseLevel.SCAFFOLD and (
+            not bridge.partial or len(bridge.missing_steps) > 1
+        ):
+            warnings.append("human_bridge_exceeds_scaffold_budget")
+        if response.status is not ResponseStatus.MIXED:
+            warnings.append("human_bridge_requires_inference_status")
+        for ref in [*bridge.source_refs,
+                    *(ref for step in bridge.missing_steps for ref in step.source_refs)]:
+            source = evidence_by_id.get(ref.evidence_id)
+            if source is None:
+                citation_ids_valid = False
+            elif ref.quote not in source.evidence_snippet:
+                literal_claims_valid = False
     for claim in response.claims:
         if any(identifier not in evidence_by_id for identifier in claim.evidence_ids):
             citation_ids_valid = False

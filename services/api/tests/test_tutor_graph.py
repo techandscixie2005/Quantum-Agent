@@ -975,3 +975,208 @@ async def test_continuation_retrieval_uses_the_persisted_transfer_topic() -> Non
     assert retriever.scopes == [RetrievalScope(
         course_id=course_id, curriculum_edition_id=edition_id,
     )]
+
+
+async def test_first_turn_lost_response_replays_without_conversation_id(
+    teaching_database: async_sessionmaker[AsyncSession],
+) -> None:
+    from quantum_agent.teaching.repository import TeachingConversationConflictError
+
+    async with teaching_database() as session:
+        seeded = await _seed(session)
+        graph = TutorGraph(
+            evidence_retriever=StaticRetriever(_packet(seeded.actor.course_id, seeded.edition_id)),
+            model_gateway=None,
+        )
+        request = TeachingTurnInput(
+            mode=TeachingMode.LEARN_CONCEPTS, message="What is a Hermitian operator?",
+            client_request_id="lost-first-response",
+        )
+        first = await graph.run(session=session, actor=seeded.actor,
+                                curriculum_edition_id=seeded.edition_id, request=request)
+        await session.commit()
+        replay = await graph.run(session=session, actor=seeded.actor,
+                                 curriculum_edition_id=seeded.edition_id, request=request)
+        assert replay == first
+        assert await session.scalar(select(func.count(TeachingTurn.id))) == 1
+        assert await session.scalar(select(func.count(AgentTrace.id))) == 1
+        with pytest.raises(TeachingConversationConflictError, match="changed input"):
+            await graph.run(
+                session=session, actor=seeded.actor, curriculum_edition_id=seeded.edition_id,
+                request=request.model_copy(update={"student_attempt": "different attempt"}),
+            )
+
+
+async def test_request_key_remains_replayable_beyond_fifty_turns(
+    teaching_database: async_sessionmaker[AsyncSession],
+) -> None:
+    async with teaching_database() as session:
+        seeded = await _seed(session)
+        graph = TutorGraph(
+            evidence_retriever=StaticRetriever(_packet(seeded.actor.course_id, seeded.edition_id)),
+            model_gateway=None,
+        )
+        request = TeachingTurnInput(mode=TeachingMode.LEARN_CONCEPTS,
+                                    message="What is an operator?", client_request_id="old-key")
+        first = await graph.run(session=session, actor=seeded.actor,
+                                curriculum_edition_id=seeded.edition_id, request=request)
+        session.add_all([
+            TeachingTurn(
+                conversation_id=first.conversation_id, sequence_number=number,
+                user_message=f"Later turn {number}", status=TeachingTurnStatus.COMPLETED,
+                completed_at=datetime.now(UTC), response_json={},
+            ) for number in range(2, 55)
+        ])
+        await session.commit()
+        replay = await graph.run(
+            session=session, actor=seeded.actor, curriculum_edition_id=seeded.edition_id,
+            request=request.model_copy(update={"conversation_id": first.conversation_id}),
+        )
+        assert replay == first
+        assert await session.scalar(select(func.count(TeachingTurn.id))) == 54
+
+
+@pytest.mark.parametrize("action", [HitlAction.APPROVE, HitlAction.REJECT])
+async def test_hitl_decision_retry_survives_lost_response_and_checkpoint_restart(
+    teaching_database: async_sessionmaker[AsyncSession], action: HitlAction,
+) -> None:
+    from quantum_agent.teaching.hitl import HitlConflictError
+
+    async with teaching_database() as session:
+        seeded = await _seed(session)
+        staff = await _seed_staff(session, seeded)
+        retriever = StaticRetriever(_packet(seeded.actor.course_id, seeded.edition_id, found=False))
+        graph = TutorGraph(evidence_retriever=retriever, model_gateway=None,
+                           checkpointer=InMemorySaver(), enable_hitl=True)
+        request = TeachingTurnInput(
+            mode=TeachingMode.LEARN_CONCEPTS, message="Unsupported new theory?",
+            student_attempt="My initial answer is that no course evidence establishes this claim.",
+            client_request_id="reviewed-first-turn",
+        )
+        interrupted = await graph.run(session=session, actor=seeded.actor,
+                                      curriculum_edition_id=seeded.edition_id, request=request)
+        assert isinstance(interrupted, HitlInterruptResponse)
+        first_retry = await graph.run(session=session, actor=seeded.actor,
+                                      curriculum_edition_id=seeded.edition_id, request=request)
+        assert first_retry.turn_id == interrupted.turn_id
+        decision = HitlResumeRequest(interrupt_id=interrupted.interrupt.interrupt_id,
+                                     action=action, note="Course evidence must be supplemented.")
+        completed = await graph.resume(
+            session=session, actor=staff, curriculum_edition_id=seeded.edition_id,
+            conversation_id=interrupted.conversation_id, request=decision,
+        )
+        await session.commit()
+        restarted = TutorGraph(evidence_retriever=retriever, model_gateway=None,
+                               checkpointer=InMemorySaver(), enable_hitl=True)
+        replay = await restarted.resume(
+            session=session, actor=staff, curriculum_edition_id=seeded.edition_id,
+            conversation_id=interrupted.conversation_id, request=decision,
+        )
+        assert replay == completed
+        with pytest.raises(HitlConflictError, match="another decision"):
+            await restarted.resume(
+                session=session, actor=staff, curriculum_edition_id=seeded.edition_id,
+                conversation_id=interrupted.conversation_id,
+                request=decision.model_copy(update={"note": "Changed reason"}),
+            )
+        with pytest.raises(HitlAuthorizationError):
+            await restarted.resume(
+                session=session, actor=seeded.actor, curriculum_edition_id=seeded.edition_id,
+                conversation_id=interrupted.conversation_id, request=decision,
+            )
+        assert await session.scalar(select(func.count(TeachingTurn.id))) == 1
+        assert await session.scalar(select(func.count(AgentTrace.id))) == (
+            1 if action is HitlAction.APPROVE else 0
+        )
+
+
+async def test_hitl_retry_recovers_after_durable_decision_before_checkpoint(
+    teaching_database: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from quantum_agent.teaching.hitl import HitlEvent
+    from quantum_agent.teaching.repository import StartedTeachingTurn, TeachingRepository
+
+    async with teaching_database() as session:
+        seeded = await _seed(session)
+        staff = await _seed_staff(session, seeded)
+        graph = TutorGraph(
+            evidence_retriever=StaticRetriever(
+                _packet(seeded.actor.course_id, seeded.edition_id, found=False)),
+            model_gateway=None, checkpointer=InMemorySaver(), enable_hitl=True,
+        )
+        interrupted = await graph.run(
+            session=session, actor=seeded.actor, curriculum_edition_id=seeded.edition_id,
+            request=TeachingTurnInput(mode=TeachingMode.LEARN_CONCEPTS,
+                message="Please review an unsupported claim",
+                student_attempt="I cannot justify it."),
+        )
+        assert isinstance(interrupted, HitlInterruptResponse)
+        decision = HitlResumeRequest(interrupt_id=interrupted.interrupt.interrupt_id,
+                                     action=HitlAction.APPROVE,
+                                     note="Release only the bounded prompt.")
+        original = TeachingRepository.record_resolution
+        crashed = [False]
+
+        async def crash_after_receipt(self: TeachingRepository, *,
+                                      started: StartedTeachingTurn, event: HitlEvent) -> None:
+            await original(self, started=started, event=event)
+            if not crashed[0]:
+                crashed[0] = True
+                await session.commit()
+                raise RuntimeError("simulated crash after durable reviewer decision")
+
+        monkeypatch.setattr(TeachingRepository, "record_resolution", crash_after_receipt)
+        with pytest.raises(RuntimeError, match="simulated crash"):
+            await graph.resume(session=session, actor=staff,
+                curriculum_edition_id=seeded.edition_id,
+                conversation_id=interrupted.conversation_id, request=decision)
+        recovered = await graph.resume(session=session, actor=staff,
+            curriculum_edition_id=seeded.edition_id,
+            conversation_id=interrupted.conversation_id, request=decision)
+        assert isinstance(recovered, TeachingTurnResult)
+        assert recovered.turn_id == interrupted.turn_id
+        await session.commit()
+        turn = await session.get(TeachingTurn, interrupted.turn_id)
+        assert turn is not None
+        assert len(turn.scientific_results_json["__hitl_decisions"]) == 1
+        assert await session.scalar(select(func.count(AgentTrace.id))) == 1
+
+
+@pytest.mark.parametrize("kind,status,diagnosis_progress,expected", [
+    ("rectangular_barrier_tunnelling", "pass", "struggling", 1),
+    ("rectangular_barrier_tunnelling", "fail", "progressing", 0),
+    ("numerical_normalization", "pass", "struggling", 0),
+])
+async def test_reference_solver_outcome_does_not_replace_student_progress(
+    teaching_database: async_sessionmaker[AsyncSession], kind: str, status: str,
+    diagnosis_progress: str, expected: int,
+) -> None:
+    from quantum_agent.teaching.repository import TeachingRepository
+
+    async with teaching_database() as session:
+        seeded = await _seed(session)
+        repository = TeachingRepository(session)
+        first = await repository.start_turn(
+            actor=seeded.actor, curriculum_edition_id=seeded.edition_id,
+            request=TeachingTurnInput(mode=TeachingMode.LEARN_CONCEPTS,
+                                      message="What is an operator?"),
+        )
+        first.turn.status = TeachingTurnStatus.COMPLETED
+        first.turn.completed_at = datetime.now(UTC)
+        first.turn.response_json = {}
+        first.turn.scientific_results_json = {"results": [{"kind": kind, "status": status}]}
+        session.add(AgentTrace(
+            teaching_turn_id=first.turn.id, course_id=seeded.actor.course_id,
+            curriculum_edition_id=seeded.edition_id, student_user_id=seeded.actor.user_id,
+            workflow_version="automated-progress-regression/1",
+            steps_json={"diagnosis": {"progress_state": diagnosis_progress}},
+            policy_snapshot_json={}, model_gateway_status="unconfigured",
+            citation_validation_status="passed",
+        ))
+        await session.commit()
+        started = await repository.start_turn(
+            actor=seeded.actor, curriculum_edition_id=seeded.edition_id,
+            request=TeachingTurnInput(conversation_id=first.conversation.id,
+                mode=TeachingMode.LEARN_CONCEPTS, message="My next attempt"),
+        )
+        assert started.recent_no_progress_count == expected

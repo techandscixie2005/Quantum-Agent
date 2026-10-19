@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated, Any, NoReturn, Protocol, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -43,6 +43,12 @@ from quantum_agent.llm.recording_budget import RecordingBudgetError
 from quantum_agent.multimodal.teaching import (
     TeachingAttachmentConflictError,
     TeachingAttachmentNotFoundError,
+)
+from quantum_agent.teaching.access import require_conversation_assistance_access
+from quantum_agent.teaching.execution_budget import (
+    ExecutionBudgetBusyError,
+    ExecutionBudgetError,
+    budget_status_json,
 )
 from quantum_agent.teaching.hitl import (
     HitlAuthorizationError,
@@ -180,6 +186,67 @@ async def _resolve_model_gateway_override(
 TeachingApiOutcome = TeachingTurnResult | HitlInterruptResponse | HitlRejectedResponse
 
 
+def _raise_budget_http(error: ExecutionBudgetError | ExecutionBudgetBusyError) -> NoReturn:
+    raise HTTPException(
+        status_code=429 if isinstance(error, ExecutionBudgetError) else 409,
+        detail={"code": error.code, "turn_id": str(error.turn_id)},
+    ) from error
+
+
+@router.get("/requests/status", response_model=None)
+async def get_teaching_request_status(
+    request: Request,
+    course_id: UUID,
+    curriculum_edition_id: UUID,
+    session: DatabaseSession,
+    client_request_id: Annotated[str, Query(min_length=1, max_length=128)],
+) -> dict[str, Any]:
+    """Recover an unknown first response without exposing answers or Solo oracles."""
+    actor = await _actor(request, session, course_id)
+    row = (await session.execute(
+        select(
+            TeachingTurn.id.label("turn_id"), TeachingTurn.conversation_id,
+            TeachingTurn.status, TeachingTurn.failure_code,
+            TeachingTurn.execution_budget_json.label("execution_budget"),
+        )
+        .join(TeachingConversation, TeachingConversation.id == TeachingTurn.conversation_id)
+        .where(
+            TeachingConversation.course_id == course_id,
+            TeachingConversation.curriculum_edition_id == curriculum_edition_id,
+            TeachingTurn.client_request_id == client_request_id,
+            *([TeachingConversation.student_user_id == actor.user_id]
+              if actor.course_role is CourseRole.STUDENT else []),
+        )
+        .order_by(TeachingTurn.created_at.desc())
+        .limit(1)
+    )).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Request not found in this account and course")
+    try:
+        await require_conversation_assistance_access(session, actor, row["conversation_id"])
+        execution = budget_status_json(row["execution_budget"], row["turn_id"])
+    except TeachingConversationConflictError as exc:
+        raise HTTPException(status_code=409, detail="Solo assistance is locked") from exc
+    except ExecutionBudgetError as exc:
+        _raise_budget_http(exc)
+    action = "wait_then_retry_same_request"
+    if row["status"] is TeachingTurnStatus.COMPLETED:
+        action = "replay_same_request"
+    elif execution["state"] == "waiting":
+        action = "review_required"
+    elif row["status"] is TeachingTurnStatus.FAILED:
+        action = "new_explicit_turn"
+    return {
+        "client_request_id": client_request_id,
+        "conversation_id": str(row["conversation_id"]),
+        "turn_id": str(row["turn_id"]),
+        "status": row["status"].value,
+        "failure_code": row["failure_code"],
+        "execution_budget": execution,
+        "recovery_action": action,
+    }
+
+
 def _raise_hitl_http(error: Exception) -> NoReturn:
     if isinstance(error, HitlAuthorizationError):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
@@ -215,10 +282,14 @@ async def run_teaching_turn(
             request=body,
             model_gateway_override=gateway_override,
         )
+        await require_conversation_assistance_access(session, actor, result.conversation_id)
         await session.commit()
         if isinstance(result, HitlInterruptResponse):
             response.status_code = status.HTTP_202_ACCEPTED
         return result
+    except (ExecutionBudgetError, ExecutionBudgetBusyError) as exc:
+        await session.rollback()
+        _raise_budget_http(exc)
     except (TeachingConversationConflictError, HitlConflictError) as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -413,6 +484,7 @@ async def stream_teaching_turn(
                     started_at=started_at,
                     emit=emit,
                 )
+                await require_conversation_assistance_access(session, actor, result.conversation_id)
                 await session.commit()
                 if isinstance(result, HitlInterruptResponse):
                     await emit(
@@ -448,6 +520,9 @@ async def stream_teaching_turn(
                     await emit(
                         _sse("workflow.completed", result.model_dump(mode="json"))
                     )
+            except (ExecutionBudgetError, ExecutionBudgetBusyError) as exc:
+                await session.rollback()
+                await emit(_sse("workflow.failed", {"code": exc.code}))
             except (TeachingConversationConflictError, HitlConflictError):
                 await session.rollback()
                 await emit(_sse("workflow.failed", {"code": "CONVERSATION_CONFLICT"}))
@@ -580,10 +655,14 @@ async def resume_teaching_interrupt(
                 model_gateway_override=gateway_override,
             ),
         )
+        await require_conversation_assistance_access(session, actor, outcome.conversation_id)
         await session.commit()
         if isinstance(outcome, HitlInterruptResponse):
             response.status_code = status.HTTP_202_ACCEPTED
         return outcome
+    except (ExecutionBudgetError, ExecutionBudgetBusyError) as exc:
+        await session.rollback()
+        _raise_budget_http(exc)
     except (
         HitlAuthorizationError,
         HitlNotFoundError,
@@ -635,6 +714,10 @@ async def get_teaching_conversation_state(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="conversation is unavailable in this course, edition, or account",
         )
+    try:
+        await require_conversation_assistance_access(session, actor, conversation.id)
+    except TeachingConversationConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     durable_phase = await repository.load_durable_learning_phase(
         conversation=conversation,
     )
@@ -685,6 +768,9 @@ async def get_teaching_conversation_state(
         "teach_back_explanation": "",
         "teach_back_probe": "",
         "teach_back_clarifications": [],
+        # Scheduling a teacher directive is server state, not permission to
+        # reveal its help before the next eligible teaching action applies it.
+        "pending_teacher_follow_up": None,
     })
     snapshot: dict[str, Any] | None = None
     turn_id: UUID | None = None
@@ -704,7 +790,9 @@ async def get_teaching_conversation_state(
             snapshot = raw_snapshot
             turn_id = turn.id
             workflow_version = str(raw_snapshot.get("workflow_version", "")) or None
-    if durable_phase.solo_assistance_locked and snapshot is not None:
+    if (durable_phase.solo_assistance_locked or durable_phase.phase.value == "solo_active") and (
+        snapshot is not None
+    ):
         from quantum_agent.teaching.solo_visibility import solo_visible_snapshot
 
         snapshot_native = snapshot.get("learning_native") or {}

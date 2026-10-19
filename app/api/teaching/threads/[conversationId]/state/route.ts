@@ -136,13 +136,12 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   if (
     typeof durablePhase === "object" &&
     durablePhase !== null &&
-    !Array.isArray(durablePhase) &&
-    (durablePhase as Record<string, unknown>).transfer_verification !== null &&
-    (durablePhase as Record<string, unknown>).transfer_verification !== undefined
+    !Array.isArray(durablePhase)
   ) {
     body.durable_phase = {
       ...(durablePhase as Record<string, unknown>),
       transfer_verification: null,
+      pending_teacher_follow_up: null,
     };
   }
   return Response.json(payload, {

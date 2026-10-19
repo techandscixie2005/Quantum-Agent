@@ -1,20 +1,14 @@
-"""API-key login (PRD V3.1 §3).
+"""Exchange roster access plus a model credential for an opaque login session.
 
-A student enters their 词元计划/一〇七杯 API key.  The backend probes the USTC
-model service to validate the key, mints an opaque session token, stores the
-Fernet-encrypted key in the session vault keyed by ``session_id``, and returns
-the session token + the demo student's course/edition binding.  The plaintext
-key never enters PostgreSQL, logs, agent traces, or the response body.
+An operator-provisioned, one-time classroom token identifies an existing roster
+member. The provider key authorizes model use independently of that identity;
+sharing a provider key never merges users or grants a course role. Shared demo
+identity requires explicit opt-in outside production. Institution SSO can
+replace the operator provisioning flow.
 
-The startup ``USTC_API`` env key remains as a dev/deploy fallback (PRD §3.3
-last bullet): when the vault is disabled, the ModelGateway uses the env key
-for all sessions.  This endpoint still mints a session in that case so the
-frontend can proceed; the probe still validates the supplied key.
-
-Logout revokes the session and deletes the vault entry.
-
-This is NOT a substitute for real SSO.  It exists so a student can enter
-``/agent`` with their own model-service credential.
+Login validates the provider credential and requires a configured encrypted
+vault. Plaintext keys never enter database rows, traces, or responses. Logout
+revokes the login session and deletes its vault entry.
 """
 
 from __future__ import annotations
@@ -25,10 +19,11 @@ import time
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,6 +54,7 @@ DatabaseSession = Annotated[AsyncSession, Depends(session_dependency)]
 
 _LOGIN_RATE_LIMIT = 10
 _LOGIN_RATE_WINDOW_SECONDS = 300
+_LOGIN_RATE_MAX_BUCKETS = 10_000
 _login_attempts: dict[str, list[float]] = defaultdict(list)
 
 
@@ -66,7 +62,8 @@ class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     api_key: SecretStr
-    course_id: str | None = Field(default=None, max_length=64)
+    course_id: UUID | None = None
+    classroom_access_token: SecretStr | None = None
 
 
 class LoginResponse(BaseModel):
@@ -99,9 +96,18 @@ def _credential_router_factory(request: Request) -> object | None:
     return getattr(request.app.state, "credential_router_factory", None)
 
 
-def _check_rate_limit(client_ip: str) -> None:
+def _check_rate_limit(bucket: str) -> None:
     now = time.monotonic()
-    window = _login_attempts[client_ip]
+    if bucket not in _login_attempts and len(_login_attempts) >= _LOGIN_RATE_MAX_BUCKETS:
+        expired = [
+            key for key, attempts in _login_attempts.items()
+            if not attempts or now - attempts[-1] >= _LOGIN_RATE_WINDOW_SECONDS
+        ]
+        for key in expired:
+            del _login_attempts[key]
+        if len(_login_attempts) >= _LOGIN_RATE_MAX_BUCKETS:
+            raise HTTPException(status_code=429, detail="Login rate capacity reached")
+    window = _login_attempts[bucket]
     window[:] = [t for t in window if now - t < _LOGIN_RATE_WINDOW_SECONDS]
     if len(window) >= _LOGIN_RATE_LIMIT:
         raise HTTPException(
@@ -169,13 +175,53 @@ async def api_key_login(
 ) -> LoginResponse:
     settings = _settings(request)
     client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or "local"
-    _check_rate_limit(client_ip)
+    coarse_bucket = "ip:" + hash_session_token(client_ip)
 
+    # A provider credential authorizes model use, never student identity or role.
+    # Classroom tokens are provisioned for an existing roster member by an
+    # operator/identity service and can be exchanged once. Shared demo identity
+    # is available only by explicit development opt-in.
+    access_session: UserSession | None = None
+    if body.classroom_access_token is not None:
+        access_token = body.classroom_access_token.get_secret_value().strip()
+        if not 32 <= len(access_token) <= 512:
+            _check_rate_limit(coarse_bucket)
+            raise HTTPException(status_code=401, detail="Invalid classroom access token")
+        access_digest = hash_session_token(access_token)
+        access_session = await session.scalar(select(UserSession).where(
+            UserSession.session_token_sha256 == access_digest,
+            UserSession.status == SessionStatus.ACTIVE,
+            UserSession.expires_at > datetime.now(UTC),
+            UserSession.user_agent == "classroom-access",
+        ).with_for_update())
+        user = await session.get(User, access_session.user_id) if access_session else None
+        if user is None:
+            _check_rate_limit(coarse_bucket)
+            raise HTTPException(status_code=401, detail="Invalid classroom access token")
+        if user.status is not UserStatus.ACTIVE:
+            _check_rate_limit(coarse_bucket)
+            raise HTTPException(status_code=403, detail="Login account is inactive")
+        # Distinct roster members behind the same classroom NAT/proxy must
+        # not share a ten-attempt budget. Only a validated invitation can
+        # select its own opaque bucket; fabricated tokens use the coarse one.
+        _check_rate_limit("invite:" + access_digest)
+    elif settings.allow_shared_demo_login and settings.environment != "production":
+        _check_rate_limit(coarse_bucket)
+        user = await session.scalar(select(User).where(
+            User.email == settings.login_course_email,
+        ).limit(1))
+    else:
+        _check_rate_limit(coarse_bucket)
+        raise HTTPException(status_code=401, detail="Classroom access token required")
     api_key = body.api_key.get_secret_value().strip()
     if not api_key:
         raise HTTPException(status_code=400, detail="API key must not be blank")
     if len(api_key) < 16 or len(api_key) > 256:
         raise HTTPException(status_code=422, detail="invalid request")
+    if user is None:
+        raise HTTPException(status_code=409, detail="Login account is not provisioned")
+    if user.status is not UserStatus.ACTIVE:
+        raise HTTPException(status_code=403, detail="Login account is inactive")
 
     # Validate the key against the USTC model service before minting a session.
     probe_ok = await _probe_ustc_key(
@@ -189,17 +235,6 @@ async def api_key_login(
             status_code=401,
             detail="API key 被模型服务拒绝或模型服务不可用",
         )
-
-    # Find-or-create the demo student the API-key login binds to.
-    email = settings.login_course_email
-    user = await session.scalar(select(User).where(User.email == email).limit(1))
-    if user is None:
-        raise HTTPException(
-            status_code=409,
-            detail="登录账户未初始化；请先运行 `quantum-agent seed-login-account`",
-        )
-    if user.status is not UserStatus.ACTIVE:
-        raise HTTPException(status_code=403, detail="登录账户未激活")
 
     membership: CourseMembership | None = None
     if body.course_id is not None:
@@ -274,6 +309,9 @@ async def api_key_login(
             detail="会话保险库未配置，拒绝创建用户凭证会话",
         )
 
+    if access_session is not None:
+        access_session.status = SessionStatus.REVOKED
+        access_session.revoked_at = now
     await session.commit()
 
     return LoginResponse(

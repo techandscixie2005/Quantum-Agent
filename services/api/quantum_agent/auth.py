@@ -15,7 +15,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import Select, select
+from sqlalchemy import Select, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from quantum_agent.db_models import (
@@ -102,6 +102,9 @@ def _active_actor_query(
             UserSession.session_token_sha256 == token_sha256,
             UserSession.status == SessionStatus.ACTIVE,
             UserSession.expires_at > now,
+            # Roster invitations are exchange credentials, never API bearer
+            # sessions. Preserve upstream sessions whose user_agent is NULL.
+            or_(UserSession.user_agent.is_(None), UserSession.user_agent != "classroom-access"),
             User.status == UserStatus.ACTIVE,
             CourseMembership.status == MembershipStatus.ACTIVE,
         )

@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { teachingProxyTimeoutMs } from "@/lib/teaching-timeout";
 
 import {
   TeachingContractError,
@@ -29,6 +30,8 @@ const SAFE_WORKFLOW_FAILURES = new Set([
   "RETRIEVAL_UNAVAILABLE",
   "RECORDING_BUDGET_UNAVAILABLE",
   "WORKFLOW_UNAVAILABLE",
+  "EXECUTION_BUDGET_EXHAUSTED",
+  "EXECUTION_BUDGET_BUSY",
 ]);
 
 export function teachingError(
@@ -364,15 +367,15 @@ export async function proxyTeachingTurn(request: Request): Promise<Response> {
   const path =
     `/api/v1/courses/${scope.courseId}/editions/${scope.curriculumEditionId}` +
     "/teaching/turns/stream";
+  let timeoutMs: number;
+  try { timeoutMs = teachingProxyTimeoutMs(); } catch {
+    return teachingError(503, "INVALID_TIMEOUT_CONFIGURATION", "教学执行与代理时限配置无效。");
+  }
   let upstream: Response;
   try {
-    // PRD V3.0 P1-2 + V3.2 streaming: forward browser cancellation to the
-    // backend so a user who navigates away or cancels the request does not
-    // keep a long model call running.  We combine the incoming request
-    // signal (browser cancellation) with a 300s timeout using AbortSignal.any.
-    // The 300s ceiling gives the real model room for deep-reasoning fallback
-    // (the Coding Agent may fall back from code_primary to reasoning_primary).
-    const timeoutSignal = AbortSignal.timeout(300_000);
+    // The backend owns the aggregate active execution budget; this transport
+    // deadline leaves room for a terminal failure and durable recovery response.
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
     const combinedSignal = request.signal
       ? AbortSignal.any([request.signal, timeoutSignal])
       : timeoutSignal;
@@ -387,11 +390,12 @@ export async function proxyTeachingTurn(request: Request): Promise<Response> {
       cache: "no-store",
       signal: combinedSignal,
     });
-  } catch {
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
     return teachingError(
-      503,
-      "BACKEND_UNAVAILABLE",
-      "无法连接教学工作流；当前输入仍保留在页面中，可以稍后重试。",
+      timedOut ? 504 : 503,
+      timedOut ? "TEACHING_TRANSPORT_TIMEOUT" : "BACKEND_UNAVAILABLE",
+      "尚未收到执行结论；输入与本次提交标识已保留，请先检查保存状态再重试。",
     );
   }
 
@@ -474,9 +478,12 @@ export function streamValidatedUpstream(
   let pending = "";
   let total = 0;
 
-  const failClosed = (controller: ReadableStreamDefaultController<Uint8Array>) => {
+  const failClosed = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    code = "INVALID_UPSTREAM_CONTRACT",
+  ) => {
     controller.enqueue(
-      encoder.encode(encodeSse("workflow.failed", { code: "INVALID_UPSTREAM_CONTRACT" })),
+      encoder.encode(encodeSse("workflow.failed", { code })),
     );
     controller.close();
   };
@@ -498,7 +505,13 @@ export function streamValidatedUpstream(
           pending = pending.slice(boundary + 2);
           break;
         }
-        const { done, value } = await reader.read();
+        let next: ReadableStreamReadResult<Uint8Array>;
+        try { next = await reader.read(); } catch (error) {
+          failClosed(controller, error instanceof Error && error.name === "TimeoutError"
+            ? "TEACHING_TRANSPORT_TIMEOUT" : "TEACHING_STREAM_INTERRUPTED");
+          return;
+        }
+        const { done, value } = next;
         if (done) {
           await reader.cancel();
           failClosed(controller);

@@ -5,10 +5,19 @@ from __future__ import annotations
 import hashlib
 import tomllib
 from enum import StrEnum
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+def _safe_relative_path(value: str) -> bool:
+    # Manifests are portable inputs. Host-native Path.is_absolute() misses
+    # Windows drives on POSIX and rooted-without-drive paths on Windows.
+    return bool(value.strip()) and all(
+        candidate.parts and not candidate.anchor and ".." not in candidate.parts
+        for candidate in (PurePosixPath(value), PureWindowsPath(value))
+    )
 
 
 class SourceAuthority(StrEnum):
@@ -35,8 +44,7 @@ class ManifestSource(BaseModel):
 
     @model_validator(mode="after")
     def require_review_for_ocr(self) -> ManifestSource:
-        candidate = Path(self.path)
-        if candidate.is_absolute() or ".." in candidate.parts:
+        if not _safe_relative_path(self.path):
             raise ValueError("manifest source paths must be safe relative paths")
         if self.requires_ocr and self.initial_status != "REVIEW_REQUIRED":
             raise ValueError("OCR sources must begin in REVIEW_REQUIRED")
@@ -84,17 +92,7 @@ class CourseSourceManifest(BaseModel):
 
     @model_validator(mode="after")
     def validate_curriculum_references(self) -> CourseSourceManifest:
-        knowledge_root = Path(self.knowledge_root)
-        windows_root = PureWindowsPath(self.knowledge_root)
-        if (
-            knowledge_root.is_absolute()
-            or windows_root.is_absolute()
-            or bool(windows_root.drive)
-            or ".." in knowledge_root.parts
-            or ".." in windows_root.parts
-            or knowledge_root == Path(".")
-            or not self.knowledge_root.strip()
-        ):
+        if not _safe_relative_path(self.knowledge_root):
             raise ValueError("knowledge_root must be a safe non-root relative path")
 
         keys = {edition.key for edition in self.curriculum_editions}
